@@ -1,0 +1,857 @@
+diff --git a/torn-analytics.user.js b/torn-analytics.user.js
+--- a/torn-analytics.user.js
++++ b/torn-analytics.user.js
+@@ -1,7 +1,7 @@
+ // ==UserScript==
+ // @name         Torn Analytics
+ // @namespace    chatgpt.openai.com/torn-tools
+-// @version      2.14.2
++// @version      2.15.0
+ // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
+ // @author       Personal use
+ // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
+@@ -22,7 +22,7 @@
+   // VERSION / CONSTANTS
+   // ============================================================
+ 
+-  const VERSION = '2.14.2';
++  const VERSION = '2.15.0';
+ 
+   const API_BASE = 'https://api.torn.com/v2';
+ 
+@@ -14201,84 +14201,58 @@
+     json,
+     fetchedAt = Date.now()
+   ) {
+-    const source =
+-      json?.cooldowns;
++    const source = json?.cooldowns;
+ 
+-    if (
+-      !source ||
+-      typeof source !== 'object' ||
+-      Array.isArray(source)
+-    ) {
+-      throw new Error(
+-        'Torn API returned an invalid cooldowns response.'
+-      );
++    if (!source || typeof source !== 'object' || Array.isArray(source)) {
++      throw new Error('Torn API returned an invalid cooldowns response.');
+     }
+ 
+-    const normalize =
+-      value => {
+-        const seconds =
+-          Number(value);
+-
+-        return Number.isSafeInteger(seconds) &&
+-          seconds >= 0 &&
+-          seconds <= 30 * 24 * 60 * 60
+-          ? seconds
+-          : null;
+-      };
++    const normalize = value => {
++      const seconds = Number(value);
++      return Number.isSafeInteger(seconds) &&
++        seconds >= 0 &&
++        seconds <= 30 * 24 * 60 * 60
++        ? seconds
++        : null;
++    };
+ 
+-    const drug =
+-      normalize(source.drug);
+-    const booster =
+-      normalize(source.booster);
++    const drug = normalize(source.drug);
++    const booster = normalize(source.booster);
+ 
+-    if (
+-      drug === null ||
+-      booster === null
+-    ) {
+-      throw new Error(
+-        'Torn API returned invalid drug or booster cooldown data.'
+-      );
++    if (drug === null || booster === null) {
++      throw new Error('Torn API returned invalid drug or booster cooldown data.');
+     }
+ 
+-    const safeFetchedAt =
+-      Number.isFinite(Number(fetchedAt))
+-        ? Number(fetchedAt)
+-        : Date.now();
++    const safeFetchedAt = Number.isFinite(Number(fetchedAt))
++      ? Number(fetchedAt)
++      : Date.now();
+ 
+     return {
+       status: 'available',
+-      fetched_at:
+-        safeFetchedAt,
+-      drug_ready_at:
+-        Math.ceil(safeFetchedAt / 1000) + drug,
+-      booster_ready_at:
+-        Math.ceil(safeFetchedAt / 1000) + booster
++      fetched_at: safeFetchedAt,
++      drug_ready_at: Math.ceil(safeFetchedAt / 1000) + drug,
++      booster_ready_at: Math.ceil(safeFetchedAt / 1000) + booster
+     };
+   }
+ 
+   async function fetchTrainingCooldownsSnapshot(
+     apiKey,
+     tracker
+   ) {
+-    const json =
+-      await apiFetchJson(
+-        `${API_BASE}/user/cooldowns`,
+-        apiKey,
+-        tracker
+-      );
+-
+-    return normalizeTrainingCooldownsResponse(
+-      json,
+-      Date.now()
++    const json = await apiFetchJson(
++      `${API_BASE}/user/cooldowns`,
++      apiKey,
++      tracker
+     );
++
++    return normalizeTrainingCooldownsResponse(json, Date.now());
+   }
+ 
+   async function loadTrainingCooldownsSnapshot(
+     apiKey,
+     tracker
+   ) {
+-    const normalizedKey =
+-      String(apiKey || '').trim();
++    const normalizedKey = String(apiKey || '').trim();
+ 
+     if (!normalizedKey) {
+       return {
+@@ -14294,16 +14268,9 @@
+     );
+ 
+     try {
+-      return await fetchTrainingCooldownsSnapshot(
+-        normalizedKey,
+-        tracker
+-      );
++      return await fetchTrainingCooldownsSnapshot(normalizedKey, tracker);
+     } catch (error) {
+-      console.warn(
+-        'Training cooldown refresh failed.',
+-        error
+-      );
+-
++      console.warn('Training cooldown refresh failed.', error);
+       return {
+         status: 'unavailable',
+         reason: 'api_request_failed',
+@@ -14315,55 +14282,35 @@
+   function trainingReadinessQuarterHour(
+     nowMs = Date.now()
+   ) {
+-    const safeNow =
+-      Number.isFinite(Number(nowMs))
+-        ? Number(nowMs)
+-        : Date.now();
+-
+-    const intervalMs =
+-      15 * 60 * 1000;
+-
+-    const nextMs =
+-      Math.floor(safeNow / intervalMs + 1) *
+-      intervalMs;
++    const safeNow = Number.isFinite(Number(nowMs))
++      ? Number(nowMs)
++      : Date.now();
++    const intervalMs = 15 * 60 * 1000;
++    const nextMs = Math.floor(safeNow / intervalMs + 1) * intervalMs;
+ 
+     return {
+-      next_timestamp:
+-        Math.floor(nextMs / 1000),
+-      seconds_until:
+-        Math.max(
+-          0,
+-          Math.ceil((nextMs - safeNow) / 1000)
+-        )
++      next_timestamp: Math.floor(nextMs / 1000),
++      seconds_until: Math.max(0, Math.ceil((nextMs - safeNow) / 1000))
+     };
+   }
+ 
+   function trainingReadinessQuantile(
+     values,
+     proportion
+   ) {
+-    const sorted =
+-      (values || [])
+-        .map(Number)
+-        .filter(
+-          value =>
+-            Number.isFinite(value) &&
+-            value >= 0
+-        )
+-        .sort((left, right) => left - right);
++    const sorted = (values || [])
++      .map(Number)
++      .filter(value => Number.isFinite(value) && value >= 0)
++      .sort((left, right) => left - right);
+ 
+     if (!sorted.length) {
+       return null;
+     }
+ 
+-    const position =
+-      Math.max(0, Math.min(1, Number(proportion) || 0)) *
++    const position = Math.max(0, Math.min(1, Number(proportion) || 0)) *
+       (sorted.length - 1);
+-
+-    const lower =
+-      Math.floor(position);
+-    const upper =
+-      Math.ceil(position);
++    const lower = Math.floor(position);
++    const upper = Math.ceil(position);
+ 
+     if (lower === upper) {
+       return sorted[lower];
+@@ -14379,38 +14326,36 @@
+     stat,
+     gymId
+   ) {
+-    const comparable =
+-      (actions || [])
+-        .filter(
+-          action =>
+-            action?.stat === stat &&
+-            (
+-              gymId === null ||
+-              Number(action?.gym) === Number(gymId)
+-            ) &&
+-            Number.isFinite(Number(action?.gain_per_energy)) &&
+-            Number(action.gain_per_energy) > 0
+-        )
+-        .sort(
+-          (left, right) =>
+-            Number(right.timestamp || 0) -
+-            Number(left.timestamp || 0)
+-        )
+-        .slice(0, 12);
+-
+-    const rates =
+-      comparable.map(
+-        action => Number(action.gain_per_energy)
+-      );
+-
+-    const samples =
+-      rates.length;
++    const comparable = (actions || [])
++      .filter(action =>
++        action?.stat === stat &&
++        (
++          gymId === null ||
++          Number(action?.gym) === Number(gymId)
++        ) &&
++        Number.isFinite(Number(action?.gain_per_energy)) &&
++        Number(action.gain_per_energy) > 0
++      )
++      .sort((left, right) =>
++        Number(right.timestamp || 0) - Number(left.timestamp || 0)
++      )
++      .slice(0, 12);
++
++    const rates = comparable.map(action => Number(action.gain_per_energy));
++    const observations = comparable
++      .slice()
++      .reverse()
++      .map(action => ({
++        timestamp: Number(action.timestamp || 0),
++        rate: Number(action.gain_per_energy)
++      }));
++    const samples = rates.length;
+ 
+     return {
+       stat,
+-      gym_id:
+-        gymId,
++      gym_id: gymId,
+       samples,
++      observations,
+       confidence:
+         samples >= 8
+           ? 'High'
+@@ -14441,80 +14386,49 @@
+     nowMs = Date.now(),
+     pageUrl = ''
+   ) {
+-    const actions =
+-      Array.isArray(growth?.training_actions)
+-        ? growth.training_actions
+-        : [];
+-
+-    const latest =
+-      actions.length
+-        ? actions[actions.length - 1]
+-        : null;
+-
+-    const gymId =
+-      Number.isSafeInteger(Number(latest?.gym)) &&
++    const actions = Array.isArray(growth?.training_actions)
++      ? growth.training_actions
++      : [];
++    const latest = actions.length
++      ? actions[actions.length - 1]
++      : null;
++    const gymId = Number.isSafeInteger(Number(latest?.gym)) &&
+       Number(latest.gym) > 0
+-        ? Number(latest.gym)
+-        : null;
+-
++      ? Number(latest.gym)
++      : null;
+     const defaultStat =
+-      ['strength', 'defense', 'speed', 'dexterity']
+-        .includes(latest?.stat)
++      ['strength', 'defense', 'speed', 'dexterity'].includes(latest?.stat)
+         ? latest.stat
+         : 'strength';
+-
+-    const effectiveUrl =
+-      String(
+-        pageUrl ||
+-        (
+-          typeof location !== 'undefined'
+-            ? location.href
+-            : ''
+-        )
+-      );
+-
+-    const energy =
+-      bars?.status === 'available'
+-        ? Number(bars?.energy?.current)
+-        : null;
+-
+-    const happiness =
+-      bars?.status === 'available'
+-        ? Number(bars?.happiness?.current)
+-        : null;
+-
+-    const happinessMaximum =
+-      bars?.status === 'available'
+-        ? Number(bars?.happiness?.maximum)
+-        : null;
+-
+-    const quarterHour =
+-      trainingReadinessQuarterHour(nowMs);
+-
++    const effectiveUrl = String(
++      pageUrl ||
++      (typeof location !== 'undefined' ? location.href : '')
++    );
++    const energy = bars?.status === 'available'
++      ? Number(bars?.energy?.current)
++      : null;
++    const happiness = bars?.status === 'available'
++      ? Number(bars?.happiness?.current)
++      : null;
++    const happinessMaximum = bars?.status === 'available'
++      ? Number(bars?.happiness?.maximum)
++      : null;
+     const models = {};
+ 
+     for (const stat of ['strength', 'defense', 'speed', 'dexterity']) {
+-      models[stat] =
+-        trainingReadinessModel(actions, stat, gymId);
++      models[stat] = trainingReadinessModel(actions, stat, gymId);
+     }
+ 
+     return {
+-      page_is_gym:
+-        /(?:^|\/)gym\.php(?:[?#]|$)/i.test(effectiveUrl),
+-      default_stat:
+-        defaultStat,
+-      gym_id:
+-        gymId,
+-      last_training_timestamp:
+-        latest?.timestamp || null,
+-      energy:
+-        Number.isFinite(energy) ? energy : null,
+-      happiness:
+-        Number.isFinite(happiness) ? happiness : null,
+-      happiness_maximum:
+-        Number.isFinite(happinessMaximum)
+-          ? happinessMaximum
+-          : null,
++      page_is_gym: /(?:^|\/)gym\.php(?:[?#]|$)/i.test(effectiveUrl),
++      default_stat: defaultStat,
++      gym_id: gymId,
++      last_training_timestamp: latest?.timestamp || null,
++      energy: Number.isFinite(energy) ? energy : null,
++      happiness: Number.isFinite(happiness) ? happiness : null,
++      happiness_maximum: Number.isFinite(happinessMaximum)
++        ? happinessMaximum
++        : null,
+       over_happiness:
+         Number.isFinite(happiness) &&
+         Number.isFinite(happinessMaximum) &&
+@@ -14529,8 +14443,7 @@
+         Number.isSafeInteger(Number(cooldowns.booster_ready_at))
+           ? Number(cooldowns.booster_ready_at)
+           : null,
+-      quarter_hour:
+-        quarterHour,
++      quarter_hour: trainingReadinessQuarterHour(nowMs),
+       models
+     };
+   }
+@@ -14539,11 +14452,10 @@
+     model,
+     plannedEnergy
+   ) {
+-    const energy =
+-      Math.max(
+-        1,
+-        Math.min(5000, Math.floor(Number(plannedEnergy) || 0))
+-      );
++    const energy = Math.max(
++      1,
++      Math.min(5000, Math.floor(Number(plannedEnergy) || 0))
++    );
+ 
+     if (
+       !model ||
+@@ -14562,10 +14474,8 @@
+     return {
+       energy,
+       available: true,
+-      low:
+-        Number(model.rate_low) * energy,
+-      high:
+-        Number(model.rate_high) * energy
++      low: Number(model.rate_low) * energy,
++      high: Number(model.rate_high) * energy
+     };
+   }
+ 
+@@ -14583,14 +14493,10 @@
+   function trainingReadinessFormatDuration(
+     seconds
+   ) {
+-    const safe =
+-      Math.max(0, Math.floor(Number(seconds) || 0));
+-    const hours =
+-      Math.floor(safe / 3600);
+-    const minutes =
+-      Math.floor(safe / 60);
+-    const remainder =
+-      safe % 60;
++    const safe = Math.max(0, Math.floor(Number(seconds) || 0));
++    const hours = Math.floor(safe / 3600);
++    const minutes = Math.floor(safe / 60);
++    const remainder = safe % 60;
+ 
+     if (hours > 0) {
+       return `${hours}h ${Math.floor((safe % 3600) / 60)}m`;
+@@ -14599,54 +14505,115 @@
+     return `${minutes}m ${remainder}s`;
+   }
+ 
++  function trainingReadinessHistoryChart(
++    observations,
++    stat
++  ) {
++    const points = (Array.isArray(observations) ? observations : [])
++      .map(observation => ({
++        timestamp: Number(observation?.timestamp),
++        rate: Number(observation?.rate)
++      }))
++      .filter(observation =>
++        Number.isFinite(observation.timestamp) &&
++        observation.timestamp > 0 &&
++        Number.isFinite(observation.rate) &&
++        observation.rate > 0
++      )
++      .slice(-12);
++
++    if (points.length < 2) {
++      return '<div class="ta-section-intro">Not enough comparable observations to draw a history graph yet.</div>';
++    }
++
++    const width = 320;
++    const height = 128;
++    const left = 38;
++    const right = 10;
++    const top = 12;
++    const bottom = 24;
++    const rates = points.map(point => point.rate);
++    const rawMin = Math.min(...rates);
++    const rawMax = Math.max(...rates);
++    const spread = rawMax - rawMin;
++    const padding = spread > 0 ? spread * 0.15 : Math.max(rawMax * 0.08, 0.01);
++    const minRate = Math.max(0, rawMin - padding);
++    const maxRate = rawMax + padding;
++    const range = Math.max(maxRate - minRate, 0.000001);
++    const plotWidth = width - left - right;
++    const plotHeight = height - top - bottom;
++    const xFor = index =>
++      left + (points.length === 1 ? 0 : (index / (points.length - 1)) * plotWidth);
++    const yFor = rate =>
++      top + ((maxRate - rate) / range) * plotHeight;
++    const polyline = points
++      .map((point, index) => `${xFor(index).toFixed(1)},${yFor(point.rate).toFixed(1)}`)
++      .join(' ');
++    const circles = points
++      .map((point, index) =>
++        `<circle cx="${xFor(index).toFixed(1)}" cy="${yFor(point.rate).toFixed(1)}" r="2.8" fill="currentColor"><title>${escapeActivityHtml(new Date(point.timestamp * 1000).toLocaleString())}: ${escapeActivityHtml(statGrowthFormatNumber(point.rate, 4))} gain/E</title></circle>`
++      )
++      .join('');
++    const median = trainingReadinessQuantile(rates, 0.5);
++    const medianY = yFor(median).toFixed(1);
++    const firstDate = new Date(points[0].timestamp * 1000)
++      .toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
++    const lastDate = new Date(points[points.length - 1].timestamp * 1000)
++      .toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
++
++    return `
++      <div class="ta-section-intro">${escapeActivityHtml(trainingReadinessStatLabel(stat))} · gain per Energy · same observed gym</div>
++      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Observed ${escapeActivityHtml(trainingReadinessStatLabel(stat))} gain per Energy over recent comparable training actions" style="display:block;width:100%;height:auto;max-height:180px;overflow:visible;color:inherit">
++        <line x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}" stroke="currentColor" opacity="0.25" />
++        <line x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" stroke="currentColor" opacity="0.25" />
++        <line x1="${left}" y1="${medianY}" x2="${width - right}" y2="${medianY}" stroke="currentColor" opacity="0.35" stroke-dasharray="4 4" />
++        <polyline points="${polyline}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
++        ${circles}
++        <text x="2" y="${top + 4}" fill="currentColor" opacity="0.7" font-size="9">${escapeActivityHtml(statGrowthFormatNumber(rawMax, 3))}</text>
++        <text x="2" y="${height - bottom}" fill="currentColor" opacity="0.7" font-size="9">${escapeActivityHtml(statGrowthFormatNumber(rawMin, 3))}</text>
++        <text x="${left}" y="${height - 7}" fill="currentColor" opacity="0.7" font-size="9">${escapeActivityHtml(firstDate)}</text>
++        <text x="${width - right}" y="${height - 7}" fill="currentColor" opacity="0.7" font-size="9" text-anchor="end">${escapeActivityHtml(lastDate)}</text>
++      </svg>
++      <div class="ta-section-intro">Dashed line = median. Points are real recorded observations; no Happiness prediction is applied.</div>
++    `;
++  }
++
+   function renderTrainingReadinessDashboard(
+     readiness
+   ) {
+     if (!readiness) {
+       return '';
+     }
+ 
+-    const defaultModel =
+-      readiness.models?.[readiness.default_stat];
+-    const plannedEnergy =
+-      Math.max(1, Math.floor(Number(readiness.energy) || 250));
+-    const projection =
+-      trainingReadinessProjection(defaultModel, plannedEnergy);
++    const defaultModel = readiness.models?.[readiness.default_stat];
++    const plannedEnergy = Math.max(1, Math.floor(Number(readiness.energy) || 250));
++    const projection = trainingReadinessProjection(defaultModel, plannedEnergy);
+ 
+-    const options =
+-      ['strength', 'defense', 'speed', 'dexterity']
+-        .map(
+-          stat => {
+-            const model = readiness.models?.[stat] || {};
+-            return `<option value="${stat}" ${stat === readiness.default_stat ? 'selected' : ''} data-samples="${Number(model.samples || 0)}" data-confidence="${escapeActivityHtml(model.confidence || 'Insufficient')}" data-rate-low="${Number.isFinite(Number(model.rate_low)) ? Number(model.rate_low) : ''}" data-rate-high="${Number.isFinite(Number(model.rate_high)) ? Number(model.rate_high) : ''}">${trainingReadinessStatLabel(stat)}</option>`;
+-          }
+-        )
+-        .join('');
+-
+-    const projectionText =
+-      projection.available
+-        ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)} observed gain`
+-        : 'Not enough comparable training samples yet';
++    const options = ['strength', 'defense', 'speed', 'dexterity']
++      .map(stat => {
++        const model = readiness.models?.[stat] || {};
++        const encodedObservations = encodeURIComponent(
++          JSON.stringify(model.observations || [])
++        );
++        return `<option value="${stat}" ${stat === readiness.default_stat ? 'selected' : ''} data-samples="${Number(model.samples || 0)}" data-confidence="${escapeActivityHtml(model.confidence || 'Insufficient')}" data-rate-low="${Number.isFinite(Number(model.rate_low)) ? Number(model.rate_low) : ''}" data-rate-high="${Number.isFinite(Number(model.rate_high)) ? Number(model.rate_high) : ''}" data-observations="${encodedObservations}">${trainingReadinessStatLabel(stat)}</option>`;
++      })
++      .join('');
+ 
++    const projectionText = projection.available
++      ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)} observed gain`
++      : 'Not enough comparable training samples yet';
+     const sampleText =
+       `${Number(defaultModel?.samples || 0)} comparable samples · ${defaultModel?.confidence || 'Insufficient'} confidence`;
+-
+-    const resetDuration =
+-      trainingReadinessFormatDuration(
+-        readiness.quarter_hour?.seconds_until
+-      );
+-
+-    const recommendation =
+-      readiness.energy === null
+-        ? 'Live Energy is unavailable. Historical estimates still work.'
+-        : readiness.energy <= 0
+-          ? 'Wait for Energy before training.'
+-          : 'Ready to train. For a happiness boost, use it just after a TCT quarter-hour and train before the next one.';
+-
++    const resetDuration = trainingReadinessFormatDuration(
++      readiness.quarter_hour?.seconds_until
++    );
++    const recommendation = readiness.energy === null
++      ? 'Live Energy is unavailable. Historical estimates still work.'
++      : readiness.energy <= 0
++        ? 'Wait for Energy before training.'
++        : 'Ready to train. For a happiness boost, use it just after a TCT quarter-hour and train before the next one.';
+     const recommendationHtml =
+-      readiness.over_happiness &&
+-      readiness.energy !== null &&
+-      readiness.energy > 0
++      readiness.over_happiness && readiness.energy !== null && readiness.energy > 0
+         ? `Train before the next quarter-hour reset (<span data-ta-quarter-countdown>${escapeActivityHtml(resetDuration)}</span>).`
+         : escapeActivityHtml(recommendation);
+ 
+@@ -14661,29 +14628,22 @@
+       </div>
+     `;
+ 
+-    const cooldownMetric =
+-      (label, readyAt) => {
+-        const available =
+-          Number.isSafeInteger(Number(readyAt));
+-        const remaining =
+-          available
+-            ? Math.max(
+-                0,
+-                Number(readyAt) -
+-                Math.floor(Date.now() / 1000)
+-              )
+-            : null;
++    const cooldownMetric = (label, readyAt) => {
++      const available = Number.isSafeInteger(Number(readyAt));
++      const remaining = available
++        ? Math.max(0, Number(readyAt) - Math.floor(Date.now() / 1000))
++        : null;
+ 
+-        return `
+-          <div class="ta-metric-card">
+-            <div class="ta-metric-label">${escapeActivityHtml(label)}</div>
+-            <div class="ta-metric-value" ${available ? `data-ta-cooldown-ready-at="${Number(readyAt)}"` : ''}>
+-              ${available ? (remaining <= 0 ? 'Ready' : escapeActivityHtml(trainingReadinessFormatDuration(remaining))) : '—'}
+-            </div>
+-            <div class="ta-metric-note">${available ? 'Live from Torn' : 'Live cooldown unavailable'}</div>
++      return `
++        <div class="ta-metric-card">
++          <div class="ta-metric-label">${escapeActivityHtml(label)}</div>
++          <div class="ta-metric-value" ${available ? `data-ta-cooldown-ready-at="${Number(readyAt)}"` : ''}>
++            ${available ? (remaining <= 0 ? 'Ready' : escapeActivityHtml(trainingReadinessFormatDuration(remaining))) : '—'}
+           </div>
+-        `;
+-      };
++          <div class="ta-metric-note">${available ? 'Live from Torn' : 'Live cooldown unavailable'}</div>
++        </div>
++      `;
++    };
+ 
+     return `
+       <details class="ta-section ta-training-readiness-section" ${readiness.page_is_gym ? 'open' : ''}>
+@@ -14723,6 +14683,16 @@
+             <strong data-ta-training-projection>${escapeActivityHtml(projectionText)}</strong>
+             <span data-ta-training-samples>${escapeActivityHtml(sampleText)}</span>
+           </div>
++
++          <details class="ta-section" style="margin-top:10px">
++            <summary class="ta-section-summary-row">
++              <span class="ta-section-title">Observed gain history</span>
++              <span class="ta-section-meta">Last ${Number(defaultModel?.samples || 0)} samples</span>
++            </summary>
++            <div class="ta-section-body" data-ta-training-history>
++              ${trainingReadinessHistoryChart(defaultModel?.observations, readiness.default_stat)}
++            </div>
++          </details>
+         </div>
+       </details>
+     `;
+@@ -14731,105 +14701,100 @@
+   function bindTrainingReadinessInteractions(
+     root
+   ) {
+-    const section =
+-      root?.querySelector?.('.ta-training-readiness-section');
++    const section = root?.querySelector?.('.ta-training-readiness-section');
+ 
+     if (!section) {
+       return;
+     }
+ 
+-    const select =
+-      section.querySelector('[data-ta-training-stat]');
+-    const input =
+-      section.querySelector('[data-ta-training-energy]');
+-    const output =
+-      section.querySelector('[data-ta-training-projection]');
+-    const samples =
+-      section.querySelector('[data-ta-training-samples]');
++    const select = section.querySelector('[data-ta-training-stat]');
++    const input = section.querySelector('[data-ta-training-energy]');
++    const output = section.querySelector('[data-ta-training-projection]');
++    const samples = section.querySelector('[data-ta-training-samples]');
++    const history = section.querySelector('[data-ta-training-history]');
++    const historyMeta = history
++      ?.closest('details')
++      ?.querySelector('.ta-section-meta');
+ 
+-    const refreshQuarterHour =
+-      () => {
+-        if (!section.isConnected) {
+-          return;
+-        }
++    const refreshQuarterHour = () => {
++      if (!section.isConnected) {
++        return;
++      }
+ 
+-        const duration =
+-          trainingReadinessFormatDuration(
+-            trainingReadinessQuarterHour(
+-              Date.now()
+-            ).seconds_until
+-          );
++      const duration = trainingReadinessFormatDuration(
++        trainingReadinessQuarterHour(Date.now()).seconds_until
++      );
+ 
+-        for (
+-          const clock
+-          of section.querySelectorAll(
+-            '[data-ta-quarter-countdown]'
+-          )
+-        ) {
+-          clock.textContent =
+-            duration;
+-        }
++      for (const clock of section.querySelectorAll('[data-ta-quarter-countdown]')) {
++        clock.textContent = duration;
++      }
+ 
+-        for (
+-          const cooldown
+-          of section.querySelectorAll(
+-            '[data-ta-cooldown-ready-at]'
+-          )
+-        ) {
+-          const readyAt =
+-            Number(
+-              cooldown.getAttribute(
+-                'data-ta-cooldown-ready-at'
+-              )
+-            );
+-          const remaining =
+-            Math.max(
+-              0,
+-              readyAt -
+-              Math.floor(Date.now() / 1000)
+-            );
++      for (const cooldown of section.querySelectorAll('[data-ta-cooldown-ready-at]')) {
++        const readyAt = Number(
++          cooldown.getAttribute('data-ta-cooldown-ready-at')
++        );
++        const remaining = Math.max(
++          0,
++          readyAt - Math.floor(Date.now() / 1000)
++        );
+ 
+-          cooldown.textContent =
+-            remaining <= 0
+-              ? 'Ready'
+-              : trainingReadinessFormatDuration(
+-                  remaining
+-                );
+-        }
++        cooldown.textContent = remaining <= 0
++          ? 'Ready'
++          : trainingReadinessFormatDuration(remaining);
++      }
+ 
+-        setTimeout(
+-          refreshQuarterHour,
+-          1000 - (Date.now() % 1000) + 20
++      setTimeout(
++        refreshQuarterHour,
++        1000 - (Date.now() % 1000) + 20
++      );
++    };
++
++    const refresh = () => {
++      const option = select?.selectedOptions?.[0];
++      let observations = [];
++
++      try {
++        observations = JSON.parse(
++          decodeURIComponent(option?.dataset?.observations || '%5B%5D')
+         );
++      } catch {
++        observations = [];
++      }
++
++      const model = {
++        samples: Number(option?.dataset?.samples || 0),
++        confidence: option?.dataset?.confidence || 'Insufficient',
++        rate_low: option?.dataset?.rateLow
++          ? Number(option.dataset.rateLow)
++          : null,
++        rate_high: option?.dataset?.rateHigh
++          ? Number(option.dataset.rateHigh)
++          : null,
++        observations
+       };
++      const projection = trainingReadinessProjection(model, input?.value);
+ 
+-    const refresh =
+-      () => {
+-        const option =
+-          select?.selectedOptions?.[0];
+-        const model = {
+-          samples: Number(option?.dataset?.samples || 0),
+-          confidence: option?.dataset?.confidence || 'Insufficient',
+-          rate_low: option?.dataset?.rateLow
+-            ? Number(option.dataset.rateLow)
+-            : null,
+-          rate_high: option?.dataset?.rateHigh
+-            ? Number(option.dataset.rateHigh)
+-            : null
+-        };
+-        const projection =
+-          trainingReadinessProjection(model, input?.value);
++      if (output) {
++        output.textContent = projection.available
++          ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)} observed gain`
++          : 'Not enough comparable training samples yet';
++      }
+ 
+-        if (output) {
+-          output.textContent = projection.available
+-            ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)} observed gain`
+-            : 'Not enough comparable training samples yet';
+-        }
++      if (samples) {
++        samples.textContent = `${model.samples} comparable samples · ${model.confidence} confidence`;
++      }
+ 
+-        if (samples) {
+-          samples.textContent = `${model.samples} comparable samples · ${model.confidence} confidence`;
+-        }
+-      };
++      if (history) {
++        history.innerHTML = trainingReadinessHistoryChart(
++          model.observations,
++          option?.value || 'strength'
++        );
++      }
++
++      if (historyMeta) {
++        historyMeta.textContent = `Last ${model.samples} samples`;
++      }
++    };
+ 
+     select?.addEventListener('change', refresh);
+     input?.addEventListener('input', refresh);
