@@ -1,0 +1,35 @@
+name: Apply v2.15.0 personal live candidate
+
+on:
+  push:
+    branches:
+      - agent/v2.15.0-personal-live
+    paths:
+      - .release/v2.15.0-userscript.patch
+      - .github/workflows/apply-v2.15.0-personal-live.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v2.15.0-personal-live
+      - name: Apply exact validated userscript patch
+        run: |
+          git apply --check .release/v2.15.0-userscript.patch
+          git apply .release/v2.15.0-userscript.patch
+          actual="$(git hash-object torn-analytics.user.js)"
+          expected="1b0838089311fa49af5e9fd8cb81ef4b18bb8f1a"
+          echo "userscript blob: $actual"
+          test "$actual" = "$expected"
+      - name: Commit personal live candidate
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add torn-analytics.user.js
+          git commit -m "Stage Torn Analytics v2.15.0 personal live test"
+          git push
