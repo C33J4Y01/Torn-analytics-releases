@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.14.0
+// @version      2.14.1
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.14.0';
+  const VERSION = '2.14.1';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -14492,17 +14492,35 @@
     const sampleText =
       `${Number(defaultModel?.samples || 0)} comparable samples · ${defaultModel?.confidence || 'Insufficient'} confidence`;
 
-    const resetText =
-      `Next TCT quarter-hour in ${trainingReadinessFormatDuration(readiness.quarter_hour?.seconds_until)}`;
+    const resetDuration =
+      trainingReadinessFormatDuration(
+        readiness.quarter_hour?.seconds_until
+      );
 
     const recommendation =
       readiness.energy === null
         ? 'Live Energy is unavailable. Historical estimates still work.'
         : readiness.energy <= 0
           ? 'Wait for Energy before training.'
-          : readiness.over_happiness
-            ? `Train before the next quarter-hour reset (${trainingReadinessFormatDuration(readiness.quarter_hour?.seconds_until)}).`
-            : 'Ready to train. For a happiness boost, use it just after a TCT quarter-hour and train before the next one.';
+          : 'Ready to train. For a happiness boost, use it just after a TCT quarter-hour and train before the next one.';
+
+    const recommendationHtml =
+      readiness.over_happiness &&
+      readiness.energy !== null &&
+      readiness.energy > 0
+        ? `Train before the next quarter-hour reset (<span data-ta-quarter-countdown>${escapeActivityHtml(resetDuration)}</span>).`
+        : escapeActivityHtml(recommendation);
+
+    const quarterHourMetric = `
+      <div class="ta-metric-card">
+        <div class="ta-metric-label">Quarter-hour</div>
+        <div class="ta-metric-value">
+          Next TCT quarter-hour in
+          <span data-ta-quarter-countdown>${escapeActivityHtml(resetDuration)}</span>
+        </div>
+        <div class="ta-metric-note">TCT (UTC)</div>
+      </div>
+    `;
 
     return `
       <details class="ta-section ta-training-readiness-section" ${readiness.page_is_gym ? 'open' : ''}>
@@ -14516,13 +14534,13 @@
             Read-only guidance from live bars and your own observed gym history. Estimates are historical ranges, not Torn formula guarantees.
           </div>
 
-          <div class="ta-training-status" data-ta-training-recommendation>${escapeActivityHtml(recommendation)}</div>
+          <div class="ta-training-status" data-ta-training-recommendation>${recommendationHtml}</div>
 
           <div class="ta-metric-grid">
             ${activityDashboardMetric('Live Energy', readiness.energy === null ? '—' : Number(readiness.energy).toLocaleString(), 'Live from Torn')}
             ${activityDashboardMetric('Live Happiness', readiness.happiness === null ? '—' : Number(readiness.happiness).toLocaleString(), readiness.happiness_maximum === null ? 'Live from Torn' : `${Number(readiness.happiness_maximum).toLocaleString()} maximum`)}
             ${activityDashboardMetric('Last observed gym', statGrowthGymName(readiness.gym_id), readiness.last_training_timestamp ? 'From your latest valid gym log' : 'No valid gym log yet')}
-            ${activityDashboardMetric('Quarter-hour', resetText, 'TCT (UTC)')}
+            ${quarterHourMetric}
           </div>
 
           <div class="ta-training-controls">
@@ -14564,6 +14582,35 @@
     const samples =
       section.querySelector('[data-ta-training-samples]');
 
+    const refreshQuarterHour =
+      () => {
+        if (!section.isConnected) {
+          return;
+        }
+
+        const duration =
+          trainingReadinessFormatDuration(
+            trainingReadinessQuarterHour(
+              Date.now()
+            ).seconds_until
+          );
+
+        for (
+          const clock
+          of section.querySelectorAll(
+            '[data-ta-quarter-countdown]'
+          )
+        ) {
+          clock.textContent =
+            duration;
+        }
+
+        setTimeout(
+          refreshQuarterHour,
+          1000 - (Date.now() % 1000) + 20
+        );
+      };
+
     const refresh =
       () => {
         const option =
@@ -14594,6 +14641,7 @@
 
     select?.addEventListener('change', refresh);
     input?.addEventListener('input', refresh);
+    refreshQuarterHour();
   }
   // ============================================================
   // STAT GROWTH DASHBOARD
