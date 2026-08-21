@@ -1,0 +1,65 @@
+name: Publish Torn Analytics v2.15.4 exact
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .release/v2.15.4.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out personal live channel
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
+
+      - name: Apply exact validated userscript patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="ad4f5b7ff34d46686e41150cd36e36b15109c162"
+          TARGET_SHA="d8d4e38577f861d30cdd47516b35582910df4fe3"
+          CURRENT_SHA="$(git hash-object torn-analytics.user.js)"
+
+          if [ "$CURRENT_SHA" = "$TARGET_SHA" ]; then
+            echo "Live userscript already matches validated v2.15.4."
+            exit 0
+          fi
+
+          if [ "$CURRENT_SHA" != "$BASE_SHA" ]; then
+            echo "Unexpected live baseline: $CURRENT_SHA"
+            exit 1
+          fi
+
+          git apply --check .release/v2.15.4-userscript.patch
+          git apply .release/v2.15.4-userscript.patch
+
+          ACTUAL_SHA="$(git hash-object torn-analytics.user.js)"
+          if [ "$ACTUAL_SHA" != "$TARGET_SHA" ]; then
+            echo "Exact artifact verification failed: $ACTUAL_SHA != $TARGET_SHA"
+            exit 1
+          fi
+
+          grep -q '^// @version      2.15.4$' torn-analytics.user.js
+          grep -q "const VERSION = '2.15.4';" torn-analytics.user.js
+          grep -q '<b>Diagnostic:</b>' torn-analytics.user.js
+
+      - name: Commit exact personal live artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- torn-analytics.user.js; then
+            echo "No userscript change required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- torn-analytics.user.js
+          git commit -m "Publish Torn Analytics v2.15.4 personal diagnostic"
+          git push origin main
