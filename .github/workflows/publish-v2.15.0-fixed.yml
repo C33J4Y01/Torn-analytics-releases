@@ -6,6 +6,13 @@ on:
       - main
     paths:
       - .github/workflows/publish-v2.15.0-fixed.yml
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - docs-trigger-v2.15.0.txt
 
 permissions:
   contents: write
