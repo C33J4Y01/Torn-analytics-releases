@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.15.2
+// @version      2.15.3
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.15.2';
+  const VERSION = '2.15.3';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -168,7 +168,7 @@
   let automaticLogSyncSchedulerInstalled = false;
   let automaticLogSyncLeaseOwner = '';
 
-  // TornPDA replaces this documented marker at injection time with
+  // TornPDA replaces this exact documented marker at injection time with
   // the API key already stored by the app. Outside TornPDA the
   // marker remains unchanged and is treated as unavailable.
   const TORN_PDA_API_KEY_SOURCE =
@@ -239,9 +239,8 @@
 
     removeLegacyApiKey();
 
-    // TornPDA's GM_* value compatibility layer is backed by the page's
-    // localStorage. Never read API-key material through it. TornPDA should
-    // use its injected API key; any manually entered override is session-only.
+    // TornPDA supplies its configured API key through runtime injection.
+    // Do not persist a manual fallback through TornPDA's page-local GM layer.
     if (
       tornPdaRuntimeDetected()
     ) {
@@ -343,9 +342,8 @@
 
     removeLegacyApiKey();
 
-    // Never route TornPDA secrets through GM_setValue because TornPDA maps
-    // that compatibility API to page localStorage. A manual override remains
-    // only in this userscript execution; normal TornPDA use relies on injection.
+    // A manual TornPDA override is a session-only fallback. Normal TornPDA
+    // use relies on the app replacing the documented injection token.
     if (
       tornPdaRuntimeDetected()
     ) {
