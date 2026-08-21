@@ -1,0 +1,123 @@
+diff --git a/torn-analytics.user.js b/torn-analytics.user.js
+--- a/torn-analytics.user.js
++++ b/torn-analytics.user.js
+@@ -1,7 +1,7 @@
+ // ==UserScript==
+ // @name         Torn Analytics
+ // @namespace    chatgpt.openai.com/torn-tools
+-// @version      2.15.3
++// @version      2.15.4
+ // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
+ // @author       Personal use
+ // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
+@@ -22,7 +22,7 @@
+   // VERSION / CONSTANTS
+   // ============================================================
+ 
+-  const VERSION = '2.15.3';
++  const VERSION = '2.15.4';
+ 
+   const API_BASE = 'https://api.torn.com/v2';
+ 
+@@ -17750,6 +17750,102 @@
+     update();
+   }
+   // ============================================================
++  // LIVE RESOURCE FAILURE DIAGNOSTICS
++  // ============================================================
++
++  const renderResourceDashboardWithoutDiagnostics =
++    renderResourceDashboard;
++
++  function resourceDashboardDiagnosticText(
++    snapshot
++  ) {
++    const reason =
++      String(
++        snapshot?.reason ||
++        'unknown'
++      );
++
++    if (
++      reason ===
++      'api_key_unavailable'
++    ) {
++      return 'No API key reached the /user/bars request.';
++    }
++
++    const raw =
++      String(
++        snapshot?.message ||
++        ''
++      ).trim();
++
++    if (
++      !raw
++    ) {
++      return `Bars failure reason: ${reason}.`;
++    }
++
++    const redacted =
++      raw
++        .replace(
++          /ApiKey\s+[^\s<>&]+/gi,
++          'ApiKey [redacted]'
++        )
++        .replace(
++          /(\bkey=)[^&\s<]+/gi,
++          '$1[redacted]'
++        );
++
++    return `${reason}: ${redacted}`
++      .slice(
++        0,
++        220
++      );
++  }
++
++  renderResourceDashboard =
++    function renderResourceDashboardWithDiagnostics(
++      flow,
++      barsSnapshot
++    ) {
++      const html =
++        renderResourceDashboardWithoutDiagnostics(
++          flow,
++          barsSnapshot
++        );
++
++      if (
++        !html ||
++        barsSnapshot?.status ===
++          'available'
++      ) {
++        return html;
++      }
++
++      const oldText =
++        'Historical totals still work. A valid saved API key is needed for current bars and refill times.';
++
++      if (
++        !html.includes(
++          oldText
++        )
++      ) {
++        return html;
++      }
++
++      const diagnostic =
++        escapeResourceDashboardHtml(
++          resourceDashboardDiagnosticText(
++            barsSnapshot
++          )
++        );
++
++      return html.replace(
++        oldText,
++        'Historical totals still work. The live /user/bars reading failed, while other analytics remain available.' +
++          `<br><b>Diagnostic:</b> ${diagnostic}`
++      );
++    };
++  // ============================================================
+   // VERIFIED READABLE HISTORY SERIALIZATION
+   // ============================================================
