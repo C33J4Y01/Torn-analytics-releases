@@ -1,0 +1,75 @@
+name: Publish Torn Analytics v2.15.0 fixed
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v2.15.0-fixed.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Reproduce exact validated v2.15.0 blob
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import hashlib
+
+          target_blob = '1b0838089311fa49af5e9fd8cb81ef4b18bb8f1a'
+          release_path = Path('torn-analytics.user.js')
+          publisher_path = Path('.github/workflows/publish-v2.15.0.yml')
+
+          def git_blob_sha(text):
+              data = text.encode('utf-8')
+              return hashlib.sha1(f'blob {len(data)}\0'.encode('ascii') + data).hexdigest()
+
+          source = release_path.read_text(encoding='utf-8')
+          if git_blob_sha(source) == target_blob:
+              print('Release already matches exact validated v2.15.0 blob.')
+              raise SystemExit(0)
+
+          raw = publisher_path.read_text(encoding='utf-8').splitlines()
+          start_i = next(i for i, line in enumerate(raw) if "module = '''  //" in line)
+          end_i = next(i for i in range(start_i + 1, len(raw)) if raw[i].strip() == "'''" )
+
+          first = raw[start_i].split("module = '''", 1)[1]
+          rest = []
+          for line in raw[start_i + 1:end_i]:
+              block_line = line[10:] if line.startswith('          ') else line
+              rest.append(('  ' + block_line) if block_line else '')
+          module = first + '\n' + '\n'.join(rest) + '\n'
+
+          source = source.replace('// @version      2.14.2', '// @version      2.15.0', 1)
+          source = source.replace("  const VERSION = '2.14.2';", "  const VERSION = '2.15.0';", 1)
+          start_marker = '  // ============================================================\n  // TRAINING READINESS\n'
+          end_marker = '  // ============================================================\n  // STAT GROWTH DASHBOARD\n'
+          start = source.index(start_marker)
+          end = source.index(end_marker, start)
+          source = source[:start] + module + source[end:]
+
+          actual = git_blob_sha(source)
+          if actual != target_blob:
+              raise SystemExit(f'Exact-release check failed: got {actual}, expected {target_blob}')
+
+          release_path.write_text(source, encoding='utf-8')
+          print('Exact validated development blob reproduced:', actual)
+          PY
+      - name: Commit v2.15.0 release
+        run: |
+          if git diff --quiet -- torn-analytics.user.js; then
+            echo "Release already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add torn-analytics.user.js
+          git commit -m "Release Torn Analytics v2.15.0"
+          git push
