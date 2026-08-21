@@ -1,1 +1,2 @@
 One-shot release trigger for Torn Analytics v2.15.0.
+Dispatch through pull_request_target.
