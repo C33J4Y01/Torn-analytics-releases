@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.13.10
+// @version      2.14.0
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.13.10';
+  const VERSION = '2.14.0';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -9890,6 +9890,16 @@
         activityTimeBasisPreference()
       );
 
+    latestAnalysis.training_readiness =
+      buildTrainingReadiness(
+        latestAnalysis.stat_growth,
+        latestAnalysis.resource_bars,
+        Date.now(),
+        typeof location !== 'undefined'
+          ? location.href
+          : ''
+      );
+
     const analysisHost =
       document.getElementById(
         'ta-status'
@@ -9928,7 +9938,6 @@
         latestAnalysis
     };
   }
-
   // ============================================================
   // BASIC ITEM ANALYTICS
   // ============================================================
@@ -14113,6 +14122,8 @@
         warningReasons,
       actions:
         actions.length,
+      training_actions:
+        actions,
       trains:
         totalTrains,
       energy_used:
@@ -14175,7 +14186,415 @@
         )
     };
   }
+  // ============================================================
+  // TRAINING READINESS
+  // ============================================================
 
+  function trainingReadinessQuarterHour(
+    nowMs = Date.now()
+  ) {
+    const safeNow =
+      Number.isFinite(Number(nowMs))
+        ? Number(nowMs)
+        : Date.now();
+
+    const intervalMs =
+      15 * 60 * 1000;
+
+    const nextMs =
+      Math.floor(safeNow / intervalMs + 1) *
+      intervalMs;
+
+    return {
+      next_timestamp:
+        Math.floor(nextMs / 1000),
+      seconds_until:
+        Math.max(
+          0,
+          Math.ceil((nextMs - safeNow) / 1000)
+        )
+    };
+  }
+
+  function trainingReadinessQuantile(
+    values,
+    proportion
+  ) {
+    const sorted =
+      (values || [])
+        .map(Number)
+        .filter(
+          value =>
+            Number.isFinite(value) &&
+            value >= 0
+        )
+        .sort((left, right) => left - right);
+
+    if (!sorted.length) {
+      return null;
+    }
+
+    const position =
+      Math.max(0, Math.min(1, Number(proportion) || 0)) *
+      (sorted.length - 1);
+
+    const lower =
+      Math.floor(position);
+    const upper =
+      Math.ceil(position);
+
+    if (lower === upper) {
+      return sorted[lower];
+    }
+
+    return sorted[lower] +
+      (sorted[upper] - sorted[lower]) *
+      (position - lower);
+  }
+
+  function trainingReadinessModel(
+    actions,
+    stat,
+    gymId
+  ) {
+    const comparable =
+      (actions || [])
+        .filter(
+          action =>
+            action?.stat === stat &&
+            (
+              gymId === null ||
+              Number(action?.gym) === Number(gymId)
+            ) &&
+            Number.isFinite(Number(action?.gain_per_energy)) &&
+            Number(action.gain_per_energy) > 0
+        )
+        .sort(
+          (left, right) =>
+            Number(right.timestamp || 0) -
+            Number(left.timestamp || 0)
+        )
+        .slice(0, 12);
+
+    const rates =
+      comparable.map(
+        action => Number(action.gain_per_energy)
+      );
+
+    const samples =
+      rates.length;
+
+    return {
+      stat,
+      gym_id:
+        gymId,
+      samples,
+      confidence:
+        samples >= 8
+          ? 'High'
+          : samples >= 4
+            ? 'Medium'
+            : samples >= 2
+              ? 'Low'
+              : 'Insufficient',
+      rate_low:
+        samples >= 2
+          ? trainingReadinessQuantile(rates, 0.25)
+          : null,
+      rate_mid:
+        samples >= 2
+          ? trainingReadinessQuantile(rates, 0.5)
+          : null,
+      rate_high:
+        samples >= 2
+          ? trainingReadinessQuantile(rates, 0.75)
+          : null
+    };
+  }
+
+  function buildTrainingReadiness(
+    growth,
+    bars,
+    nowMs = Date.now(),
+    pageUrl = ''
+  ) {
+    const actions =
+      Array.isArray(growth?.training_actions)
+        ? growth.training_actions
+        : [];
+
+    const latest =
+      actions.length
+        ? actions[actions.length - 1]
+        : null;
+
+    const gymId =
+      Number.isSafeInteger(Number(latest?.gym)) &&
+      Number(latest.gym) > 0
+        ? Number(latest.gym)
+        : null;
+
+    const defaultStat =
+      ['strength', 'defense', 'speed', 'dexterity']
+        .includes(latest?.stat)
+        ? latest.stat
+        : 'strength';
+
+    const effectiveUrl =
+      String(
+        pageUrl ||
+        (
+          typeof location !== 'undefined'
+            ? location.href
+            : ''
+        )
+      );
+
+    const energy =
+      bars?.status === 'available'
+        ? Number(bars?.energy?.current)
+        : null;
+
+    const happiness =
+      bars?.status === 'available'
+        ? Number(bars?.happiness?.current)
+        : null;
+
+    const happinessMaximum =
+      bars?.status === 'available'
+        ? Number(bars?.happiness?.maximum)
+        : null;
+
+    const quarterHour =
+      trainingReadinessQuarterHour(nowMs);
+
+    const models = {};
+
+    for (const stat of ['strength', 'defense', 'speed', 'dexterity']) {
+      models[stat] =
+        trainingReadinessModel(actions, stat, gymId);
+    }
+
+    return {
+      page_is_gym:
+        /(?:^|\/)gym\.php(?:[?#]|$)/i.test(effectiveUrl),
+      default_stat:
+        defaultStat,
+      gym_id:
+        gymId,
+      last_training_timestamp:
+        latest?.timestamp || null,
+      energy:
+        Number.isFinite(energy) ? energy : null,
+      happiness:
+        Number.isFinite(happiness) ? happiness : null,
+      happiness_maximum:
+        Number.isFinite(happinessMaximum)
+          ? happinessMaximum
+          : null,
+      over_happiness:
+        Number.isFinite(happiness) &&
+        Number.isFinite(happinessMaximum) &&
+        happiness > happinessMaximum,
+      quarter_hour:
+        quarterHour,
+      models
+    };
+  }
+
+  function trainingReadinessProjection(
+    model,
+    plannedEnergy
+  ) {
+    const energy =
+      Math.max(
+        1,
+        Math.min(5000, Math.floor(Number(plannedEnergy) || 0))
+      );
+
+    if (
+      !model ||
+      Number(model.samples) < 2 ||
+      !Number.isFinite(Number(model.rate_low)) ||
+      !Number.isFinite(Number(model.rate_high))
+    ) {
+      return {
+        energy,
+        available: false,
+        low: null,
+        high: null
+      };
+    }
+
+    return {
+      energy,
+      available: true,
+      low:
+        Number(model.rate_low) * energy,
+      high:
+        Number(model.rate_high) * energy
+    };
+  }
+
+  function trainingReadinessStatLabel(
+    stat
+  ) {
+    return {
+      strength: 'Strength',
+      defense: 'Defense',
+      speed: 'Speed',
+      dexterity: 'Dexterity'
+    }[stat] || 'Strength';
+  }
+
+  function trainingReadinessFormatDuration(
+    seconds
+  ) {
+    const safe =
+      Math.max(0, Math.floor(Number(seconds) || 0));
+    const minutes =
+      Math.floor(safe / 60);
+    const remainder =
+      safe % 60;
+
+    return `${minutes}m ${remainder}s`;
+  }
+
+  function renderTrainingReadinessDashboard(
+    readiness
+  ) {
+    if (!readiness) {
+      return '';
+    }
+
+    const defaultModel =
+      readiness.models?.[readiness.default_stat];
+    const plannedEnergy =
+      Math.max(1, Math.floor(Number(readiness.energy) || 250));
+    const projection =
+      trainingReadinessProjection(defaultModel, plannedEnergy);
+
+    const options =
+      ['strength', 'defense', 'speed', 'dexterity']
+        .map(
+          stat => {
+            const model = readiness.models?.[stat] || {};
+            return `<option value="${stat}" ${stat === readiness.default_stat ? 'selected' : ''} data-samples="${Number(model.samples || 0)}" data-confidence="${escapeActivityHtml(model.confidence || 'Insufficient')}" data-rate-low="${Number.isFinite(Number(model.rate_low)) ? Number(model.rate_low) : ''}" data-rate-high="${Number.isFinite(Number(model.rate_high)) ? Number(model.rate_high) : ''}">${trainingReadinessStatLabel(stat)}</option>`;
+          }
+        )
+        .join('');
+
+    const projectionText =
+      projection.available
+        ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)} observed gain`
+        : 'Not enough comparable training samples yet';
+
+    const sampleText =
+      `${Number(defaultModel?.samples || 0)} comparable samples · ${defaultModel?.confidence || 'Insufficient'} confidence`;
+
+    const resetText =
+      `Next TCT quarter-hour in ${trainingReadinessFormatDuration(readiness.quarter_hour?.seconds_until)}`;
+
+    const recommendation =
+      readiness.energy === null
+        ? 'Live Energy is unavailable. Historical estimates still work.'
+        : readiness.energy <= 0
+          ? 'Wait for Energy before training.'
+          : readiness.over_happiness
+            ? `Train before the next quarter-hour reset (${trainingReadinessFormatDuration(readiness.quarter_hour?.seconds_until)}).`
+            : 'Ready to train. For a happiness boost, use it just after a TCT quarter-hour and train before the next one.';
+
+    return `
+      <details class="ta-section ta-training-readiness-section" ${readiness.page_is_gym ? 'open' : ''}>
+        <summary class="ta-section-summary-row">
+          <span class="ta-section-title">Training Readiness</span>
+          <span class="ta-section-meta">${readiness.energy === null ? 'Historical only' : `${Number(readiness.energy).toLocaleString()} E`}</span>
+        </summary>
+
+        <div class="ta-section-body">
+          <div class="ta-section-intro">
+            Read-only guidance from live bars and your own observed gym history. Estimates are historical ranges, not Torn formula guarantees.
+          </div>
+
+          <div class="ta-training-status" data-ta-training-recommendation>${escapeActivityHtml(recommendation)}</div>
+
+          <div class="ta-metric-grid">
+            ${activityDashboardMetric('Live Energy', readiness.energy === null ? '—' : Number(readiness.energy).toLocaleString(), 'Live from Torn')}
+            ${activityDashboardMetric('Live Happiness', readiness.happiness === null ? '—' : Number(readiness.happiness).toLocaleString(), readiness.happiness_maximum === null ? 'Live from Torn' : `${Number(readiness.happiness_maximum).toLocaleString()} maximum`)}
+            ${activityDashboardMetric('Last observed gym', statGrowthGymName(readiness.gym_id), readiness.last_training_timestamp ? 'From your latest valid gym log' : 'No valid gym log yet')}
+            ${activityDashboardMetric('Quarter-hour', resetText, 'TCT (UTC)')}
+          </div>
+
+          <div class="ta-training-controls">
+            <label>
+              <span>Target stat</span>
+              <select data-ta-training-stat>${options}</select>
+            </label>
+            <label>
+              <span>Planned Energy</span>
+              <input data-ta-training-energy type="number" min="1" max="5000" step="5" value="${plannedEnergy}">
+            </label>
+          </div>
+
+          <div class="ta-training-projection">
+            <strong data-ta-training-projection>${escapeActivityHtml(projectionText)}</strong>
+            <span data-ta-training-samples>${escapeActivityHtml(sampleText)}</span>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
+  function bindTrainingReadinessInteractions(
+    root
+  ) {
+    const section =
+      root?.querySelector?.('.ta-training-readiness-section');
+
+    if (!section) {
+      return;
+    }
+
+    const select =
+      section.querySelector('[data-ta-training-stat]');
+    const input =
+      section.querySelector('[data-ta-training-energy]');
+    const output =
+      section.querySelector('[data-ta-training-projection]');
+    const samples =
+      section.querySelector('[data-ta-training-samples]');
+
+    const refresh =
+      () => {
+        const option =
+          select?.selectedOptions?.[0];
+        const model = {
+          samples: Number(option?.dataset?.samples || 0),
+          confidence: option?.dataset?.confidence || 'Insufficient',
+          rate_low: option?.dataset?.rateLow
+            ? Number(option.dataset.rateLow)
+            : null,
+          rate_high: option?.dataset?.rateHigh
+            ? Number(option.dataset.rateHigh)
+            : null
+        };
+        const projection =
+          trainingReadinessProjection(model, input?.value);
+
+        if (output) {
+          output.textContent = projection.available
+            ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)} observed gain`
+            : 'Not enough comparable training samples yet';
+        }
+
+        if (samples) {
+          samples.textContent = `${model.samples} comparable samples · ${model.confidence} confidence`;
+        }
+      };
+
+    select?.addEventListener('change', refresh);
+    input?.addEventListener('input', refresh);
+  }
   // ============================================================
   // STAT GROWTH DASHBOARD
   // ============================================================
@@ -15104,6 +15523,9 @@
         analysis?.resource_flow,
         analysis?.resource_bars
       ) +
+      renderTrainingReadinessDashboard(
+        analysis?.training_readiness
+      ) +
       renderOverallActivityDashboard(
         analysis?.activity
       ) +
@@ -15117,6 +15539,10 @@
     root
   ) {
     bindResourceDashboardInteractions(
+      root
+    );
+
+    bindTrainingReadinessInteractions(
       root
     );
 
@@ -18634,6 +19060,54 @@
         font-size: 12px;
         line-height: 1.5;
         opacity: .65;
+      }
+
+      #${MODAL_ID} .ta-training-status,
+      #${MODAL_ID} .ta-training-projection {
+        margin: 0 0 12px;
+        padding: 10px;
+        border: 1px solid #303030;
+        border-radius: 8px;
+        background: #151515;
+        line-height: 1.4;
+      }
+
+      #${MODAL_ID} .ta-training-controls {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin: 12px 0;
+      }
+
+      #${MODAL_ID} .ta-training-controls label,
+      #${MODAL_ID} .ta-training-projection {
+        display: grid;
+        gap: 5px;
+      }
+
+      #${MODAL_ID} .ta-training-controls label > span,
+      #${MODAL_ID} .ta-training-projection > span {
+        font-size: 11px;
+        opacity: .68;
+      }
+
+      #${MODAL_ID} .ta-training-controls select,
+      #${MODAL_ID} .ta-training-controls input {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 40px;
+        padding: 8px;
+        border: 1px solid #555;
+        border-radius: 7px;
+        background: #202020;
+        color: #fff;
+        font: inherit;
+      }
+
+      @media (max-width: 520px) {
+        #${MODAL_ID} .ta-training-controls {
+          grid-template-columns: 1fr;
+        }
       }
 
       #${MODAL_ID} .ta-time-basis-control {
