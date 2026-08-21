@@ -1,11 +1,6 @@
 name: Publish Torn Analytics v2.15.3 exact
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .release/v2.15.3.trigger
   pull_request:
     branches:
       - main
@@ -22,44 +17,69 @@ jobs:
       - name: Check out publication target
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || 'main' }}
+          ref: ${{ github.head_ref }}
 
-      - name: Apply exact validated userscript patch
+      - name: Reproduce exact validated v2.15.3 artifact
         shell: bash
         run: |
           set -euo pipefail
-          BASE_SHA="b14a200b34cc8055c7276b5229c582504f97f4d9"
-          TARGET_SHA="ad4f5b7ff34d46686e41150cd36e36b15109c162"
-          CURRENT_SHA="$(git hash-object torn-analytics.user.js)"
+          python3 <<'PY'
+          from pathlib import Path
+          import hashlib
 
-          if [ "$CURRENT_SHA" = "$TARGET_SHA" ]; then
-            echo "Live userscript already matches validated v2.15.3."
-            exit 0
-          fi
+          path = Path('torn-analytics.user.js')
+          source = path.read_text(encoding='utf-8')
+          base_sha = 'b14a200b34cc8055c7276b5229c582504f97f4d9'
+          target_sha = 'ad4f5b7ff34d46686e41150cd36e36b15109c162'
 
-          if [ "$CURRENT_SHA" != "$BASE_SHA" ]; then
-            echo "Unexpected live baseline: $CURRENT_SHA"
-            exit 1
-          fi
+          def blob_sha(text):
+              data = text.encode('utf-8')
+              return hashlib.sha1(f'blob {len(data)}\0'.encode('ascii') + data).hexdigest()
 
-          git apply --check .release/v2.15.3-userscript.patch
-          git apply .release/v2.15.3-userscript.patch
+          current = blob_sha(source)
+          if current == target_sha:
+              print('Candidate already matches exact validated v2.15.3 artifact.')
+              raise SystemExit(0)
+          if current != base_sha:
+              raise SystemExit(f'Unexpected live baseline: {current}')
 
-          ACTUAL_SHA="$(git hash-object torn-analytics.user.js)"
-          if [ "$ACTUAL_SHA" != "$TARGET_SHA" ]; then
-            echo "Exact artifact verification failed: $ACTUAL_SHA != $TARGET_SHA"
-            exit 1
-          fi
+          replacements = [
+              ('// @version      2.15.2', '// @version      2.15.3'),
+              ("  const VERSION = '2.15.2';", "  const VERSION = '2.15.3';"),
+              ('  // TornPDA replaces this documented marker at injection time with',
+               '  // TornPDA replaces this exact documented marker at injection time with'),
+              ("    // TornPDA's GM_* value compatibility layer is backed by the page's\n"
+               "    // localStorage. Never read API-key material through it. TornPDA should\n"
+               "    // use its injected API key; any manually entered override is session-only.",
+               "    // TornPDA supplies its configured API key through runtime injection.\n"
+               "    // Do not persist a manual fallback through TornPDA's page-local GM layer."),
+              ('    // Never route TornPDA secrets through GM_setValue because TornPDA maps\n'
+               '    // that compatibility API to page localStorage. A manual override remains\n'
+               '    // only in this userscript execution; normal TornPDA use relies on injection.',
+               '    // A manual TornPDA override is a session-only fallback. Normal TornPDA\n'
+               '    // use relies on the app replacing the documented injection token.'),
+          ]
 
-          grep -q '^// @version      2.15.3$' torn-analytics.user.js
-          grep -q "const VERSION = '2.15.3';" torn-analytics.user.js
-          grep -q "'###PDA-APIKEY###';" torn-analytics.user.js
-          if grep -q "'_###PDA-APIKEY###_';" torn-analytics.user.js; then
-            echo "Wrapped TornPDA API-key token is still present."
-            exit 1
-          fi
+          for old, new in replacements:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one occurrence of replacement source; found {count}: {old!r}')
+              source = source.replace(old, new, 1)
 
-      - name: Commit exact personal live artifact
+          actual = blob_sha(source)
+          if actual != target_sha:
+              raise SystemExit(f'Exact artifact verification failed: {actual} != {target_sha}')
+
+          if "'_###PDA-APIKEY###_';" in source:
+              raise SystemExit('Wrapped TornPDA API-key token remains present.')
+          if source.count("'###PDA-APIKEY###';") != 1:
+              raise SystemExit('Exact bare TornPDA API-key token is not present exactly once.')
+
+          path.write_text(source, encoding='utf-8')
+          print('Exact validated v2.15.3 artifact reproduced:', actual)
+          PY
+
+      - name: Commit exact personal live artifact to candidate branch
         shell: bash
         run: |
           set -euo pipefail
@@ -71,8 +91,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- torn-analytics.user.js
           git commit -m "Publish Torn Analytics v2.15.3 personal live test"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git push origin HEAD:"${{ github.head_ref }}"
-          else
-            git push origin main
-          fi
+          git push origin HEAD:"${{ github.head_ref }}"
