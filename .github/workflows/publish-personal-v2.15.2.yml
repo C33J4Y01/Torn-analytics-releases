@@ -28,7 +28,7 @@ jobs:
           path = Path('torn-analytics.user.js')
           source = path.read_text(encoding='utf-8')
           base_blob = '1a1dfc4f64a9d1c3db397e2d6c88b2b4ad7aafef'
-          target_blob = 'b61fecd604e97c9a580854e3b73b84a88a2ca681'
+          target_blob = 'b14a200b34cc8055c7276b5229c582504f97f4d9'
 
           def git_blob_sha(text):
               data = text.encode('utf-8')
