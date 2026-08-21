@@ -1,0 +1,348 @@
+name: Publish corrected personal Torn Analytics v2.15.2 native key persistence
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - personal-v2.15.2-native-key-corrected.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out personal live channel
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
+
+      - name: Reproduce exact validated development blob
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import hashlib
+
+          path = Path('torn-analytics.user.js')
+          source = path.read_text(encoding='utf-8')
+          base_blob = 'b14a200b34cc8055c7276b5229c582504f97f4d9'
+          target_blob = '84b9322523ce62b63c83065b924dbc53a634e926'
+
+          def git_blob_sha(text):
+              data = text.encode('utf-8')
+              return hashlib.sha1(f'blob {len(data)}\0'.encode('ascii') + data).hexdigest()
+
+          current = git_blob_sha(source)
+          if current == target_blob:
+              print('Personal live channel already matches validated v2.15.2.')
+              raise SystemExit(0)
+          if current != base_blob:
+              raise SystemExit(f'Unexpected release baseline: {current}')
+
+          marker_old = "    '###PDA-APIKEY###';"
+          marker_new = "    '_###PDA-APIKEY###_';"
+          if source.count(marker_old) != 1:
+              raise SystemExit('Expected exactly one unwrapped TornPDA marker in release baseline')
+          source = source.replace(marker_old, marker_new, 1)
+
+          replacement = r'''  function userscriptValueStorageAvailable() {
+    return (
+      typeof GM_getValue === 'function' &&
+      typeof GM_setValue === 'function'
+    );
+  }
+
+  function apiKeyStorageBackend() {
+    if (
+      typeof PDA_storage !== 'undefined' &&
+      PDA_storage &&
+      typeof PDA_storage.get === 'function' &&
+      typeof PDA_storage.set === 'function'
+    ) {
+      return 'pda_storage';
+    }
+
+    if (
+      tornPdaRuntimeDetected()
+    ) {
+      return null;
+    }
+
+    if (
+      userscriptValueStorageAvailable()
+    ) {
+      return 'gm_values';
+    }
+
+    return null;
+  }
+
+  async function readStoredApiKey(
+    backend
+  ) {
+    if (
+      backend === 'pda_storage'
+    ) {
+      return PDA_storage.get(
+        API_KEY_STORAGE,
+        ''
+      );
+    }
+
+    if (
+      backend === 'gm_values'
+    ) {
+      return Promise.resolve(
+        GM_getValue(
+          API_KEY_STORAGE,
+          ''
+        )
+      );
+    }
+
+    return '';
+  }
+
+  async function writeStoredApiKey(
+    backend,
+    value
+  ) {
+    if (
+      backend === 'pda_storage'
+    ) {
+      await PDA_storage.set(
+        API_KEY_STORAGE,
+        value
+      );
+      return;
+    }
+
+    if (
+      backend === 'gm_values'
+    ) {
+      await Promise.resolve(
+        GM_setValue(
+          API_KEY_STORAGE,
+          value
+        )
+      );
+    }
+  }
+
+  function removeLegacyApiKey() {
+    try {
+      localStorage.removeItem(
+        API_KEY_STORAGE
+      );
+    } catch (_) {}
+  }
+
+  async function loadSecureApiKey() {
+    if (
+      sessionApiKey
+    ) {
+      return sessionApiKey;
+    }
+
+    const backend =
+      apiKeyStorageBackend();
+
+    if (
+      backend
+    ) {
+      try {
+        const stored =
+          await readStoredApiKey(
+            backend
+          );
+
+        if (
+          typeof stored === 'string' &&
+          stored.trim()
+        ) {
+          sessionApiKey =
+            stored.trim();
+
+          removeLegacyApiKey();
+
+          return sessionApiKey;
+        }
+      } catch (error) {
+        console.warn(
+          '[Torn Analytics] API-key read failed:',
+          error
+        );
+      }
+    }
+
+    // One-time migration path for keys saved by older builds. When TornPDA
+    // native storage exists, migrate the legacy page-local copy into
+    // PDA_storage before removing it.
+    try {
+      const legacy =
+        localStorage.getItem(
+          API_KEY_STORAGE
+        );
+
+      if (
+        legacy?.trim()
+      ) {
+        sessionApiKey =
+          legacy.trim();
+
+        if (
+          backend
+        ) {
+          try {
+            await writeStoredApiKey(
+              backend,
+              sessionApiKey
+            );
+          } catch (error) {
+            console.warn(
+              '[Torn Analytics] API-key migration failed; key will remain session-only:',
+              error
+            );
+          }
+        }
+
+        removeLegacyApiKey();
+
+        return sessionApiKey;
+      }
+    } catch (error) {
+      console.warn(
+        '[Torn Analytics] Legacy API-key migration failed:',
+        error
+      );
+    }
+
+    return '';
+  }
+
+  async function saveSecureApiKey(
+    apiKey
+  ) {
+    const normalized =
+      String(
+        apiKey ||
+        ''
+      ).trim();
+
+    if (
+      !normalized
+    ) {
+      return '';
+    }
+
+    sessionApiKey =
+      normalized;
+
+    const backend =
+      apiKeyStorageBackend();
+
+    if (
+      backend
+    ) {
+      try {
+        await writeStoredApiKey(
+          backend,
+          sessionApiKey
+        );
+
+        const verified =
+          await readStoredApiKey(
+            backend
+          );
+
+        if (
+          String(verified || '').trim() !==
+          sessionApiKey
+        ) {
+          throw new Error(
+            'saved API key could not be verified'
+          );
+        }
+      } catch (error) {
+        console.warn(
+          '[Torn Analytics] API-key save failed; key will remain session-only:',
+          error
+        );
+      }
+    }
+
+    removeLegacyApiKey();
+
+    return sessionApiKey;
+  }
+
+  async function clearSecureApiKey() {
+    sessionApiKey = '';
+
+    const backend =
+      apiKeyStorageBackend();
+
+    if (
+      backend === 'pda_storage'
+    ) {
+      try {
+        await PDA_storage.set(
+          API_KEY_STORAGE,
+          ''
+        );
+      } catch (error) {
+        console.warn(
+          '[Torn Analytics] API-key delete failed:',
+          error
+        );
+      }
+    } else if (
+      backend === 'gm_values' &&
+      typeof GM_deleteValue === 'function'
+    ) {
+      try {
+        await Promise.resolve(
+          GM_deleteValue(
+            API_KEY_STORAGE
+          )
+        );
+      } catch (error) {
+        console.warn(
+          '[Torn Analytics] API-key delete failed:',
+          error
+        );
+      }
+    }
+
+    removeLegacyApiKey();
+  }
+
+'''
+
+          start_marker = '  function userscriptValueStorageAvailable() {'
+          end_marker = '  function pad2(n) {'
+          start = source.index(start_marker)
+          end = source.index(end_marker, start)
+          source = source[:start] + replacement + source[end:]
+
+          actual = git_blob_sha(source)
+          if actual != target_blob:
+              raise SystemExit(f'Exact blob verification failed: {actual} != {target_blob}')
+
+          path.write_text(source, encoding='utf-8')
+          print('Exact validated v2.15.2 blob reproduced:', actual)
+          PY
+
+      - name: Commit corrected personal v2.15.2 live update
+        run: |
+          if git diff --quiet -- torn-analytics.user.js; then
+            echo "Personal live channel already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- torn-analytics.user.js
+          git commit -m "Publish corrected personal Torn Analytics v2.15.2"
+          git push origin main
