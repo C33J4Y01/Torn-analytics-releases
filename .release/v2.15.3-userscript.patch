@@ -1,0 +1,304 @@
+diff --git a/torn-analytics.user.js b/torn-analytics.user.js
+--- a/torn-analytics.user.js
++++ b/torn-analytics.user.js
+@@ -1,7 +1,7 @@
+ // ==UserScript==
+ // @name         Torn Analytics
+ // @namespace    chatgpt.openai.com/torn-tools
+-// @version      2.15.2
++// @version      2.15.3
+ // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
+ // @author       Personal use
+ // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
+@@ -22,7 +22,7 @@
+   // VERSION / CONSTANTS
+   // ============================================================
+ 
+-  const VERSION = '2.15.2';
++  const VERSION = '2.15.3';
+ 
+   const API_BASE = 'https://api.torn.com/v2';
+ 
+@@ -168,11 +168,11 @@
+   let automaticLogSyncSchedulerInstalled = false;
+   let automaticLogSyncLeaseOwner = '';
+ 
+-  // TornPDA replaces this documented marker at injection time with
++  // TornPDA replaces this exact documented marker at injection time with
+   // the API key already stored by the app. Outside TornPDA the
+   // marker remains unchanged and is treated as unavailable.
+   const TORN_PDA_API_KEY_SOURCE =
+-    '_###PDA-APIKEY###_';
++    '###PDA-APIKEY###';
+ 
+   const injectedPdaApiKey =
+     TORN_PDA_API_KEY_SOURCE.includes(
+@@ -222,83 +222,6 @@
+     );
+   }
+ 
+-  function apiKeyStorageBackend() {
+-    if (
+-      typeof PDA_storage !== 'undefined' &&
+-      PDA_storage &&
+-      typeof PDA_storage.get === 'function' &&
+-      typeof PDA_storage.set === 'function'
+-    ) {
+-      return 'pda_storage';
+-    }
+-
+-    if (
+-      tornPdaRuntimeDetected()
+-    ) {
+-      return null;
+-    }
+-
+-    if (
+-      userscriptValueStorageAvailable()
+-    ) {
+-      return 'gm_values';
+-    }
+-
+-    return null;
+-  }
+-
+-  async function readStoredApiKey(
+-    backend
+-  ) {
+-    if (
+-      backend === 'pda_storage'
+-    ) {
+-      return PDA_storage.get(
+-        API_KEY_STORAGE,
+-        ''
+-      );
+-    }
+-
+-    if (
+-      backend === 'gm_values'
+-    ) {
+-      return Promise.resolve(
+-        GM_getValue(
+-          API_KEY_STORAGE,
+-          ''
+-        )
+-      );
+-    }
+-
+-    return '';
+-  }
+-
+-  async function writeStoredApiKey(
+-    backend,
+-    value
+-  ) {
+-    if (
+-      backend === 'pda_storage'
+-    ) {
+-      await PDA_storage.set(
+-        API_KEY_STORAGE,
+-        value
+-      );
+-      return;
+-    }
+-
+-    if (
+-      backend === 'gm_values'
+-    ) {
+-      await Promise.resolve(
+-        GM_setValue(
+-          API_KEY_STORAGE,
+-          value
+-        )
+-      );
+-    }
+-  }
+-
+   function removeLegacyApiKey() {
+     try {
+       localStorage.removeItem(
+@@ -314,16 +237,26 @@
+       return sessionApiKey;
+     }
+ 
+-    const backend =
+-      apiKeyStorageBackend();
++    removeLegacyApiKey();
+ 
++    // TornPDA supplies its configured API key through runtime injection.
++    // Do not persist a manual fallback through TornPDA's page-local GM layer.
+     if (
+-      backend
++      tornPdaRuntimeDetected()
++    ) {
++      return '';
++    }
++
++    if (
++      userscriptValueStorageAvailable()
+     ) {
+       try {
+         const stored =
+-          await readStoredApiKey(
+-            backend
++          await Promise.resolve(
++            GM_getValue(
++              API_KEY_STORAGE,
++              ''
++            )
+           );
+ 
+         if (
+@@ -339,15 +272,12 @@
+         }
+       } catch (error) {
+         console.warn(
+-          '[Torn Analytics] API-key read failed:',
++          '[Torn Analytics] Secure API-key read failed:',
+           error
+         );
+       }
+     }
+ 
+-    // One-time migration path for keys saved by older builds. When TornPDA
+-    // native storage exists, migrate the legacy page-local copy into
+-    // PDA_storage before removing it.
+     try {
+       const legacy =
+         localStorage.getItem(
+@@ -361,16 +291,18 @@
+           legacy.trim();
+ 
+         if (
+-          backend
++          typeof GM_setValue === 'function'
+         ) {
+           try {
+-            await writeStoredApiKey(
+-              backend,
+-              sessionApiKey
++            await Promise.resolve(
++              GM_setValue(
++                API_KEY_STORAGE,
++                sessionApiKey
++              )
+             );
+           } catch (error) {
+             console.warn(
+-              '[Torn Analytics] API-key migration failed; key will remain session-only:',
++              '[Torn Analytics] Secure API-key migration failed; key will remain session-only:',
+               error
+             );
+           }
+@@ -408,66 +340,48 @@
+     sessionApiKey =
+       normalized;
+ 
+-    const backend =
+-      apiKeyStorageBackend();
++    removeLegacyApiKey();
+ 
++    // A manual TornPDA override is a session-only fallback. Normal TornPDA
++    // use relies on the app replacing the documented injection token.
+     if (
+-      backend
++      tornPdaRuntimeDetected()
++    ) {
++      return sessionApiKey;
++    }
++
++    if (
++      typeof GM_setValue === 'function'
+     ) {
+       try {
+-        await writeStoredApiKey(
+-          backend,
+-          sessionApiKey
++        await Promise.resolve(
++          GM_setValue(
++            API_KEY_STORAGE,
++            sessionApiKey
++          )
+         );
+-
+-        const verified =
+-          await readStoredApiKey(
+-            backend
+-          );
+-
+-        if (
+-          String(verified || '').trim() !==
+-          sessionApiKey
+-        ) {
+-          throw new Error(
+-            'saved API key could not be verified'
+-          );
+-        }
+       } catch (error) {
+         console.warn(
+-          '[Torn Analytics] API-key save failed; key will remain session-only:',
++          '[Torn Analytics] Secure API-key save failed; key will remain session-only:',
+           error
+         );
+       }
+     }
+ 
+-    removeLegacyApiKey();
+-
+     return sessionApiKey;
+   }
+ 
+   async function clearSecureApiKey() {
+     sessionApiKey = '';
+-
+-    const backend =
+-      apiKeyStorageBackend();
++    removeLegacyApiKey();
+ 
+     if (
+-      backend === 'pda_storage'
++      tornPdaRuntimeDetected()
+     ) {
+-      try {
+-        await PDA_storage.set(
+-          API_KEY_STORAGE,
+-          ''
+-        );
+-      } catch (error) {
+-        console.warn(
+-          '[Torn Analytics] API-key delete failed:',
+-          error
+-        );
+-      }
+-    } else if (
+-      backend === 'gm_values' &&
++      return;
++    }
++
++    if (
+       typeof GM_deleteValue === 'function'
+     ) {
+       try {
+@@ -478,13 +392,11 @@
+         );
+       } catch (error) {
+         console.warn(
+-          '[Torn Analytics] API-key delete failed:',
++          '[Torn Analytics] Secure API-key delete failed:',
+           error
+         );
+       }
+     }
+-
+-    removeLegacyApiKey();
+   }
+ 
+   function pad2(n) {
+@@ -925,6 +837,7 @@
+       ? `${hours}h ${remMinutes}m`
+       : `${hours}h`;
+   }
++
+   // ============================================================
+   // INDEXEDDB
+   // ============================================================
