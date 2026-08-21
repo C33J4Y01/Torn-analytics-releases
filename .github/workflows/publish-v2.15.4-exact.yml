@@ -1,23 +1,22 @@
 name: Publish Torn Analytics v2.15.4 exact
 
 on:
-  push:
+  pull_request:
     branches:
       - main
-    paths:
-      - .release/v2.15.4.trigger
 
 permissions:
   contents: write
 
 jobs:
   publish:
+    if: github.head_ref == 'release/v2.15.4-personal-diagnostic'
     runs-on: ubuntu-latest
     steps:
-      - name: Check out personal live channel
+      - name: Check out personal release candidate
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: main
+          ref: release/v2.15.4-personal-diagnostic
 
       - name: Apply exact validated userscript patch
         shell: bash
@@ -28,12 +27,12 @@ jobs:
           CURRENT_SHA="$(git hash-object torn-analytics.user.js)"
 
           if [ "$CURRENT_SHA" = "$TARGET_SHA" ]; then
-            echo "Live userscript already matches validated v2.15.4."
+            echo "Candidate userscript already matches validated v2.15.4."
             exit 0
           fi
 
           if [ "$CURRENT_SHA" != "$BASE_SHA" ]; then
-            echo "Unexpected live baseline: $CURRENT_SHA"
+            echo "Unexpected candidate baseline: $CURRENT_SHA"
             exit 1
           fi
 
@@ -50,7 +49,7 @@ jobs:
           grep -q "const VERSION = '2.15.4';" torn-analytics.user.js
           grep -q '<b>Diagnostic:</b>' torn-analytics.user.js
 
-      - name: Commit exact personal live artifact
+      - name: Commit exact personal release candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -62,4 +61,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- torn-analytics.user.js
           git commit -m "Publish Torn Analytics v2.15.4 personal diagnostic"
-          git push origin main
+          git push origin HEAD:release/v2.15.4-personal-diagnostic
