@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.15.0
+// @version      2.15.1
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.15.0';
+  const VERSION = '2.15.1';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -168,11 +168,11 @@
   let automaticLogSyncSchedulerInstalled = false;
   let automaticLogSyncLeaseOwner = '';
 
-  // TornPDA replaces this exact placeholder at injection time with
+  // TornPDA replaces this documented marker at injection time with
   // the API key already stored by the app. Outside TornPDA the
-  // placeholder remains unchanged and is treated as unavailable.
+  // marker remains unchanged and is treated as unavailable.
   const TORN_PDA_API_KEY_SOURCE =
-    '###PDA-APIKEY###';
+    '_###PDA-APIKEY###_';
 
   const injectedPdaApiKey =
     TORN_PDA_API_KEY_SOURCE.includes(
