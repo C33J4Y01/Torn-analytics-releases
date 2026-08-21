@@ -1,17 +1,16 @@
 name: Publish Torn Analytics v2.15.4 exact
 
 on:
-  push:
+  pull_request:
     branches:
-      - release/v2.15.4-personal-diagnostic
-    paths:
-      - .release/v2.15.4.trigger
+      - main
 
 permissions:
   contents: write
 
 jobs:
   publish:
+    if: github.head_ref == 'release/v2.15.4-personal-diagnostic'
     runs-on: ubuntu-latest
     steps:
       - name: Check out personal release candidate
@@ -50,7 +49,7 @@ jobs:
           grep -q "const VERSION = '2.15.4';" torn-analytics.user.js
           grep -q '<b>Diagnostic:</b>' torn-analytics.user.js
 
-      - name: Commit exact candidate artifact
+      - name: Commit exact personal release candidate
         shell: bash
         run: |
           set -euo pipefail
