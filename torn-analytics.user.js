@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.14.1
+// @version      2.14.2
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.14.1';
+  const VERSION = '2.14.2';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -9878,6 +9878,12 @@
         tracker
       );
 
+    latestAnalysis.training_cooldowns =
+      await loadTrainingCooldownsSnapshot(
+        apiKey,
+        tracker
+      );
+
     latestAnalysis.activity =
       buildOverallActivity(
         latestLogs,
@@ -9894,6 +9900,7 @@
       buildTrainingReadiness(
         latestAnalysis.stat_growth,
         latestAnalysis.resource_bars,
+        latestAnalysis.training_cooldowns,
         Date.now(),
         typeof location !== 'undefined'
           ? location.href
@@ -14190,6 +14197,121 @@
   // TRAINING READINESS
   // ============================================================
 
+  function normalizeTrainingCooldownsResponse(
+    json,
+    fetchedAt = Date.now()
+  ) {
+    const source =
+      json?.cooldowns;
+
+    if (
+      !source ||
+      typeof source !== 'object' ||
+      Array.isArray(source)
+    ) {
+      throw new Error(
+        'Torn API returned an invalid cooldowns response.'
+      );
+    }
+
+    const normalize =
+      value => {
+        const seconds =
+          Number(value);
+
+        return Number.isSafeInteger(seconds) &&
+          seconds >= 0 &&
+          seconds <= 30 * 24 * 60 * 60
+          ? seconds
+          : null;
+      };
+
+    const drug =
+      normalize(source.drug);
+    const booster =
+      normalize(source.booster);
+
+    if (
+      drug === null ||
+      booster === null
+    ) {
+      throw new Error(
+        'Torn API returned invalid drug or booster cooldown data.'
+      );
+    }
+
+    const safeFetchedAt =
+      Number.isFinite(Number(fetchedAt))
+        ? Number(fetchedAt)
+        : Date.now();
+
+    return {
+      status: 'available',
+      fetched_at:
+        safeFetchedAt,
+      drug_ready_at:
+        Math.ceil(safeFetchedAt / 1000) + drug,
+      booster_ready_at:
+        Math.ceil(safeFetchedAt / 1000) + booster
+    };
+  }
+
+  async function fetchTrainingCooldownsSnapshot(
+    apiKey,
+    tracker
+  ) {
+    const json =
+      await apiFetchJson(
+        `${API_BASE}/user/cooldowns`,
+        apiKey,
+        tracker
+      );
+
+    return normalizeTrainingCooldownsResponse(
+      json,
+      Date.now()
+    );
+  }
+
+  async function loadTrainingCooldownsSnapshot(
+    apiKey,
+    tracker
+  ) {
+    const normalizedKey =
+      String(apiKey || '').trim();
+
+    if (!normalizedKey) {
+      return {
+        status: 'unavailable',
+        reason: 'api_key_unavailable',
+        fetched_at: null
+      };
+    }
+
+    tracker?.setStage(
+      'Refreshing training cooldowns…',
+      'One live Torn API request'
+    );
+
+    try {
+      return await fetchTrainingCooldownsSnapshot(
+        normalizedKey,
+        tracker
+      );
+    } catch (error) {
+      console.warn(
+        'Training cooldown refresh failed.',
+        error
+      );
+
+      return {
+        status: 'unavailable',
+        reason: 'api_request_failed',
+        fetched_at: null
+      };
+    }
+  }
+
   function trainingReadinessQuarterHour(
     nowMs = Date.now()
   ) {
@@ -14315,6 +14437,7 @@
   function buildTrainingReadiness(
     growth,
     bars,
+    cooldowns,
     nowMs = Date.now(),
     pageUrl = ''
   ) {
@@ -14396,6 +14519,16 @@
         Number.isFinite(happiness) &&
         Number.isFinite(happinessMaximum) &&
         happiness > happinessMaximum,
+      drug_ready_at:
+        cooldowns?.status === 'available' &&
+        Number.isSafeInteger(Number(cooldowns.drug_ready_at))
+          ? Number(cooldowns.drug_ready_at)
+          : null,
+      booster_ready_at:
+        cooldowns?.status === 'available' &&
+        Number.isSafeInteger(Number(cooldowns.booster_ready_at))
+          ? Number(cooldowns.booster_ready_at)
+          : null,
       quarter_hour:
         quarterHour,
       models
@@ -14452,10 +14585,16 @@
   ) {
     const safe =
       Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours =
+      Math.floor(safe / 3600);
     const minutes =
       Math.floor(safe / 60);
     const remainder =
       safe % 60;
+
+    if (hours > 0) {
+      return `${hours}h ${Math.floor((safe % 3600) / 60)}m`;
+    }
 
     return `${minutes}m ${remainder}s`;
   }
@@ -14522,6 +14661,30 @@
       </div>
     `;
 
+    const cooldownMetric =
+      (label, readyAt) => {
+        const available =
+          Number.isSafeInteger(Number(readyAt));
+        const remaining =
+          available
+            ? Math.max(
+                0,
+                Number(readyAt) -
+                Math.floor(Date.now() / 1000)
+              )
+            : null;
+
+        return `
+          <div class="ta-metric-card">
+            <div class="ta-metric-label">${escapeActivityHtml(label)}</div>
+            <div class="ta-metric-value" ${available ? `data-ta-cooldown-ready-at="${Number(readyAt)}"` : ''}>
+              ${available ? (remaining <= 0 ? 'Ready' : escapeActivityHtml(trainingReadinessFormatDuration(remaining))) : '—'}
+            </div>
+            <div class="ta-metric-note">${available ? 'Live from Torn' : 'Live cooldown unavailable'}</div>
+          </div>
+        `;
+      };
+
     return `
       <details class="ta-section ta-training-readiness-section" ${readiness.page_is_gym ? 'open' : ''}>
         <summary class="ta-section-summary-row">
@@ -14541,6 +14704,8 @@
             ${activityDashboardMetric('Live Happiness', readiness.happiness === null ? '—' : Number(readiness.happiness).toLocaleString(), readiness.happiness_maximum === null ? 'Live from Torn' : `${Number(readiness.happiness_maximum).toLocaleString()} maximum`)}
             ${activityDashboardMetric('Last observed gym', statGrowthGymName(readiness.gym_id), readiness.last_training_timestamp ? 'From your latest valid gym log' : 'No valid gym log yet')}
             ${quarterHourMetric}
+            ${cooldownMetric('Drug cooldown', readiness.drug_ready_at)}
+            ${cooldownMetric('Booster cooldown', readiness.booster_ready_at)}
           </div>
 
           <div class="ta-training-controls">
@@ -14603,6 +14768,33 @@
         ) {
           clock.textContent =
             duration;
+        }
+
+        for (
+          const cooldown
+          of section.querySelectorAll(
+            '[data-ta-cooldown-ready-at]'
+          )
+        ) {
+          const readyAt =
+            Number(
+              cooldown.getAttribute(
+                'data-ta-cooldown-ready-at'
+              )
+            );
+          const remaining =
+            Math.max(
+              0,
+              readyAt -
+              Math.floor(Date.now() / 1000)
+            );
+
+          cooldown.textContent =
+            remaining <= 0
+              ? 'Ready'
+              : trainingReadinessFormatDuration(
+                  remaining
+                );
         }
 
         setTimeout(
