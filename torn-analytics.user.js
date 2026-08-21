@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.15.4
+// @version      2.15.5
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.15.4';
+  const VERSION = '2.15.5';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -222,6 +222,83 @@
     );
   }
 
+  function apiKeyStorageBackend() {
+    if (
+      typeof PDA_storage !== 'undefined' &&
+      PDA_storage &&
+      typeof PDA_storage.get === 'function' &&
+      typeof PDA_storage.set === 'function'
+    ) {
+      return 'pda_storage';
+    }
+
+    if (
+      tornPdaRuntimeDetected()
+    ) {
+      return null;
+    }
+
+    if (
+      userscriptValueStorageAvailable()
+    ) {
+      return 'gm_values';
+    }
+
+    return null;
+  }
+
+  async function readStoredApiKey(
+    backend
+  ) {
+    if (
+      backend === 'pda_storage'
+    ) {
+      return PDA_storage.get(
+        API_KEY_STORAGE,
+        ''
+      );
+    }
+
+    if (
+      backend === 'gm_values'
+    ) {
+      return Promise.resolve(
+        GM_getValue(
+          API_KEY_STORAGE,
+          ''
+        )
+      );
+    }
+
+    return '';
+  }
+
+  async function writeStoredApiKey(
+    backend,
+    value
+  ) {
+    if (
+      backend === 'pda_storage'
+    ) {
+      await PDA_storage.set(
+        API_KEY_STORAGE,
+        value
+      );
+      return;
+    }
+
+    if (
+      backend === 'gm_values'
+    ) {
+      await Promise.resolve(
+        GM_setValue(
+          API_KEY_STORAGE,
+          value
+        )
+      );
+    }
+  }
+
   function removeLegacyApiKey() {
     try {
       localStorage.removeItem(
@@ -239,24 +316,16 @@
 
     removeLegacyApiKey();
 
-    // TornPDA supplies its configured API key through runtime injection.
-    // Do not persist a manual fallback through TornPDA's page-local GM layer.
-    if (
-      tornPdaRuntimeDetected()
-    ) {
-      return '';
-    }
+    const backend =
+      apiKeyStorageBackend();
 
     if (
-      userscriptValueStorageAvailable()
+      backend
     ) {
       try {
         const stored =
-          await Promise.resolve(
-            GM_getValue(
-              API_KEY_STORAGE,
-              ''
-            )
+          await readStoredApiKey(
+            backend
           );
 
         if (
@@ -278,6 +347,14 @@
       }
     }
 
+    // TornPDA's native store is the only persistent fallback allowed there.
+    // Never fall through to its page-local GM compatibility layer.
+    if (
+      tornPdaRuntimeDetected()
+    ) {
+      return '';
+    }
+
     try {
       const legacy =
         localStorage.getItem(
@@ -290,15 +367,11 @@
         sessionApiKey =
           legacy.trim();
 
-        if (
-          typeof GM_setValue === 'function'
-        ) {
+        if (backend) {
           try {
-            await Promise.resolve(
-              GM_setValue(
-                API_KEY_STORAGE,
-                sessionApiKey
-              )
+            await writeStoredApiKey(
+              backend,
+              sessionApiKey
             );
           } catch (error) {
             console.warn(
@@ -342,24 +415,29 @@
 
     removeLegacyApiKey();
 
-    // A manual TornPDA override is a session-only fallback. Normal TornPDA
-    // use relies on the app replacing the documented injection token.
-    if (
-      tornPdaRuntimeDetected()
-    ) {
-      return sessionApiKey;
-    }
+    const backend =
+      apiKeyStorageBackend();
 
-    if (
-      typeof GM_setValue === 'function'
-    ) {
+    if (backend) {
       try {
-        await Promise.resolve(
-          GM_setValue(
-            API_KEY_STORAGE,
-            sessionApiKey
-          )
+        await writeStoredApiKey(
+          backend,
+          sessionApiKey
         );
+
+        const verified =
+          await readStoredApiKey(
+            backend
+          );
+
+        if (
+          String(verified || '').trim() !==
+          sessionApiKey
+        ) {
+          throw new Error(
+            'saved API key could not be verified'
+          );
+        }
       } catch (error) {
         console.warn(
           '[Torn Analytics] Secure API-key save failed; key will remain session-only:',
@@ -375,13 +453,25 @@
     sessionApiKey = '';
     removeLegacyApiKey();
 
-    if (
-      tornPdaRuntimeDetected()
-    ) {
-      return;
-    }
+    const backend =
+      apiKeyStorageBackend();
 
     if (
+      backend === 'pda_storage'
+    ) {
+      try {
+        await PDA_storage.set(
+          API_KEY_STORAGE,
+          ''
+        );
+      } catch (error) {
+        console.warn(
+          '[Torn Analytics] Secure API-key delete failed:',
+          error
+        );
+      }
+    } else if (
+      backend === 'gm_values' &&
       typeof GM_deleteValue === 'function'
     ) {
       try {
