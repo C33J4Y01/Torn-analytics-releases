@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.15.5
+// @version      2.15.6
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.15.5';
+  const VERSION = '2.15.6';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -14717,7 +14717,11 @@
     `;
 
     const cooldownMetric = (label, readyAt) => {
-      const available = Number.isSafeInteger(Number(readyAt));
+      const available =
+        readyAt !== null &&
+        readyAt !== undefined &&
+        Number.isSafeInteger(Number(readyAt)) &&
+        Number(readyAt) > 0;
       const remaining = available
         ? Math.max(0, Number(readyAt) - Math.floor(Date.now() / 1000))
         : null;
@@ -14748,8 +14752,8 @@
           <div class="ta-training-status" data-ta-training-recommendation>${recommendationHtml}</div>
 
           <div class="ta-metric-grid">
-            ${activityDashboardMetric('Live Energy', readiness.energy === null ? '—' : Number(readiness.energy).toLocaleString(), 'Live from Torn')}
-            ${activityDashboardMetric('Live Happiness', readiness.happiness === null ? '—' : Number(readiness.happiness).toLocaleString(), readiness.happiness_maximum === null ? 'Live from Torn' : `${Number(readiness.happiness_maximum).toLocaleString()} maximum`)}
+            ${activityDashboardMetric('Live Energy', readiness.energy === null ? '—' : Number(readiness.energy).toLocaleString(), readiness.energy === null ? 'Live Energy unavailable' : 'Live from Torn')}
+            ${activityDashboardMetric('Live Happiness', readiness.happiness === null ? '—' : Number(readiness.happiness).toLocaleString(), readiness.happiness === null ? 'Live Happiness unavailable' : readiness.happiness_maximum === null ? 'Live from Torn' : `${Number(readiness.happiness_maximum).toLocaleString()} maximum`)}
             ${activityDashboardMetric('Last observed gym', statGrowthGymName(readiness.gym_id), readiness.last_training_timestamp ? 'From your latest valid gym log' : 'No valid gym log yet')}
             ${quarterHourMetric}
             ${cooldownMetric('Drug cooldown', readiness.drug_ready_at)}
@@ -20689,8 +20693,7 @@
 
             await runStoredAnalysis(
               false,
-              null,
-              false
+              null
             );
           }
         })().catch(
@@ -21009,8 +21012,7 @@
 
     async function runStoredAnalysis(
       showCompletionAlert = true,
-      restoreScrollTop = null,
-      allowLiveApi = true
+      restoreScrollTop = null
     ) {
       setBusy(
         true
@@ -21018,9 +21020,7 @@
 
       try {
         const optionalApiKey =
-          allowLiveApi
-            ? await getOptionalApiKey()
-            : null;
+          await getOptionalApiKey();
 
         await analyzeStoredLogs(
           tracker,
@@ -21643,13 +21643,12 @@
     ) {
       tracker.setStage(
         'Restoring dashboard',
-        'Loading and analyzing stored encrypted history locally...'
+        'Loading stored history and refreshing live resources...'
       );
 
       await runStoredAnalysis(
         false,
-        restoreState?.scroll_top ?? null,
-        false
+        restoreState?.scroll_top ?? null
       );
     } else if (
       scrollContainer &&
