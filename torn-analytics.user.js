@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.15.7
+// @version      2.15.8
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.15.7';
+  const VERSION = '2.15.8';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -17425,9 +17425,19 @@
     fullAt,
     now = Date.now()
   ) {
+    const normalizedCurrent =
+      Number(
+        current
+      );
+
+    const normalizedMaximum =
+      Number(
+        maximum
+      );
+
     const overMaximum =
-      Number(current) -
-      Number(maximum);
+      normalizedCurrent -
+      normalizedMaximum;
 
     if (
       Number.isFinite(overMaximum) &&
@@ -17441,10 +17451,30 @@
       );
     }
 
-    return resourceDashboardEtaText(
-      fullAt,
-      now
-    );
+    if (
+      Number.isFinite(normalizedCurrent) &&
+      Number.isFinite(normalizedMaximum) &&
+      normalizedCurrent >= normalizedMaximum
+    ) {
+      return 'Full now';
+    }
+
+    const etaText =
+      resourceDashboardEtaText(
+        fullAt,
+        now
+      );
+
+    if (
+      etaText === 'Full now' &&
+      Number.isFinite(normalizedCurrent) &&
+      Number.isFinite(normalizedMaximum) &&
+      normalizedCurrent < normalizedMaximum
+    ) {
+      return 'Expected full now · refresh to confirm';
+    }
+
+    return etaText;
   }
 
   function resourceDashboardSourceLabel(
