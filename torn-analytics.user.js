@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.15.6
+// @version      2.15.7
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.15.6';
+  const VERSION = '2.15.7';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -17268,6 +17268,52 @@
       : '—';
   }
 
+  function resourceDashboardFormatPercentage(
+    amount,
+    total
+  ) {
+    const normalizedAmount =
+      Number(
+        amount
+      );
+
+    const normalizedTotal =
+      Number(
+        total
+      );
+
+    if (
+      !Number.isFinite(normalizedAmount) ||
+      !Number.isFinite(normalizedTotal) ||
+      normalizedAmount < 0 ||
+      normalizedTotal <= 0
+    ) {
+      return '0%';
+    }
+
+    const percentage =
+      Math.max(
+        0,
+        Math.min(
+          100,
+          (
+            normalizedAmount /
+            normalizedTotal
+          ) *
+            100
+        )
+      );
+
+    return (
+      Number(
+        percentage.toFixed(
+          1
+        )
+      ).toLocaleString() +
+      '%'
+    );
+  }
+
   function resourceDashboardFormatDuration(
     seconds
   ) {
@@ -17461,7 +17507,8 @@
   function resourceDashboardBreakdown(
     events,
     resource,
-    flow
+    flow,
+    kind = ''
   ) {
     const grouped =
       new Map();
@@ -17472,7 +17519,11 @@
     ) {
       if (
         event?.resource !== resource ||
-        event?.flow !== flow
+        event?.flow !== flow ||
+        (
+          kind &&
+          event?.kind !== kind
+        )
       ) {
         continue;
       }
@@ -17521,10 +17572,27 @@
 
   function renderResourceDashboardBreakdown(
     rows,
-    emptyText
+    emptyText,
+    tone = 'neutral'
   ) {
+    const positiveRows =
+      (
+        rows ||
+        []
+      ).filter(
+        row =>
+          Number.isFinite(
+            Number(
+              row?.amount
+            )
+          ) &&
+          Number(
+            row.amount
+          ) > 0
+      );
+
     if (
-      !rows.length
+      !positiveRows.length
     ) {
       return `
         <div class="ta-resource-empty">
@@ -17533,33 +17601,89 @@
       `;
     }
 
-    const maximum =
-      Math.max(
-        1,
-        ...rows.map(
-          row =>
+    const safeTone =
+      [
+        'gain',
+        'use',
+        'loss'
+      ].includes(
+        tone
+      )
+        ? tone
+        : 'neutral';
+
+    const total =
+      positiveRows.reduce(
+        (
+          sum,
+          row
+        ) =>
+          sum +
+          Number(
             row.amount
-        )
+          ),
+        0
       );
 
+    const categoryText =
+      positiveRows.length === 1
+        ? 'category'
+        : 'categories';
+
     return `
-      <div class="ta-category-list">
-        ${rows.slice(0, 6).map(
-          row => `
-            <div>
-              <div class="ta-category-topline">
-                <span>${escapeResourceDashboardHtml(row.label)}</span>
-                <span>${resourceDashboardFormatNumber(row.amount)}</span>
-              </div>
-              <div class="ta-category-track">
-                <div
-                  class="ta-category-fill"
-                  style="width:${Math.max(3, (row.amount / maximum) * 100).toFixed(2)}%"
-                ></div>
-              </div>
-            </div>
-          `
-        ).join('')}
+      <div class="ta-resource-breakdown ta-resource-breakdown-${safeTone}">
+        <div class="ta-resource-breakdown-summary">
+          <span>${positiveRows.length} ranked ${categoryText}</span>
+          <b>${resourceDashboardFormatNumber(total)} total</b>
+        </div>
+        <div class="ta-resource-breakdown-list">
+          ${positiveRows.map(
+            (
+              row,
+              index
+            ) => {
+              const share =
+                Math.max(
+                  0,
+                  Math.min(
+                    100,
+                    (
+                      Number(row.amount) /
+                      total
+                    ) *
+                      100
+                  )
+                );
+
+              const eventCount =
+                Number(
+                  row.events
+                ) ||
+                0;
+
+              return `
+                <div class="ta-resource-breakdown-row">
+                  <div class="ta-resource-breakdown-rank">${index + 1}</div>
+                  <div class="ta-resource-breakdown-main">
+                    <div class="ta-resource-breakdown-topline">
+                      <span class="ta-resource-breakdown-label">${escapeResourceDashboardHtml(row.label)}</span>
+                      <span class="ta-resource-breakdown-values">
+                        <b>${resourceDashboardFormatNumber(row.amount)}</b>
+                        <span>${resourceDashboardFormatPercentage(row.amount, total)}</span>
+                      </span>
+                    </div>
+                    <div class="ta-resource-breakdown-track">
+                      <div style="width:${share.toFixed(2)}%"></div>
+                    </div>
+                    <div class="ta-resource-breakdown-events">
+                      ${resourceDashboardFormatNumber(eventCount)} recorded ${eventCount === 1 ? 'event' : 'events'}
+                    </div>
+                  </div>
+                </div>
+              `;
+            }
+          ).join('')}
+        </div>
       </div>
     `;
   }
@@ -17659,14 +17783,24 @@
       resourceDashboardBreakdown(
         flow?.events,
         resource,
-        'in'
+        'in',
+        'gain'
       );
 
     const outgoing =
       resourceDashboardBreakdown(
         flow?.events,
         resource,
-        'out'
+        'out',
+        'use'
+      );
+
+    const setbacks =
+      resourceDashboardBreakdown(
+        flow?.events,
+        resource,
+        'out',
+        'loss'
       );
 
     return `
@@ -17675,23 +17809,31 @@
           ${title}
         </div>
         <div class="ta-metric-grid ta-resource-metric-grid">
-          <div class="ta-metric-card">
+          <div class="ta-metric-card ta-resource-metric-gain">
             <div class="ta-metric-label">Gained</div>
             <div class="ta-metric-value">${resourceDashboardFormatNumber(summary.gain_total)}</div>
           </div>
-          <div class="ta-metric-card">
+          <div class="ta-metric-card ta-resource-metric-use">
             <div class="ta-metric-label">Used</div>
             <div class="ta-metric-value">${resourceDashboardFormatNumber(summary.use_total)}</div>
           </div>
-          <div class="ta-metric-card">
+          <div class="ta-metric-card ta-resource-metric-loss">
             <div class="ta-metric-label">Lost to setbacks</div>
             <div class="ta-metric-value">${resourceDashboardFormatNumber(summary.loss_total)}</div>
           </div>
         </div>
-        <div class="ta-resource-list-heading">Where it came from</div>
-        ${renderResourceDashboardBreakdown(incoming, `No recorded ${resource} gains yet.`)}
-        <div class="ta-resource-list-heading">Where it went</div>
-        ${renderResourceDashboardBreakdown(outgoing, `No recorded ${resource} uses yet.`)}
+        <div class="ta-resource-list-heading ta-resource-list-heading-gain">Where it came from</div>
+        ${renderResourceDashboardBreakdown(incoming, `No recorded ${resource} gains yet.`, 'gain')}
+        <div class="ta-resource-list-heading ta-resource-list-heading-use">Where it went</div>
+        ${renderResourceDashboardBreakdown(outgoing, `No recorded ${resource} uses yet.`, 'use')}
+        ${
+          Number(summary.loss_total) > 0
+            ? `
+              <div class="ta-resource-list-heading ta-resource-list-heading-loss">Setbacks</div>
+              ${renderResourceDashboardBreakdown(setbacks, `No recorded ${resource} setbacks yet.`, 'loss')}
+            `
+            : ''
+        }
       </div>
     `;
   }
@@ -20067,13 +20209,185 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
+      #${MODAL_ID} .ta-resource-metric-gain,
+      #${MODAL_ID} .ta-resource-metric-use,
+      #${MODAL_ID} .ta-resource-metric-loss {
+        box-shadow: inset 0 3px 0 var(--ta-resource-accent);
+      }
+
+      #${MODAL_ID} .ta-resource-metric-gain {
+        --ta-resource-accent: #72b98e;
+      }
+
+      #${MODAL_ID} .ta-resource-metric-use {
+        --ta-resource-accent: #d1a05f;
+      }
+
+      #${MODAL_ID} .ta-resource-metric-loss {
+        --ta-resource-accent: #cf7474;
+      }
+
+      #${MODAL_ID} .ta-resource-metric-gain .ta-metric-value,
+      #${MODAL_ID} .ta-resource-metric-use .ta-metric-value,
+      #${MODAL_ID} .ta-resource-metric-loss .ta-metric-value {
+        color: var(--ta-resource-accent);
+      }
+
       #${MODAL_ID} .ta-resource-list-heading {
-        margin: 11px 0 7px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 13px 0 7px;
         font-size: 11px;
         font-weight: 800;
         text-transform: uppercase;
         letter-spacing: .03em;
-        opacity: .65;
+        color: var(--ta-resource-accent, #aaa);
+      }
+
+      #${MODAL_ID} .ta-resource-list-heading::before {
+        width: 7px;
+        height: 7px;
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: currentColor;
+        content: '';
+      }
+
+      #${MODAL_ID} .ta-resource-list-heading-gain {
+        --ta-resource-accent: #72b98e;
+      }
+
+      #${MODAL_ID} .ta-resource-list-heading-use {
+        --ta-resource-accent: #d1a05f;
+      }
+
+      #${MODAL_ID} .ta-resource-list-heading-loss {
+        --ta-resource-accent: #cf7474;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown {
+        --ta-resource-accent: #aaa;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-gain {
+        --ta-resource-accent: #72b98e;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-use {
+        --ta-resource-accent: #d1a05f;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-loss {
+        --ta-resource-accent: #cf7474;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-summary {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 7px;
+        font-size: 10px;
+        line-height: 1.35;
+        opacity: .7;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-summary b {
+        flex: 0 0 auto;
+        color: var(--ta-resource-accent);
+        font-size: 11px;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-list {
+        display: grid;
+        gap: 6px;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-row {
+        display: grid;
+        grid-template-columns: 24px minmax(0, 1fr);
+        gap: 8px;
+        min-width: 0;
+        padding: 8px;
+        border: 1px solid #292929;
+        border-radius: 7px;
+        background: #111;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-rank {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border: 1px solid var(--ta-resource-accent);
+        border-radius: 999px;
+        color: var(--ta-resource-accent);
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-main {
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-topline {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-label {
+        min-width: 0;
+        overflow: hidden;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.35;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-values {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-values > span {
+        min-width: 35px;
+        padding: 2px 5px;
+        border: 1px solid var(--ta-resource-accent);
+        border-radius: 999px;
+        color: var(--ta-resource-accent);
+        text-align: center;
+        font-size: 9px;
+        font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-track {
+        height: 5px;
+        margin-top: 6px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #262626;
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-track > div {
+        height: 100%;
+        min-width: 2px;
+        border-radius: inherit;
+        background: var(--ta-resource-accent);
+      }
+
+      #${MODAL_ID} .ta-resource-breakdown-events {
+        margin-top: 4px;
+        font-size: 9px;
+        line-height: 1.3;
+        opacity: .55;
       }
 
       #${MODAL_ID} .ta-resource-limit-note {
@@ -20115,6 +20429,10 @@
         #${MODAL_ID} .ta-stat-gym-topline span:last-child,
         #${MODAL_ID} .ta-stat-gym-values span:last-child {
           text-align: left;
+        }
+
+        #${MODAL_ID} .ta-resource-breakdown-topline {
+          align-items: flex-start;
         }
       }
 
