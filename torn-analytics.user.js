@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.16.1
+// @version      2.17.0
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.16.1';
+  const VERSION = '2.17.0';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -12790,6 +12790,34 @@
     } catch (_) {}
   }
 
+  function uiSessionOptionalBoolean(
+    value
+  ) {
+    return value === true
+      ? true
+      : value === false
+        ? false
+        : null;
+  }
+
+  function uiSessionTrainingFocus(
+    value
+  ) {
+    return value ===
+      'most_trained'
+        ? 'most_trained'
+        : 'recent';
+  }
+
+  function uiSessionStatGainScope(
+    value
+  ) {
+    return value ===
+      'all'
+        ? 'all'
+        : 'selected';
+  }
+
   function writeUiOrientationHandoff(
     state
   ) {
@@ -12821,6 +12849,26 @@
           : 'portrait',
       orientation_refresh_pending:
         true,
+      training_workspace_open:
+        uiSessionOptionalBoolean(
+          state.training_workspace_open
+        ),
+      training_readiness_open:
+        uiSessionOptionalBoolean(
+          state.training_readiness_open
+        ),
+      stat_growth_open:
+        uiSessionOptionalBoolean(
+          state.stat_growth_open
+        ),
+      stat_growth_focus:
+        uiSessionTrainingFocus(
+          state.stat_growth_focus
+        ),
+      stat_growth_scope:
+        uiSessionStatGainScope(
+          state.stat_growth_scope
+        ),
       updated_at:
         Date.now()
     };
@@ -12889,6 +12937,26 @@
             : 'portrait',
         orientation_refresh_pending:
           true,
+        training_workspace_open:
+          uiSessionOptionalBoolean(
+            parsed.training_workspace_open
+          ),
+        training_readiness_open:
+          uiSessionOptionalBoolean(
+            parsed.training_readiness_open
+          ),
+        stat_growth_open:
+          uiSessionOptionalBoolean(
+            parsed.stat_growth_open
+          ),
+        stat_growth_focus:
+          uiSessionTrainingFocus(
+            parsed.stat_growth_focus
+          ),
+        stat_growth_scope:
+          uiSessionStatGainScope(
+            parsed.stat_growth_scope
+          ),
         updated_at:
           Math.max(
             0,
@@ -12915,6 +12983,16 @@
         uiSessionOrientation(),
       orientation_refresh_pending:
         false,
+      training_workspace_open:
+        null,
+      training_readiness_open:
+        null,
+      stat_growth_open:
+        null,
+      stat_growth_focus:
+        'recent',
+      stat_growth_scope:
+        'selected',
       updated_at:
         0
     };
@@ -12975,6 +13053,26 @@
         orientation_refresh_pending:
           parsed.orientation_refresh_pending ===
           true,
+        training_workspace_open:
+          uiSessionOptionalBoolean(
+            parsed.training_workspace_open
+          ),
+        training_readiness_open:
+          uiSessionOptionalBoolean(
+            parsed.training_readiness_open
+          ),
+        stat_growth_open:
+          uiSessionOptionalBoolean(
+            parsed.stat_growth_open
+          ),
+        stat_growth_focus:
+          uiSessionTrainingFocus(
+            parsed.stat_growth_focus
+          ),
+        stat_growth_scope:
+          uiSessionStatGainScope(
+            parsed.stat_growth_scope
+          ),
         updated_at:
           Math.max(
             0,
@@ -13166,7 +13264,27 @@
           : 0,
       orientation,
       orientation_refresh_pending:
-        false
+        false,
+      training_workspace_open:
+        uiSessionOptionalBoolean(
+          source?.training_workspace_open
+        ),
+      training_readiness_open:
+        uiSessionOptionalBoolean(
+          source?.training_readiness_open
+        ),
+      stat_growth_open:
+        uiSessionOptionalBoolean(
+          source?.stat_growth_open
+        ),
+      stat_growth_focus:
+        uiSessionTrainingFocus(
+          source?.stat_growth_focus
+        ),
+      stat_growth_scope:
+        uiSessionStatGainScope(
+          source?.stat_growth_scope
+        )
     });
 
     return restoreState;
@@ -14770,11 +14888,18 @@
   }
 
   function renderTrainingReadinessDashboard(
-    readiness
+    readiness,
+    renderOptions
   ) {
     if (!readiness) {
       return '';
     }
+
+    const safeRenderOptions =
+      renderOptions &&
+      typeof renderOptions === 'object'
+        ? renderOptions
+        : {};
 
     const defaultModel = readiness.models?.[readiness.default_stat];
     const plannedEnergy = Math.max(1, Math.floor(Number(readiness.energy) || 250));
@@ -14807,6 +14932,13 @@
       readiness.over_happiness && readiness.energy !== null && readiness.energy > 0
         ? `Train before the next quarter-hour reset (<span data-ta-quarter-countdown>${escapeActivityHtml(resetDuration)}</span>).`
         : escapeActivityHtml(recommendation);
+
+    const sectionOpen =
+      safeRenderOptions.open === true ||
+      (
+        safeRenderOptions.open !== false &&
+        readiness.page_is_gym
+      );
 
     const quarterHourMetric = `
       <div class="ta-metric-card">
@@ -14841,7 +14973,7 @@
     };
 
     return `
-      <details class="ta-section ta-training-readiness-section" ${readiness.page_is_gym ? 'open' : ''}>
+      <details class="ta-section ta-training-readiness-section" ${sectionOpen ? 'open' : ''}>
         <summary class="ta-section-summary-row">
           <span class="ta-section-title">Training Readiness</span>
           <span class="ta-section-meta">${readiness.energy === null ? 'Historical only' : `${Number(readiness.energy).toLocaleString()} E`}</span>
@@ -16028,14 +16160,140 @@
     `;
   }
 
-  function renderStatGrowthDashboard(
-    growth
+  function statGrowthScopedGainSummary(
+    growth,
+    focus = 'recent',
+    scope = 'selected'
   ) {
+    const normalizedFocus =
+      focus ===
+      'most_trained'
+        ? 'most_trained'
+        : 'recent';
+
+    const normalizedScope =
+      scope ===
+      'all'
+        ? 'all'
+        : 'selected';
+
+    const stat =
+      statGrowthFocusStat(
+        growth,
+        normalizedFocus
+      );
+
+    const selected =
+      stat
+        ? growth?.stats?.[stat]
+        : null;
+
+    const row =
+      normalizedScope ===
+        'all' ||
+      !selected
+        ? growth
+        : selected;
+
+    return {
+      focus:
+        normalizedFocus,
+      scope:
+        normalizedScope,
+      stat,
+      label:
+        normalizedScope ===
+        'all'
+          ? 'All stats'
+          : selected?.label ||
+            'Selected stat',
+      gain:
+        Number(
+          row?.gain ||
+          0
+        ),
+      actions:
+        Number(
+          row?.actions ??
+          row?.valid_logs ??
+          0
+        )
+    };
+  }
+
+  function renderStatGrowthScopedGainSummary(
+    growth,
+    focus = 'recent',
+    scope = 'selected'
+  ) {
+    const summary =
+      statGrowthScopedGainSummary(
+        growth,
+        focus,
+        scope
+      );
+
+    return `
+      <div class="ta-stat-gain-scope" data-ta-stat-gain-scope>
+        <div class="ta-stat-gain-scope-controls" role="group" aria-label="Observed gain summary scope">
+          ${
+            [
+              ['selected', 'Selected stat'],
+              ['all', 'All stats']
+            ].map(
+              ([value, label]) => `
+                <button
+                  type="button"
+                  class="${value === summary.scope ? 'ta-stat-gain-scope-active' : ''}"
+                  data-ta-stat-gain-scope-option="${value}"
+                  aria-pressed="${value === summary.scope ? 'true' : 'false'}"
+                >${label}</button>
+              `
+            ).join('')
+          }
+        </div>
+
+        <div class="ta-metric-card ta-stat-gain-primary">
+          <div class="ta-metric-label">Observed stat gain</div>
+          <div class="ta-metric-value">${escapeActivityHtml(statGrowthFormatGain(summary.gain))}</div>
+          <div class="ta-metric-note">
+            ${escapeActivityHtml(summary.label)} · ${summary.actions.toLocaleString()} training actions
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderStatGrowthDashboard(
+    growth,
+    options
+  ) {
+    const safeOptions =
+      options &&
+      typeof options === 'object'
+        ? options
+        : {};
+
+    const sectionOpen =
+      safeOptions.open === true;
+
+    const focus =
+      safeOptions.focus ===
+      'most_trained'
+        ? 'most_trained'
+        : 'recent';
+
+    const scope =
+      safeOptions.scope ===
+      'all'
+        ? 'all'
+        : 'selected';
+
     if (
       !growth?.valid_logs
     ) {
       return `
-        <details class="ta-section ta-stat-growth-section">
+        <details class="ta-section ta-stat-growth-section" ${sectionOpen ? 'open' : ''}>
           <summary class="ta-section-summary-row">
             <span class="ta-section-title">Stat Growth</span>
             <span class="ta-section-meta">No gym training data</span>
@@ -16064,23 +16322,16 @@
 
     const metrics = [
       activityDashboardMetric(
-        'Observed stat gain',
-        statGrowthFormatGain(
-          growth.gain
-        ),
-        `${Number(growth.valid_logs).toLocaleString()} training actions`
-      ),
-      activityDashboardMetric(
         'Energy trained',
         Number(growth.energy_used).toLocaleString(),
-        `${Number(growth.trains).toLocaleString()} individual trains`
+        `${Number(growth.trains).toLocaleString()} individual trains · all stats`
       ),
       activityDashboardMetric(
         'Gain / energy',
         statGrowthFormatRate(
           growth.gain_per_energy
         ),
-        'Observed across all gym logs'
+        'Observed across all gym logs · all stats'
       ),
       activityDashboardMetric(
         'Training days',
@@ -16105,7 +16356,7 @@
     ].join('');
 
     return `
-      <details class="ta-section ta-stat-growth-section">
+      <details class="ta-section ta-stat-growth-section" ${sectionOpen ? 'open' : ''}>
         <summary class="ta-section-summary-row">
           <span class="ta-section-title">Stat Growth</span>
           <span class="ta-section-meta">
@@ -16119,23 +16370,33 @@
             ${escapeActivityHtml(timeBasis)} selected in Settings. All-time gain and energy totals do not change with the time basis.
           </div>
 
-          ${renderStatGrowthCumulativeChart(growth)}
+          ${renderStatGrowthCumulativeChart(growth, focus)}
 
-          <div class="ta-metric-grid">
-            ${metrics}
-          </div>
+          ${renderStatGrowthScopedGainSummary(growth, focus, scope)}
 
-          ${renderStatGrowthStatCards(growth)}
+          <details class="ta-stat-subsection ta-stat-more-details">
+            <summary>
+              More growth details
+              <span>Metrics, breakdowns &amp; diagnostics</span>
+            </summary>
+            <div class="ta-stat-subsection-body">
+              <div class="ta-metric-grid">
+                ${metrics}
+              </div>
 
-          ${renderStatGrowthWindows(growth)}
+              ${renderStatGrowthStatCards(growth)}
 
-          ${renderStatGrowthRecentChart(growth)}
+              ${renderStatGrowthWindows(growth)}
 
-          ${renderStatGrowthEnergyAllocation(growth)}
+              ${renderStatGrowthRecentChart(growth)}
 
-          ${renderStatGrowthGymBreakdown(growth)}
+              ${renderStatGrowthEnergyAllocation(growth)}
 
-          ${renderStatGrowthDataQuality(growth)}
+              ${renderStatGrowthGymBreakdown(growth)}
+
+              ${renderStatGrowthDataQuality(growth)}
+            </div>
+          </details>
         </div>
       </details>
     `;
@@ -16150,6 +16411,26 @@
     ) {
       return;
     }
+
+    const uiState =
+      readUiSessionState();
+
+    root.__taStatGrowth =
+      growth ||
+      root.__taStatGrowth ||
+      null;
+
+    root.__taStatGrowthFocus =
+      uiState.stat_growth_focus ===
+      'most_trained'
+        ? 'most_trained'
+        : 'recent';
+
+    root.__taStatGrowthScope =
+      uiState.stat_growth_scope ===
+      'all'
+        ? 'all'
+        : 'selected';
 
     const columns =
       Array.from(
@@ -16310,12 +16591,25 @@
                   'data-ta-stat-total-focus'
                 );
 
+              root.__taStatGrowthFocus =
+                focus ===
+                'most_trained'
+                  ? 'most_trained'
+                  : 'recent';
+
+              writeUiSessionState({
+                stat_growth_focus:
+                  root.__taStatGrowthFocus
+              });
+
               card.outerHTML =
                 renderStatGrowthCumulativeChart(
                   root.__taStatGrowth ||
                   {},
-                  focus
+                  root.__taStatGrowthFocus
                 );
+
+              refreshScopedGainSummary();
 
               bindCumulativeInteractions(
                 root
@@ -16325,14 +16619,191 @@
         }
       };
 
-    root.__taStatGrowth =
-      growth ||
-      root.__taStatGrowth ||
-      null;
+    const refreshScopedGainSummary =
+      () => {
+        const current =
+          root.querySelector(
+            '[data-ta-stat-gain-scope]'
+          );
+
+        if (
+          !current
+        ) {
+          return;
+        }
+
+        current.outerHTML =
+          renderStatGrowthScopedGainSummary(
+            root.__taStatGrowth ||
+            {},
+            root.__taStatGrowthFocus,
+            root.__taStatGrowthScope
+          );
+
+        bindScopedGainInteractions();
+      };
+
+    const bindScopedGainInteractions =
+      () => {
+        const panel =
+          root.querySelector(
+            '[data-ta-stat-gain-scope]'
+          );
+
+        if (
+          !panel
+        ) {
+          return;
+        }
+
+        for (
+          const button
+          of panel.querySelectorAll(
+            '[data-ta-stat-gain-scope-option]'
+          )
+        ) {
+          button.addEventListener(
+            'click',
+            () => {
+              root.__taStatGrowthScope =
+                button.getAttribute(
+                  'data-ta-stat-gain-scope-option'
+                ) ===
+                'all'
+                  ? 'all'
+                  : 'selected';
+
+              writeUiSessionState({
+                stat_growth_scope:
+                  root.__taStatGrowthScope
+              });
+
+              refreshScopedGainSummary();
+            }
+          );
+        }
+      };
 
     bindCumulativeInteractions(
       root
     );
+
+    bindScopedGainInteractions();
+  }
+
+  function renderTrainingWorkspace(
+    readiness,
+    growth
+  ) {
+    if (
+      !readiness &&
+      !growth
+    ) {
+      return '';
+    }
+
+    const state =
+      readUiSessionState();
+
+    const defaultOpen =
+      readiness?.page_is_gym ===
+      true;
+
+    const workspaceOpen =
+      state.training_workspace_open ===
+      null
+        ? defaultOpen
+        : state.training_workspace_open;
+
+    const readinessOpen =
+      state.training_readiness_open ===
+      null
+        ? defaultOpen
+        : state.training_readiness_open;
+
+    const statGrowthOpen =
+      state.stat_growth_open ===
+      true;
+
+    const focus =
+      state.stat_growth_focus ===
+      'most_trained'
+        ? 'most_trained'
+        : 'recent';
+
+    const scope =
+      state.stat_growth_scope ===
+      'all'
+        ? 'all'
+        : 'selected';
+
+    const meta = [
+      readiness?.energy === null ||
+      readiness?.energy === undefined
+        ? 'Historical readiness'
+        : `${Number(readiness.energy).toLocaleString()} E`,
+      growth?.valid_logs
+        ? `${Number(growth.valid_logs).toLocaleString()} actions`
+        : null
+    ].filter(Boolean).join(' · ');
+
+    return `
+      <details class="ta-section ta-training-workspace-section" ${workspaceOpen ? 'open' : ''}>
+        <summary class="ta-section-summary-row">
+          <span class="ta-section-title">Training</span>
+          <span class="ta-section-meta">${escapeActivityHtml(meta)}</span>
+        </summary>
+
+        <div class="ta-section-body ta-training-workspace-body">
+          ${renderTrainingReadinessDashboard(readiness, { open: readinessOpen })}
+          ${renderStatGrowthDashboard(growth, {
+            open: statGrowthOpen,
+            focus,
+            scope
+          })}
+        </div>
+      </details>
+    `;
+  }
+
+  function bindTrainingWorkspaceInteractions(
+    root
+  ) {
+    const bindings = [
+      [
+        '.ta-training-workspace-section',
+        'training_workspace_open'
+      ],
+      [
+        '.ta-training-readiness-section',
+        'training_readiness_open'
+      ],
+      [
+        '.ta-stat-growth-section',
+        'stat_growth_open'
+      ]
+    ];
+
+    for (
+      const [selector, key]
+      of bindings
+    ) {
+      const section =
+        root?.querySelector?.(
+          selector
+        );
+
+      section?.addEventListener(
+        'toggle',
+        () => {
+          writeUiSessionState({
+            [key]:
+              section.open ===
+              true
+          });
+        }
+      );
+    }
   }
 
   function renderStoredAnalysisDashboards(
@@ -16343,14 +16814,12 @@
         analysis?.resource_flow,
         analysis?.resource_bars
       ) +
-      renderTrainingReadinessDashboard(
-        analysis?.training_readiness
+      renderTrainingWorkspace(
+        analysis?.training_readiness,
+        analysis?.stat_growth
       ) +
       renderOverallActivityDashboard(
         analysis?.activity
-      ) +
-      renderStatGrowthDashboard(
-        analysis?.stat_growth
       )
     );
   }
@@ -16360,6 +16829,10 @@
     analysis = null
   ) {
     bindResourceDashboardInteractions(
+      root
+    );
+
+    bindTrainingWorkspaceInteractions(
       root
     );
 
@@ -20122,6 +20595,24 @@
         padding: 0 12px 12px;
       }
 
+      #${MODAL_ID} .ta-training-workspace-body {
+        padding-top: 2px;
+      }
+
+      #${MODAL_ID} .ta-training-workspace-body > .ta-section {
+        margin: 8px 0;
+        border-color: #303030;
+        background: #0c0c0c;
+      }
+
+      #${MODAL_ID} .ta-training-workspace-body > .ta-section:last-child {
+        margin-bottom: 0;
+      }
+
+      #${MODAL_ID} .ta-training-workspace-body > .ta-section .ta-section-title {
+        font-size: 14px;
+      }
+
       #${MODAL_ID} .ta-settings-section .ta-section-body {
         padding-top: 2px;
       }
@@ -20434,6 +20925,41 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 6px;
         margin: 0 0 8px;
+      }
+
+      #${MODAL_ID} .ta-stat-gain-scope {
+        display: grid;
+        gap: 8px;
+        margin: 10px 0;
+      }
+
+      #${MODAL_ID} .ta-stat-gain-scope-controls {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      #${MODAL_ID} .ta-stat-gain-scope-controls button {
+        min-height: 34px;
+        margin: 0;
+        padding: 6px 8px;
+        border-color: #444;
+        font-size: 11px;
+        opacity: .7;
+      }
+
+      #${MODAL_ID} .ta-stat-gain-scope-controls button.ta-stat-gain-scope-active {
+        border-color: #ddd;
+        background: #3a3a3a;
+        opacity: 1;
+      }
+
+      #${MODAL_ID} .ta-stat-gain-primary {
+        min-height: 74px;
+      }
+
+      #${MODAL_ID} .ta-stat-more-details {
+        margin-top: 10px;
       }
 
       #${MODAL_ID} .ta-stat-total-controls button {
