@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.15.8
+// @version      2.16.0
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.15.8';
+  const VERSION = '2.16.0';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13626,6 +13626,107 @@
     };
   }
 
+  function statGrowthFocusStat(
+    growth,
+    focus = 'recent'
+  ) {
+    const rows =
+      Object.values(
+        growth?.stats || {}
+      )
+        .filter(
+          row =>
+            row &&
+            Number(row.actions || 0) > 0 &&
+            Number.isSafeInteger(
+              Number(row.last_timestamp)
+            )
+        );
+
+    if (
+      !rows.length
+    ) {
+      return null;
+    }
+
+    rows.sort(
+      (
+        left,
+        right
+      ) => {
+        if (
+          focus ===
+          'most_trained'
+        ) {
+          return Number(right.trains || 0) -
+            Number(left.trains || 0) ||
+            Number(right.last_timestamp || 0) -
+            Number(left.last_timestamp || 0) ||
+            String(left.stat).localeCompare(
+              String(right.stat)
+            );
+        }
+
+        return Number(right.last_timestamp || 0) -
+          Number(left.last_timestamp || 0) ||
+          Number(right.trains || 0) -
+          Number(left.trains || 0) ||
+          String(left.stat).localeCompare(
+            String(right.stat)
+          );
+      }
+    );
+
+    return rows[0].stat ||
+      null;
+  }
+
+  function statGrowthCumulativeSamples(
+    growth,
+    stat,
+    limit = 12
+  ) {
+    const normalizedStat =
+      String(
+        stat ||
+        ''
+      );
+
+    const safeLimit =
+      Math.max(
+        1,
+        Math.min(
+          60,
+          Math.floor(
+            Number(limit) ||
+            12
+          )
+        )
+      );
+
+    return (growth?.training_actions || [])
+      .filter(
+        action =>
+          action?.stat ===
+          normalizedStat
+      )
+      .slice()
+      .sort(
+        (
+          left,
+          right
+        ) =>
+          Number(left.timestamp || 0) -
+            Number(right.timestamp || 0) ||
+          String(left.id || '').localeCompare(
+            String(right.id || '')
+        )
+      )
+      .slice(
+        -safeLimit
+      );
+  }
+
   function statGrowthAddToStat(
     target,
     action
@@ -15144,6 +15245,318 @@
       `${timezone} · displayed ${windowDays}-day window`;
   }
 
+  function statGrowthCumulativeFocusLabel(
+    focus
+  ) {
+    return focus ===
+      'most_trained'
+      ? 'Most trained'
+      : 'Most recent';
+  }
+
+  function statGrowthCumulativeSampleDetail(
+    action
+  ) {
+    const date =
+      new Date(
+        Number(action?.timestamp || 0) *
+        1000
+      ).toLocaleString();
+
+    return `${date} · ${action?.stat_label || 'Stat'} ` +
+      `${statGrowthFormatGain(action?.stat_increased)} · ` +
+      `${Number(action?.energy_used || 0).toLocaleString()} energy · ` +
+      `${Number(action?.trains || 0).toLocaleString()} trains · ` +
+      `${statGrowthGymName(action?.gym)} · ` +
+      `total after ${statGrowthFormatNumber(action?.stat_after, 2)}`;
+  }
+
+  function renderStatGrowthCumulativeChart(
+    growth,
+    focus = 'recent'
+  ) {
+    const stat =
+      statGrowthFocusStat(
+        growth,
+        focus
+      );
+
+    const samples =
+      statGrowthCumulativeSamples(
+        growth,
+        stat,
+        12
+      );
+
+    const label =
+      stat &&
+      samples[0]?.stat_label
+        ? samples[0].stat_label
+        : 'Stat';
+
+    if (
+      !samples.length
+    ) {
+      return `
+        <div class="ta-chart-card ta-stat-total-chart" data-ta-stat-total-card>
+          <div class="ta-chart-heading">
+            <span>Observed total &amp; session gain</span>
+            <span>No selected-stat observations</span>
+          </div>
+        </div>
+      `;
+    }
+
+    const width =
+      620;
+
+    const height =
+      230;
+
+    const left =
+      54;
+
+    const right =
+      54;
+
+    const top =
+      20;
+
+    const bottom =
+      38;
+
+    const plotWidth =
+      width -
+      left -
+      right;
+
+    const plotHeight =
+      height -
+      top -
+      bottom;
+
+    const totals =
+      samples.map(
+        action =>
+          Number(
+            action.stat_after ||
+            0
+          )
+      );
+
+    const gains =
+      samples.map(
+        action =>
+          Number(
+            action.stat_increased ||
+            0
+          )
+      );
+
+    const minimumTotal =
+      Math.min(
+        ...totals
+      );
+
+    const maximumTotal =
+      Math.max(
+        ...totals
+      );
+
+    const totalRange =
+      Math.max(
+        1,
+        maximumTotal -
+        minimumTotal
+      );
+
+    const maximumGain =
+      Math.max(
+        1,
+        ...gains
+      );
+
+    const pointX =
+      index =>
+        samples.length === 1
+          ? left +
+            plotWidth / 2
+          : left +
+            index /
+              (samples.length - 1) *
+              plotWidth;
+
+    const pointY =
+      total =>
+        top +
+        (
+          1 -
+          (total -
+            minimumTotal) /
+            totalRange
+        ) *
+          plotHeight;
+
+    const line =
+      samples.map(
+        (
+          action,
+          index
+        ) =>
+          `${index ? 'L' : 'M'}${pointX(index).toFixed(2)} ${pointY(Number(action.stat_after || 0)).toFixed(2)}`
+      ).join(' ');
+
+    const barWidth =
+      Math.max(
+        5,
+        Math.min(
+          20,
+          plotWidth /
+            samples.length *
+            .56
+        )
+      );
+
+    const bars =
+      samples.map(
+        (
+          action,
+          index
+        ) => {
+          const gain =
+            Number(
+              action.stat_increased ||
+              0
+            );
+
+          const barHeight =
+            Math.max(
+              2,
+              gain /
+                maximumGain *
+                plotHeight *
+                .36
+            );
+
+          return `<rect x="${(pointX(index) - barWidth / 2).toFixed(2)}" y="${(top + plotHeight - barHeight).toFixed(2)}" width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2" class="ta-stat-total-bar"></rect>`;
+        }
+      ).join('');
+
+    const points =
+      samples.map(
+        (
+          action,
+          index
+        ) => {
+          const detail =
+            statGrowthCumulativeSampleDetail(
+              action
+            );
+
+          return `
+            <circle
+              cx="${pointX(index).toFixed(2)}"
+              cy="${pointY(Number(action.stat_after || 0)).toFixed(2)}"
+              r="8"
+              class="ta-stat-total-hit"
+              data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
+              role="button"
+              tabindex="0"
+              aria-label="${escapeActivityHtml(detail)}"
+            ></circle>
+            <circle
+              cx="${pointX(index).toFixed(2)}"
+              cy="${pointY(Number(action.stat_after || 0)).toFixed(2)}"
+              r="3.7"
+              class="ta-stat-total-point"
+            ></circle>
+          `;
+        }
+      ).join('');
+
+    const firstDate =
+      new Date(
+        Number(samples[0].timestamp || 0) *
+        1000
+      ).toLocaleDateString(
+        undefined,
+        {
+          month: 'short',
+          day: 'numeric'
+        }
+      );
+
+    const lastDate =
+      new Date(
+        Number(samples[samples.length - 1].timestamp || 0) *
+        1000
+      ).toLocaleDateString(
+        undefined,
+        {
+          month: 'short',
+          day: 'numeric'
+        }
+      );
+
+    const firstDetail =
+      statGrowthCumulativeSampleDetail(
+        samples[
+          samples.length - 1
+        ]
+      );
+
+    return `
+      <div class="ta-chart-card ta-stat-total-chart" data-ta-stat-total-card>
+        <div class="ta-chart-heading">
+          <span>Observed total &amp; session gain</span>
+          <span>${escapeActivityHtml(label)} · last ${samples.length} observations</span>
+        </div>
+
+        <div class="ta-stat-total-controls" role="group" aria-label="Stat chart focus">
+          ${
+            [
+              'recent',
+              'most_trained'
+            ].map(
+              option => `
+                <button
+                  type="button"
+                  class="${option === focus ? 'ta-stat-total-focus-active' : ''}"
+                  data-ta-stat-total-focus="${option}"
+                  aria-pressed="${option === focus ? 'true' : 'false'}"
+                >${statGrowthCumulativeFocusLabel(option)}</button>
+              `
+            ).join('')
+          }
+        </div>
+
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars" class="ta-stat-total-svg">
+          <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
+          <line x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
+          <line x1="${left}" y1="${top + plotHeight / 2}" x2="${left + plotWidth}" y2="${top + plotHeight / 2}" class="ta-stat-total-guide"></line>
+          ${bars}
+          <path d="${line}" class="ta-stat-total-line"></path>
+          ${points}
+          <text x="0" y="${top + 4}" class="ta-stat-total-label">${escapeActivityHtml(statGrowthFormatNumber(maximumTotal, 2))}</text>
+          <text x="0" y="${top + plotHeight}" class="ta-stat-total-label">${escapeActivityHtml(statGrowthFormatNumber(minimumTotal, 2))}</text>
+          <text x="${width}" y="${top + 4}" text-anchor="end" class="ta-stat-total-label">+${escapeActivityHtml(statGrowthFormatNumber(maximumGain, 2))}</text>
+          <text x="${width}" y="${top + plotHeight}" text-anchor="end" class="ta-stat-total-label">0</text>
+          <text x="${left}" y="${height - 8}" class="ta-stat-total-label">${escapeActivityHtml(firstDate)}</text>
+          <text x="${left + plotWidth}" y="${height - 8}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(lastDate)}</text>
+        </svg>
+
+        <div class="ta-stat-total-legend">
+          <span><i class="ta-stat-total-line-key"></i>Total stat</span>
+          <span><i class="ta-stat-total-bar-key"></i>Session gain</span>
+        </div>
+
+        <div class="ta-chart-detail" data-ta-stat-total-detail-output>
+          ${escapeActivityHtml(firstDetail)}
+        </div>
+      </div>
+    `;
+  }
+
   function renderStatGrowthRecentChart(
     growth
   ) {
@@ -15704,6 +16117,8 @@
             ${escapeActivityHtml(timeBasis)} selected in Settings. All-time gain and energy totals do not change with the time basis.
           </div>
 
+          ${renderStatGrowthCumulativeChart(growth)}
+
           <div class="ta-metric-grid">
             ${metrics}
           </div>
@@ -15725,7 +16140,8 @@
   }
 
   function bindStatGrowthDashboardInteractions(
-    root
+    root,
+    growth = null
   ) {
     if (
       !root?.querySelectorAll
@@ -15810,6 +16226,111 @@
         }
       );
     }
+
+    const bindCumulativeInteractions =
+      scope => {
+        const card =
+          scope?.matches?.(
+            '[data-ta-stat-total-card]'
+          )
+            ? scope
+            : scope?.querySelector?.(
+              '[data-ta-stat-total-card]'
+            );
+
+        if (
+          !card
+        ) {
+          return;
+        }
+
+        const activatePoint =
+          point => {
+            const output =
+              card.querySelector(
+                '[data-ta-stat-total-detail-output]'
+              );
+
+            if (
+              output
+            ) {
+              output.textContent =
+                point.getAttribute(
+                  'data-ta-stat-total-detail'
+                ) ||
+                '';
+            }
+          };
+
+        for (
+          const point
+          of card.querySelectorAll(
+            '[data-ta-stat-total-detail]'
+          )
+        ) {
+          point.addEventListener(
+            'click',
+            () =>
+              activatePoint(
+                point
+              )
+          );
+
+          point.addEventListener(
+            'keydown',
+            event => {
+              if (
+                event.key !== 'Enter' &&
+                event.key !== ' '
+              ) {
+                return;
+              }
+
+              event.preventDefault();
+              activatePoint(
+                point
+              );
+            }
+          );
+        }
+
+        for (
+          const button
+          of card.querySelectorAll(
+            '[data-ta-stat-total-focus]'
+          )
+        ) {
+          button.addEventListener(
+            'click',
+            () => {
+              const focus =
+                button.getAttribute(
+                  'data-ta-stat-total-focus'
+                );
+
+              card.outerHTML =
+                renderStatGrowthCumulativeChart(
+                  root.__taStatGrowth ||
+                  {},
+                  focus
+                );
+
+              bindCumulativeInteractions(
+                root
+              );
+            }
+          );
+        }
+      };
+
+    root.__taStatGrowth =
+      growth ||
+      root.__taStatGrowth ||
+      null;
+
+    bindCumulativeInteractions(
+      root
+    );
   }
 
   function renderStoredAnalysisDashboards(
@@ -15848,7 +16369,8 @@
     );
 
     bindStatGrowthDashboardInteractions(
-      root
+      root,
+      analysis?.stat_growth
     );
   }
   // ============================================================
@@ -19902,6 +20424,113 @@
         font-size: 11px;
         line-height: 1.45;
         opacity: .78;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin: 0 0 8px;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls button {
+        min-height: 34px;
+        margin: 0;
+        padding: 6px 8px;
+        border-color: #444;
+        font-size: 11px;
+        opacity: .7;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls button.ta-stat-total-focus-active {
+        border-color: #ddd;
+        background: #3a3a3a;
+        opacity: 1;
+      }
+
+      #${MODAL_ID} .ta-stat-total-svg {
+        display: block;
+        width: 100%;
+        height: auto;
+        overflow: visible;
+      }
+
+      #${MODAL_ID} .ta-stat-total-axis {
+        stroke: #555;
+        stroke-width: 1;
+      }
+
+      #${MODAL_ID} .ta-stat-total-guide {
+        stroke: #454545;
+        stroke-width: 1;
+        stroke-dasharray: 5 5;
+      }
+
+      #${MODAL_ID} .ta-stat-total-bar {
+        fill: #dba854;
+        opacity: .72;
+      }
+
+      #${MODAL_ID} .ta-stat-total-line {
+        fill: none;
+        stroke: #f2f2f2;
+        stroke-width: 3;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      #${MODAL_ID} .ta-stat-total-point {
+        fill: #f2f2f2;
+        pointer-events: none;
+      }
+
+      #${MODAL_ID} .ta-stat-total-hit {
+        fill: transparent;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+
+      #${MODAL_ID} .ta-stat-total-hit:focus-visible {
+        fill: rgba(255, 255, 255, .16);
+        outline: none;
+      }
+
+      #${MODAL_ID} .ta-stat-total-label {
+        fill: #aaa;
+        font-size: 11px;
+      }
+
+      #${MODAL_ID} .ta-stat-total-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 4px;
+        font-size: 11px;
+        opacity: .68;
+      }
+
+      #${MODAL_ID} .ta-stat-total-legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      #${MODAL_ID} .ta-stat-total-legend i {
+        display: inline-block;
+      }
+
+      #${MODAL_ID} .ta-stat-total-line-key {
+        width: 16px;
+        height: 3px;
+        border-radius: 9px;
+        background: #f2f2f2;
+      }
+
+      #${MODAL_ID} .ta-stat-total-bar-key {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        background: #dba854;
       }
 
       #${MODAL_ID} .ta-category-list {
