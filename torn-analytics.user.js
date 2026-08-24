@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.17.0
+// @version      2.17.1
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.17.0';
+  const VERSION = '2.17.1';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -12803,12 +12803,19 @@
   function uiSessionTrainingFocus(
     value
   ) {
-    return value ===
-      'most_trained'
-        ? 'most_trained'
-        : 'recent';
+    return [
+      'recent',
+      'most_trained',
+      'strength',
+      'defense',
+      'speed',
+      'dexterity'
+    ].includes(
+      value
+    )
+      ? value
+      : 'recent';
   }
-
   function uiSessionStatGainScope(
     value
   ) {
@@ -13750,6 +13757,19 @@
     growth,
     focus = 'recent'
   ) {
+    if (
+      [
+        'strength',
+        'defense',
+        'speed',
+        'dexterity'
+      ].includes(
+        focus
+      )
+    ) {
+      return focus;
+    }
+
     const rows =
       Object.values(
         growth?.stats || {}
@@ -14927,7 +14947,7 @@
       ? 'Live Energy is unavailable. Historical estimates still work.'
       : readiness.energy <= 0
         ? 'Wait for Energy before training.'
-        : 'Ready to train. For a happiness boost, use it just after a TCT quarter-hour and train before the next one.';
+        : 'Ready to train. For a happiness boost, use a booster just after a TCT quarter-hour and train before the next one.';
     const recommendationHtml =
       readiness.over_happiness && readiness.energy !== null && readiness.energy > 0
         ? `Train before the next quarter-hour reset (<span data-ta-quarter-countdown>${escapeActivityHtml(resetDuration)}</span>).`
@@ -15382,12 +15402,53 @@
   function statGrowthCumulativeFocusLabel(
     focus
   ) {
-    return focus ===
-      'most_trained'
-      ? 'Most trained'
-      : 'Most recent';
+    return {
+      recent: 'Most recent',
+      most_trained: 'Most trained',
+      strength: 'Strength',
+      defense: 'Defense',
+      speed: 'Speed',
+      dexterity: 'Dexterity'
+    }[
+      uiSessionTrainingFocus(
+        focus
+      )
+    ];
   }
 
+  function renderStatGrowthFocusControl(
+    focus
+  ) {
+    const selected =
+      uiSessionTrainingFocus(
+        focus
+      );
+
+    return `
+      <div class="ta-stat-total-controls">
+        <label>
+          <span>Stat</span>
+          <select data-ta-stat-total-focus>
+            ${[
+              'recent',
+              'most_trained',
+              'strength',
+              'defense',
+              'speed',
+              'dexterity'
+            ].map(
+              option => `
+                <option
+                  value="${option}"
+                  ${option === selected ? 'selected' : ''}
+                >${escapeActivityHtml(statGrowthCumulativeFocusLabel(option))}</option>
+              `
+            ).join('')}
+          </select>
+        </label>
+      </div>
+    `;
+  }
   function statGrowthCumulativeSampleDetail(
     action
   ) {
@@ -15437,6 +15498,8 @@
             <span>Observed total &amp; session gain</span>
             <span>No selected-stat observations</span>
           </div>
+
+          ${renderStatGrowthFocusControl(focus)}
         </div>
       `;
     }
@@ -15646,23 +15709,7 @@
           <span>${escapeActivityHtml(label)} · last ${samples.length} observations</span>
         </div>
 
-        <div class="ta-stat-total-controls" role="group" aria-label="Stat chart focus">
-          ${
-            [
-              'recent',
-              'most_trained'
-            ].map(
-              option => `
-                <button
-                  type="button"
-                  class="${option === focus ? 'ta-stat-total-focus-active' : ''}"
-                  data-ta-stat-total-focus="${option}"
-                  aria-pressed="${option === focus ? 'true' : 'false'}"
-                >${statGrowthCumulativeFocusLabel(option)}</button>
-              `
-            ).join('')
-          }
-        </div>
+        ${renderStatGrowthFocusControl(focus)}
 
         <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars" class="ta-stat-total-svg">
           <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
@@ -16166,9 +16213,17 @@
     scope = 'selected'
   ) {
     const normalizedFocus =
-      focus ===
-      'most_trained'
-        ? 'most_trained'
+      [
+        'recent',
+        'most_trained',
+        'strength',
+        'defense',
+        'speed',
+        'dexterity'
+      ].includes(
+        focus
+      )
+        ? focus
         : 'recent';
 
     const normalizedScope =
@@ -16278,10 +16333,9 @@
       safeOptions.open === true;
 
     const focus =
-      safeOptions.focus ===
-      'most_trained'
-        ? 'most_trained'
-        : 'recent';
+      uiSessionTrainingFocus(
+        safeOptions.focus
+      );
 
     const scope =
       safeOptions.scope ===
@@ -16421,10 +16475,9 @@
       null;
 
     root.__taStatGrowthFocus =
-      uiState.stat_growth_focus ===
-      'most_trained'
-        ? 'most_trained'
-        : 'recent';
+      uiSessionTrainingFocus(
+        uiState.stat_growth_focus
+      );
 
     root.__taStatGrowthScope =
       uiState.stat_growth_scope ===
@@ -16577,46 +16630,38 @@
           );
         }
 
-        for (
-          const button
-          of card.querySelectorAll(
+        const select =
+          card.querySelector(
             '[data-ta-stat-total-focus]'
-          )
-        ) {
-          button.addEventListener(
-            'click',
-            () => {
-              const focus =
-                button.getAttribute(
-                  'data-ta-stat-total-focus'
-                );
-
-              root.__taStatGrowthFocus =
-                focus ===
-                'most_trained'
-                  ? 'most_trained'
-                  : 'recent';
-
-              writeUiSessionState({
-                stat_growth_focus:
-                  root.__taStatGrowthFocus
-              });
-
-              card.outerHTML =
-                renderStatGrowthCumulativeChart(
-                  root.__taStatGrowth ||
-                  {},
-                  root.__taStatGrowthFocus
-                );
-
-              refreshScopedGainSummary();
-
-              bindCumulativeInteractions(
-                root
-              );
-            }
           );
-        }
+
+        select?.addEventListener(
+          'change',
+          () => {
+            root.__taStatGrowthFocus =
+              uiSessionTrainingFocus(
+                select.value
+              );
+
+            writeUiSessionState({
+              stat_growth_focus:
+                root.__taStatGrowthFocus
+            });
+
+            card.outerHTML =
+              renderStatGrowthCumulativeChart(
+                root.__taStatGrowth ||
+                {},
+                root.__taStatGrowthFocus
+              );
+
+            refreshScopedGainSummary();
+
+            bindCumulativeInteractions(
+              root
+            );
+          }
+        );
       };
 
     const refreshScopedGainSummary =
@@ -16726,10 +16771,9 @@
       true;
 
     const focus =
-      state.stat_growth_focus ===
-      'most_trained'
-        ? 'most_trained'
-        : 'recent';
+      uiSessionTrainingFocus(
+        state.stat_growth_focus
+      );
 
     const scope =
       state.stat_growth_scope ===
@@ -20921,12 +20965,27 @@
       }
 
       #${MODAL_ID} .ta-stat-total-controls {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 6px;
         margin: 0 0 8px;
       }
 
+      #${MODAL_ID} .ta-stat-total-controls label {
+        display: grid;
+        grid-template-columns: minmax(68px, auto) minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        opacity: .8;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls select {
+        min-height: 34px;
+        padding: 6px 8px;
+        border: 1px solid #444;
+        border-radius: 6px;
+        background: #171717;
+        color: inherit;
+        font: inherit;
+      }
       #${MODAL_ID} .ta-stat-gain-scope {
         display: grid;
         gap: 8px;
