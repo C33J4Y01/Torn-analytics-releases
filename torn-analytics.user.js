@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.17.1
+// @version      2.17.2
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.17.1';
+  const VERSION = '2.17.2';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -16456,6 +16456,71 @@
     `;
   }
 
+  function statGrowthNearestCumulativePoint(
+    points,
+    targetX
+  ) {
+    const x =
+      Number(
+        targetX
+      );
+
+    if (
+      !Number.isFinite(
+        x
+      )
+    ) {
+      return null;
+    }
+
+    let nearest =
+      null;
+
+    for (
+      const candidate
+      of Array.isArray(
+        points
+      )
+        ? points
+        : []
+    ) {
+      const candidateX =
+        Number(
+          candidate?.x
+        );
+
+      if (
+        !Number.isFinite(
+          candidateX
+        )
+      ) {
+        continue;
+      }
+
+      const distance =
+        Math.abs(
+          candidateX -
+          x
+        );
+
+      if (
+        !nearest ||
+        distance <
+          nearest.distance
+      ) {
+        nearest = {
+          point: candidate.point ||
+            null,
+          distance
+        };
+      }
+    }
+
+    return nearest?.point ||
+      null;
+  }
+
+
   function bindStatGrowthDashboardInteractions(
     root,
     growth = null
@@ -16629,6 +16694,78 @@
             }
           );
         }
+
+        const chart =
+          card.querySelector(
+            '[data-ta-stat-total-svg]'
+          );
+
+        chart?.addEventListener(
+          'click',
+          event => {
+            if (
+              event.target?.getAttribute?.(
+                'data-ta-stat-total-detail'
+              )
+            ) {
+              return;
+            }
+
+            const rect =
+              chart.getBoundingClientRect?.();
+            const viewWidth =
+              Number(
+                chart.viewBox?.baseVal?.width
+              );
+
+            if (
+              !rect ||
+              rect.width <= 0 ||
+              !Number.isFinite(
+                viewWidth
+              ) ||
+              viewWidth <= 0
+            ) {
+              return;
+            }
+
+            const tapX =
+              (
+                Number(
+                  event.clientX
+                ) -
+                rect.left
+              ) /
+              rect.width *
+              viewWidth;
+            const nearest =
+              statGrowthNearestCumulativePoint(
+                Array.from(
+                  card.querySelectorAll(
+                    '[data-ta-stat-total-detail]'
+                  )
+                ).map(
+                  point => ({
+                    point,
+                    x: Number(
+                      point.getAttribute(
+                        'cx'
+                      )
+                    )
+                  })
+                ),
+                tapX
+              );
+
+            if (
+              nearest
+            ) {
+              activatePoint(
+                nearest
+              );
+            }
+          }
+        );
 
         const select =
           card.querySelector(
@@ -21041,6 +21178,8 @@
         width: 100%;
         height: auto;
         overflow: visible;
+        cursor: pointer;
+        touch-action: manipulation;
       }
 
       #${MODAL_ID} .ta-stat-total-axis {
