@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.4
+// @version      2.18.5
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.4';
+  const VERSION = '2.18.5';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -15936,10 +15936,17 @@
         statGrowthTrainingContextBoosters(
           context
         );
+      const observedCount =
+        Array.isArray(
+          context?.boosts
+        ) &&
+        context.boosts.length
+          ? context.boosts.length
+          : boosters.length;
 
       return boosters.length === 1
         ? `Happiness boost observed ${boosters[0]}`
-        : `${boosters.length} Happiness boosts observed: ${boosters.join(', ')}`;
+        : `${observedCount} Happiness boosts observed: ${boosters.join(', ')}`;
     }
 
     if (
@@ -15973,8 +15980,13 @@
             }
           ];
 
-    return rows.map(
-      boost => {
+    const grouped =
+      new Map();
+
+    for (
+      const boost
+      of rows
+    ) {
         const secondsBefore =
           Math.max(
             0,
@@ -15983,17 +15995,69 @@
             ) ||
             0
           );
-        const timing =
-          secondsBefore < 60
-            ? '<1m'
-            : `${Math.floor(secondsBefore / 60)}m`;
         const source =
           String(
             boost?.source ||
             'Happiness item'
           );
 
-        return `${source} · ${timing} before`;
+        const existing =
+          grouped.get(
+            source
+          );
+
+        if (
+          existing
+        ) {
+          existing.count++;
+          existing.minimum_seconds =
+            Math.min(
+              existing.minimum_seconds,
+              secondsBefore
+            );
+          existing.maximum_seconds =
+            Math.max(
+              existing.maximum_seconds,
+              secondsBefore
+            );
+          continue;
+        }
+
+        grouped.set(
+          source,
+          {
+            source,
+            count: 1,
+            minimum_seconds:
+              secondsBefore,
+            maximum_seconds:
+              secondsBefore
+          }
+        );
+      }
+
+    return Array.from(
+      grouped.values()
+    ).map(
+      booster => {
+        const firstTiming =
+          booster.minimum_seconds < 60
+            ? '<1m'
+            : `${Math.floor(booster.minimum_seconds / 60)}m`;
+        const lastTiming =
+          booster.maximum_seconds < 60
+            ? '<1m'
+            : `${Math.floor(booster.maximum_seconds / 60)}m`;
+        const timing =
+          firstTiming === lastTiming
+            ? firstTiming
+            : `${firstTiming}–${lastTiming}`;
+        const quantity =
+          booster.count > 1
+            ? ` ×${booster.count}`
+            : '';
+
+        return `${booster.source}${quantity} · ${timing} before`;
       }
     );
   }
@@ -16885,32 +16949,16 @@
                   );
 
             return `
-              <div class="ta-stat-card">
-                <div class="ta-stat-card-title">
-                  ${escapeActivityHtml(row.label)}
+              <div class="ta-stat-compact-row">
+                <div class="ta-stat-compact-main">
+                  <strong>${escapeActivityHtml(row.label)}</strong>
+                  <b>${escapeActivityHtml(statGrowthFormatGain(row.gain))}</b>
                 </div>
-
-                <div class="ta-stat-card-gain">
-                  ${escapeActivityHtml(statGrowthFormatGain(row.gain))}
-                </div>
-
-                <div class="ta-stat-card-grid">
-                  <div>
-                    <span>Energy</span>
-                    <b>${Number(row.energy_used || 0).toLocaleString()}</b>
-                  </div>
-                  <div>
-                    <span>Gain / E</span>
-                    <b>${escapeActivityHtml(statGrowthFormatRate(row.gain_per_energy))}</b>
-                  </div>
-                  <div>
-                    <span>Trains</span>
-                    <b>${Number(row.trains || 0).toLocaleString()}</b>
-                  </div>
-                  <div>
-                    <span>After last train</span>
-                    <b>${escapeActivityHtml(lastObserved)}</b>
-                  </div>
+                <div class="ta-stat-compact-facts">
+                  <span><i>Energy</i><b>${Number(row.energy_used || 0).toLocaleString()}</b></span>
+                  <span><i>Gain / E</i><b>${escapeActivityHtml(statGrowthFormatRate(row.gain_per_energy))}</b></span>
+                  <span><i>Trains</i><b>${Number(row.trains || 0).toLocaleString()}</b></span>
+                  <span><i>After</i><b>${escapeActivityHtml(lastObserved)}</b></span>
                 </div>
               </div>
             `;
@@ -16919,7 +16967,7 @@
         .join('');
 
     return `
-      <div class="ta-stat-grid">
+      <div class="ta-stat-compact-list">
         ${cards}
       </div>
     `;
@@ -17433,7 +17481,7 @@
               <span>Metrics, breakdowns &amp; diagnostics</span>
             </summary>
             <div class="ta-stat-subsection-body">
-              <div class="ta-metric-grid">
+              <div class="ta-stat-growth-compact-metrics">
                 ${metrics}
               </div>
 
@@ -23265,6 +23313,101 @@
         line-height: 1.4;
       }
 
+      /* v2.18.5: compact, scan-friendly advanced Stat Growth detail. */
+      #${MODAL_ID} .ta-stat-growth-compact-metrics {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 7px;
+      }
+
+      #${MODAL_ID} .ta-stat-growth-compact-metrics .ta-metric-card {
+        min-width: 0;
+        min-height: 74px;
+        margin: 0;
+        padding: 8px 9px;
+        border-radius: 8px;
+      }
+
+      #${MODAL_ID} .ta-stat-growth-compact-metrics .ta-metric-label {
+        font-size: 9px;
+      }
+
+      #${MODAL_ID} .ta-stat-growth-compact-metrics .ta-metric-value {
+        margin-top: 3px;
+        font-size: 21px;
+        line-height: 1.1;
+      }
+
+      #${MODAL_ID} .ta-stat-growth-compact-metrics .ta-metric-note {
+        margin-top: 3px;
+        font-size: 10px;
+        line-height: 1.25;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-list {
+        display: grid;
+        gap: 7px;
+        margin-top: 9px;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-row {
+        display: grid;
+        grid-template-columns: minmax(112px, .78fr) minmax(0, 1.22fr);
+        gap: 9px;
+        align-items: center;
+        padding: 9px;
+        border: 1px solid #303030;
+        border-radius: 8px;
+        background: #171717;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-main {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-main strong {
+        color: #f0f0f0;
+        font-size: 15px;
+        line-height: 1.2;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-main b {
+        overflow-wrap: anywhere;
+        color: #f3f3f3;
+        font-size: 21px;
+        line-height: 1.1;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-facts {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 8px;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-facts span {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-facts i {
+        color: #9b9b9b;
+        font-size: 9px;
+        font-style: normal;
+        font-weight: 700;
+        letter-spacing: .035em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-facts b {
+        overflow-wrap: anywhere;
+        color: #dedede;
+        font-size: 12px;
+        line-height: 1.2;
+      }
+
       @media(max-width:520px) {
         #${MODAL_ID} .ta-stat-session-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -23280,6 +23423,21 @@
 
         #${MODAL_ID} .ta-stat-session-metric > strong {
           font-size: 14px;
+        }
+
+        #${MODAL_ID} .ta-stat-compact-row {
+          grid-template-columns: 1fr;
+          gap: 7px;
+        }
+
+        #${MODAL_ID} .ta-stat-compact-main {
+          grid-template-columns: 1fr auto;
+          align-items: baseline;
+        }
+
+        #${MODAL_ID} .ta-stat-compact-main b {
+          font-size: 22px;
+          text-align: right;
         }
       }
 
