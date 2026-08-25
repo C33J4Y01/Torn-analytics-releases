@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.0
+// @version      2.18.1
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.0';
+  const VERSION = '2.18.1';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -12825,6 +12825,19 @@
         : 'selected';
   }
 
+  function uiSessionStatGrowthContext(
+    value
+  ) {
+    return [
+      'happiness_boost_observed',
+      'no_happiness_boost_observed'
+    ].includes(
+      value
+    )
+      ? value
+      : 'all';
+  }
+
   function writeUiOrientationHandoff(
     state
   ) {
@@ -12875,6 +12888,10 @@
       stat_growth_scope:
         uiSessionStatGainScope(
           state.stat_growth_scope
+        ),
+      stat_growth_context:
+        uiSessionStatGrowthContext(
+          state.stat_growth_context
         ),
       updated_at:
         Date.now()
@@ -12964,6 +12981,10 @@
           uiSessionStatGainScope(
             parsed.stat_growth_scope
           ),
+        stat_growth_context:
+          uiSessionStatGrowthContext(
+            parsed.stat_growth_context
+          ),
         updated_at:
           Math.max(
             0,
@@ -13000,6 +13021,8 @@
         'recent',
       stat_growth_scope:
         'selected',
+      stat_growth_context:
+        'all',
       updated_at:
         0
     };
@@ -13079,6 +13102,10 @@
         stat_growth_scope:
           uiSessionStatGainScope(
             parsed.stat_growth_scope
+          ),
+        stat_growth_context:
+          uiSessionStatGrowthContext(
+            parsed.stat_growth_context
           ),
         updated_at:
           Math.max(
@@ -13291,6 +13318,10 @@
       stat_growth_scope:
         uiSessionStatGainScope(
           source?.stat_growth_scope
+        ),
+      stat_growth_context:
+        uiSessionStatGrowthContext(
+          source?.stat_growth_context
         )
     });
 
@@ -14030,13 +14061,24 @@
   function statGrowthCumulativeSamples(
     growth,
     stat,
-    limit = 12
+    limit = 12,
+    contextFilter = 'all'
   ) {
     const normalizedStat =
       String(
         stat ||
         ''
       );
+
+    const normalizedContextFilter =
+      [
+        'happiness_boost_observed',
+        'no_happiness_boost_observed'
+      ].includes(
+        contextFilter
+      )
+        ? contextFilter
+        : 'all';
 
     const safeLimit =
       Math.max(
@@ -14054,7 +14096,12 @@
       .filter(
         action =>
           action?.stat ===
-          normalizedStat
+          normalizedStat &&
+          (
+            normalizedContextFilter === 'all' ||
+            action?.training_context?.status ===
+              normalizedContextFilter
+          )
       )
       .slice()
       .sort(
@@ -15700,12 +15747,36 @@
     ];
   }
 
+  function statGrowthContextFilterLabel(
+    context
+  ) {
+    switch (
+      uiSessionStatGrowthContext(
+        context
+      )
+    ) {
+      case 'happiness_boost_observed':
+        return 'Boost observed';
+
+      case 'no_happiness_boost_observed':
+        return 'No boost observed';
+
+      default:
+        return 'All contexts';
+    }
+  }
+
   function renderStatGrowthFocusControl(
-    focus
+    focus,
+    context = 'all'
   ) {
     const selected =
       uiSessionTrainingFocus(
         focus
+      );
+    const selectedContext =
+      uiSessionStatGrowthContext(
+        context
       );
 
     return `
@@ -15726,6 +15797,23 @@
                   value="${option}"
                   ${option === selected ? 'selected' : ''}
                 >${escapeActivityHtml(statGrowthCumulativeFocusLabel(option))}</option>
+              `
+            ).join('')}
+          </select>
+        </label>
+        <label>
+          <span>Context</span>
+          <select data-ta-stat-total-context>
+            ${[
+              'all',
+              'happiness_boost_observed',
+              'no_happiness_boost_observed'
+            ].map(
+              option => `
+                <option
+                  value="${option}"
+                  ${option === selectedContext ? 'selected' : ''}
+                >${escapeActivityHtml(statGrowthContextFilterLabel(option))}</option>
               `
             ).join('')}
           </select>
@@ -15852,7 +15940,8 @@
 
   function renderStatGrowthCumulativeChart(
     growth,
-    focus = 'recent'
+    focus = 'recent',
+    context = 'all'
   ) {
     const stat =
       statGrowthFocusStat(
@@ -15860,11 +15949,17 @@
         focus
       );
 
+    const selectedContext =
+      uiSessionStatGrowthContext(
+        context
+      );
+
     const samples =
       statGrowthCumulativeSamples(
         growth,
         stat,
-        12
+        12,
+        selectedContext
       );
 
     const label =
@@ -15889,7 +15984,7 @@
             <span>No selected-stat observations</span>
           </div>
 
-          ${renderStatGrowthFocusControl(focus)}
+          ${renderStatGrowthFocusControl(focus, selectedContext)}
         </div>
       `;
     }
@@ -16134,7 +16229,7 @@
           <span>${escapeActivityHtml(label)} · last ${samples.length} observations</span>
         </div>
 
-        ${renderStatGrowthFocusControl(focus)}
+        ${renderStatGrowthFocusControl(focus, selectedContext)}
 
         <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars" class="ta-stat-total-svg">
           <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
@@ -16997,6 +17092,11 @@
         ? 'all'
         : 'selected';
 
+    root.__taStatGrowthContext =
+      uiSessionStatGrowthContext(
+        uiState.stat_growth_context
+      );
+
     const columns =
       Array.from(
         root.querySelectorAll(
@@ -17236,10 +17336,43 @@
               renderStatGrowthCumulativeChart(
                 root.__taStatGrowth ||
                 {},
-                root.__taStatGrowthFocus
+                root.__taStatGrowthFocus,
+                root.__taStatGrowthContext
               );
 
             refreshScopedGainSummary();
+
+            bindCumulativeInteractions(
+              root
+            );
+          }
+        );
+
+        const contextSelect =
+          card.querySelector(
+            '[data-ta-stat-total-context]'
+          );
+
+        contextSelect?.addEventListener(
+          'change',
+          () => {
+            root.__taStatGrowthContext =
+              uiSessionStatGrowthContext(
+                contextSelect.value
+              );
+
+            writeUiSessionState({
+              stat_growth_context:
+                root.__taStatGrowthContext
+            });
+
+            card.outerHTML =
+              renderStatGrowthCumulativeChart(
+                root.__taStatGrowth ||
+                {},
+                root.__taStatGrowthFocus,
+                root.__taStatGrowthContext
+              );
 
             bindCumulativeInteractions(
               root
