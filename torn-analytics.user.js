@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.17.8
+// @version      2.18.0
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.17.8';
+  const VERSION = '2.18.0';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13707,6 +13707,212 @@
       : null;
   }
 
+  function statGrowthHappinessBoostSource(
+    logId
+  ) {
+    switch (
+      Number(
+        logId
+      )
+    ) {
+      case 2020:
+        return 'Candy';
+
+      case 2180:
+        return 'Erotic DVD';
+
+      case 2210:
+        return 'Ecstasy';
+
+      case 2280:
+        return 'Vicodin';
+
+      default:
+        return null;
+    }
+  }
+
+  function statGrowthHappinessBoostEvent(
+    log
+  ) {
+    const logId =
+      Number(
+        log?.log ??
+        log?.details?.id
+      );
+    const source =
+      statGrowthHappinessBoostSource(
+        logId
+      );
+
+    if (
+      !source
+    ) {
+      return null;
+    }
+
+    const timestamp =
+      Number(
+        log?.timestamp
+      );
+
+    if (
+      !Number.isSafeInteger(
+        timestamp
+      ) ||
+      timestamp <= 0
+    ) {
+      return null;
+    }
+
+    return {
+      id:
+        String(
+          log?.id ??
+          ''
+        ),
+      log_id:
+        logId,
+      timestamp,
+      source
+    };
+  }
+
+  function statGrowthTrainingContext(
+    action,
+    happinessBoostEvents,
+    historyFirstTimestamp,
+    windowSeconds = 15 * 60
+  ) {
+    const timestamp =
+      Number(
+        action?.timestamp
+      );
+    const historyStart =
+      Number(
+        historyFirstTimestamp
+      );
+    const safeWindow =
+      Number.isSafeInteger(
+        Number(
+          windowSeconds
+        )
+      ) &&
+      Number(windowSeconds) > 0
+        ? Number(windowSeconds)
+        : 15 * 60;
+
+    if (
+      !Number.isSafeInteger(
+        timestamp
+      ) ||
+      timestamp <= 0 ||
+      !Number.isSafeInteger(
+        historyStart
+      ) ||
+      historyStart <= 0 ||
+      historyStart >
+        timestamp -
+        safeWindow
+    ) {
+      return {
+        status:
+          'context_unavailable',
+        window_seconds:
+          safeWindow
+      };
+    }
+
+    const events =
+      Array.isArray(
+        happinessBoostEvents
+      )
+        ? happinessBoostEvents
+        : [];
+
+    let low = 0;
+    let high =
+      events.length -
+      1;
+    let latest =
+      null;
+
+    while (
+      low <= high
+    ) {
+      const middle =
+        Math.floor(
+          (
+            low +
+            high
+          ) /
+          2
+        );
+      const event =
+        events[middle];
+      const eventTimestamp =
+        Number(
+          event?.timestamp
+        );
+
+      if (
+        !Number.isSafeInteger(
+          eventTimestamp
+        ) ||
+        eventTimestamp >
+          timestamp
+      ) {
+        high =
+          middle -
+          1;
+        continue;
+      }
+
+      latest =
+        event;
+      low =
+        middle +
+        1;
+    }
+
+    if (
+      latest &&
+      Number(latest.timestamp) >=
+        timestamp -
+        safeWindow
+    ) {
+      return {
+        status:
+          'happiness_boost_observed',
+        window_seconds:
+          safeWindow,
+        seconds_before:
+          timestamp -
+          Number(
+            latest.timestamp
+          ),
+        source:
+          latest.source,
+        source_log_id:
+          Number(
+            latest.log_id
+          ),
+        source_event_id:
+          String(
+            latest.id ||
+            ''
+          )
+      };
+    }
+
+    return {
+      status:
+        'no_happiness_boost_observed',
+      window_seconds:
+        safeWindow
+    };
+  }
+
   function statGrowthBlankStat(
     stat,
     label
@@ -14105,7 +14311,11 @@
     const actions =
       [];
 
+    const happinessBoostEvents =
+      [];
+
     let recognizedLogs = 0;
+    let historyFirstTimestamp = null;
     let historyLastTimestamp = null;
 
     const rejectionReasons =
@@ -14127,15 +14337,35 @@
         Number.isSafeInteger(
           candidateTimestamp
         ) &&
-        candidateTimestamp > 0 &&
-        (
-          historyLastTimestamp === null ||
-          candidateTimestamp >
-            historyLastTimestamp
-        )
+        candidateTimestamp > 0
       ) {
+        historyFirstTimestamp =
+          historyFirstTimestamp === null
+            ? candidateTimestamp
+            : Math.min(
+                historyFirstTimestamp,
+                candidateTimestamp
+              );
         historyLastTimestamp =
-          candidateTimestamp;
+          historyLastTimestamp === null
+            ? candidateTimestamp
+            : Math.max(
+                historyLastTimestamp,
+                candidateTimestamp
+              );
+      }
+
+      const happinessBoostEvent =
+        statGrowthHappinessBoostEvent(
+          log
+        );
+
+      if (
+        happinessBoostEvent
+      ) {
+        happinessBoostEvents.push(
+          happinessBoostEvent
+        );
       }
 
       const inspection =
@@ -14199,6 +14429,30 @@
           right.id
         )
     );
+
+    happinessBoostEvents.sort(
+      (
+        left,
+        right
+      ) =>
+        left.timestamp -
+          right.timestamp ||
+        left.id.localeCompare(
+          right.id
+        )
+    );
+
+    for (
+      const action
+      of actions
+    ) {
+      action.training_context =
+        statGrowthTrainingContext(
+          action,
+          happinessBoostEvents,
+          historyFirstTimestamp
+        );
+    }
 
     const stats =
       statGrowthBlankStatTotals();
@@ -14460,6 +14714,8 @@
         actions.length,
       training_actions:
         actions,
+      training_context_window_seconds:
+        15 * 60,
       trains:
         totalTrains,
       energy_used:
@@ -15477,6 +15733,103 @@
       </div>
     `;
   }
+  function statGrowthTrainingContextDetail(
+    context
+  ) {
+    const status =
+      String(
+        context?.status ||
+        ''
+      );
+
+    if (
+      status ===
+      'happiness_boost_observed'
+    ) {
+      const secondsBefore =
+        Math.max(
+          0,
+          Number(
+            context?.seconds_before
+          ) ||
+          0
+        );
+      const timing =
+        secondsBefore < 60
+          ? '<1m'
+          : `${Math.floor(secondsBefore / 60)}m`;
+      const source =
+        String(
+          context?.source ||
+          'Happiness item'
+        );
+
+      return `Happiness boost observed ${timing} before (${source})`;
+    }
+
+    if (
+      status ===
+      'no_happiness_boost_observed'
+    ) {
+      return 'No Happiness boost observed in the prior 15m';
+    }
+
+    return 'Training context unavailable';
+  }
+
+  function statGrowthTrainingContextSummary(
+    growth,
+    stat
+  ) {
+    const rows =
+      (
+        growth?.training_actions ||
+        []
+      ).filter(
+        action =>
+          action?.stat ===
+          stat
+      );
+    const counts = {
+      happiness_boost_observed:
+        0,
+      no_happiness_boost_observed:
+        0,
+      context_unavailable:
+        0
+    };
+
+    for (
+      const action
+      of rows
+    ) {
+      const status =
+        action?.training_context?.status;
+
+      if (
+        status ===
+        'happiness_boost_observed' ||
+        status ===
+        'no_happiness_boost_observed'
+      ) {
+        counts[status]++;
+      } else {
+        counts.context_unavailable++;
+      }
+    }
+
+    return {
+      stat,
+      label:
+        growth?.stats?.[stat]?.label ||
+        rows[0]?.stat_label ||
+        'Stat',
+      actions:
+        rows.length,
+      ...counts
+    };
+  }
+
   function statGrowthCumulativeSampleDetail(
     action
   ) {
@@ -15491,7 +15844,10 @@
       `${Number(action?.energy_used || 0).toLocaleString()} energy · ` +
       `${Number(action?.trains || 0).toLocaleString()} trains · ` +
       `${statGrowthGymName(action?.gym)} · ` +
-      `total after ${statGrowthFormatNumber(action?.stat_after, 2)}`;
+      `total after ${statGrowthFormatNumber(action?.stat_after, 2)} · ` +
+      statGrowthTrainingContextDetail(
+        action?.training_context
+      );
   }
 
   function renderStatGrowthCumulativeChart(
@@ -15516,6 +15872,12 @@
       samples[0]?.stat_label
         ? samples[0].stat_label
         : 'Stat';
+
+    const contextSummary =
+      statGrowthTrainingContextSummary(
+        growth,
+        stat
+      );
 
     if (
       !samples.length
@@ -15798,6 +16160,16 @@
 
         <div class="ta-chart-detail" data-ta-stat-total-detail-output>
           ${escapeActivityHtml(firstDetail)}
+        </div>
+
+        <div class="ta-stat-context-summary">
+          <strong>Observed training context · ${escapeActivityHtml(contextSummary.label)}</strong>
+          <span>
+            ${Number(contextSummary.happiness_boost_observed || 0).toLocaleString()} boost observed ·
+            ${Number(contextSummary.no_happiness_boost_observed || 0).toLocaleString()} no boost observed ·
+            ${Number(contextSummary.context_unavailable || 0).toLocaleString()} unavailable
+          </span>
+          <small>15-minute log lookback; exact Happiness is not inferred.</small>
         </div>
       </div>
     `;
@@ -22060,6 +22432,30 @@
         font-size: 12px;
         font-weight: 600;
         line-height: 1.35;
+      }
+
+      #${MODAL_ID} .ta-stat-context-summary {
+        display: grid;
+        gap: 3px;
+        margin-top: 8px;
+        padding: 9px 10px;
+        border: 1px solid #353027;
+        border-left: 3px solid #c79642;
+        border-radius: 8px;
+        background: #171511;
+        color: #d3d3d3;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      #${MODAL_ID} .ta-stat-context-summary strong {
+        color: #f0f0f0;
+        font-size: 13px;
+      }
+
+      #${MODAL_ID} .ta-stat-context-summary small {
+        color: #aaa;
+        font-size: 11px;
       }
 
       @media(max-width:360px) {
