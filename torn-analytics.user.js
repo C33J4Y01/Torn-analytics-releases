@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.17.5
+// @version      2.17.6
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.17.5';
+  const VERSION = '2.17.6';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -14855,12 +14855,12 @@
       return '<div class="ta-section-intro">Not enough comparable observations to draw a history graph yet.</div>';
     }
 
-    const width = 320;
-    const height = 128;
-    const left = 38;
-    const right = 10;
-    const top = 12;
-    const bottom = 24;
+    const width = 360;
+    const height = 150;
+    const left = 58;
+    const right = 14;
+    const top = 18;
+    const bottom = 34;
     const rates = points.map(point => point.rate);
     const rawMin = Math.min(...rates);
     const rawMax = Math.max(...rates);
@@ -14892,16 +14892,16 @@
 
     return `
       <div class="ta-section-intro">${escapeActivityHtml(trainingReadinessStatLabel(stat))} · gain per Energy · same observed gym</div>
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Observed ${escapeActivityHtml(trainingReadinessStatLabel(stat))} gain per Energy over recent comparable training actions" style="display:block;width:100%;height:auto;max-height:180px;overflow:visible;color:inherit">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Observed ${escapeActivityHtml(trainingReadinessStatLabel(stat))} gain per Energy over recent comparable training actions" class="ta-training-history-chart" style="display:block;width:100%;height:auto;max-height:190px;overflow:visible;color:inherit">
         <line x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}" stroke="currentColor" opacity="0.25" />
         <line x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" stroke="currentColor" opacity="0.25" />
         <line x1="${left}" y1="${medianY}" x2="${width - right}" y2="${medianY}" stroke="currentColor" opacity="0.35" stroke-dasharray="4 4" />
-        <polyline points="${polyline}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        <polyline points="${polyline}" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
         ${circles}
-        <text x="2" y="${top + 4}" fill="currentColor" opacity="0.7" font-size="9">${escapeActivityHtml(statGrowthFormatNumber(rawMax, 3))}</text>
-        <text x="2" y="${height - bottom}" fill="currentColor" opacity="0.7" font-size="9">${escapeActivityHtml(statGrowthFormatNumber(rawMin, 3))}</text>
-        <text x="${left}" y="${height - 7}" fill="currentColor" opacity="0.7" font-size="9">${escapeActivityHtml(firstDate)}</text>
-        <text x="${width - right}" y="${height - 7}" fill="currentColor" opacity="0.7" font-size="9" text-anchor="end">${escapeActivityHtml(lastDate)}</text>
+        <text x="${left - 8}" y="${top + 5}" fill="currentColor" opacity="0.82" font-size="12" font-weight="600" text-anchor="end">${escapeActivityHtml(statGrowthFormatNumber(rawMax, 3))}</text>
+        <text x="${left - 8}" y="${height - bottom}" fill="currentColor" opacity="0.82" font-size="12" font-weight="600" text-anchor="end">${escapeActivityHtml(statGrowthFormatNumber(rawMin, 3))}</text>
+        <text x="${left}" y="${height - 10}" fill="currentColor" opacity="0.8" font-size="12" font-weight="600">${escapeActivityHtml(firstDate)}</text>
+        <text x="${width - right}" y="${height - 10}" fill="currentColor" opacity="0.8" font-size="12" font-weight="600" text-anchor="end">${escapeActivityHtml(lastDate)}</text>
       </svg>
       <div class="ta-section-intro">Dashed line = median. Points are real recorded observations; no Happiness prediction is applied.</div>
     `;
