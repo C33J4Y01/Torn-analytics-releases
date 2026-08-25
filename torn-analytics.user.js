@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.2
+// @version      2.18.3
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.2';
+  const VERSION = '2.18.3';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -12838,6 +12838,22 @@
       : 'all';
   }
 
+  function uiSessionStatGrowthSessionLimit(
+    value
+  ) {
+    return [
+      12,
+      30,
+      60
+    ].includes(
+      Number(
+        value
+      )
+    )
+      ? Number(value)
+      : 12;
+  }
+
   function writeUiOrientationHandoff(
     state
   ) {
@@ -12892,6 +12908,10 @@
       stat_growth_context:
         uiSessionStatGrowthContext(
           state.stat_growth_context
+        ),
+      stat_growth_session_limit:
+        uiSessionStatGrowthSessionLimit(
+          state.stat_growth_session_limit
         ),
       updated_at:
         Date.now()
@@ -12985,6 +13005,10 @@
           uiSessionStatGrowthContext(
             parsed.stat_growth_context
           ),
+        stat_growth_session_limit:
+          uiSessionStatGrowthSessionLimit(
+            parsed.stat_growth_session_limit
+          ),
         updated_at:
           Math.max(
             0,
@@ -13023,6 +13047,8 @@
         'selected',
       stat_growth_context:
         'all',
+      stat_growth_session_limit:
+        12,
       updated_at:
         0
     };
@@ -13106,6 +13132,10 @@
         stat_growth_context:
           uiSessionStatGrowthContext(
             parsed.stat_growth_context
+          ),
+        stat_growth_session_limit:
+          uiSessionStatGrowthSessionLimit(
+            parsed.stat_growth_session_limit
           ),
         updated_at:
           Math.max(
@@ -13322,6 +13352,10 @@
       stat_growth_context:
         uiSessionStatGrowthContext(
           source?.stat_growth_context
+        ),
+      stat_growth_session_limit:
+        uiSessionStatGrowthSessionLimit(
+          source?.stat_growth_session_limit
         )
     });
 
@@ -15768,7 +15802,8 @@
 
   function renderStatGrowthFocusControl(
     focus,
-    context = 'all'
+    context = 'all',
+    sessionLimit = 12
   ) {
     const selected =
       uiSessionTrainingFocus(
@@ -15777,6 +15812,10 @@
     const selectedContext =
       uiSessionStatGrowthContext(
         context
+      );
+    const selectedLimit =
+      uiSessionStatGrowthSessionLimit(
+        sessionLimit
       );
 
     return `
@@ -15814,6 +15853,23 @@
                   value="${option}"
                   ${option === selectedContext ? 'selected' : ''}
                 >${escapeActivityHtml(statGrowthContextFilterLabel(option))}</option>
+              `
+            ).join('')}
+          </select>
+        </label>
+        <label>
+          <span>Sessions</span>
+          <select data-ta-stat-total-session-limit aria-label="Sessions shown">
+            ${[
+              12,
+              30,
+              60
+            ].map(
+              option => `
+                <option
+                  value="${option}"
+                  ${option === selectedLimit ? 'selected' : ''}
+                >${option}</option>
               `
             ).join('')}
           </select>
@@ -16225,7 +16281,8 @@
   function renderStatGrowthCumulativeChart(
     growth,
     focus = 'recent',
-    context = 'all'
+    context = 'all',
+    sessionLimit = 12
   ) {
     const stat =
       statGrowthFocusStat(
@@ -16237,12 +16294,16 @@
       uiSessionStatGrowthContext(
         context
       );
+    const selectedLimit =
+      uiSessionStatGrowthSessionLimit(
+        sessionLimit
+      );
 
     const samples =
       statGrowthCumulativeSamples(
         growth,
         stat,
-        12,
+        selectedLimit,
         selectedContext
       );
 
@@ -16268,7 +16329,7 @@
             <span>No selected-stat observations</span>
           </div>
 
-          ${renderStatGrowthFocusControl(focus, selectedContext)}
+          ${renderStatGrowthFocusControl(focus, selectedContext, selectedLimit)}
         </div>
       `;
     }
@@ -16538,7 +16599,7 @@
           <span>${escapeActivityHtml(label)} · last ${samples.length} observations</span>
         </div>
 
-        ${renderStatGrowthFocusControl(focus, selectedContext)}
+        ${renderStatGrowthFocusControl(focus, selectedContext, selectedLimit)}
 
         <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars" class="ta-stat-total-svg" data-ta-stat-total-svg>
           <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
@@ -17195,6 +17256,14 @@
       'all'
         ? 'all'
         : 'selected';
+    const sessionLimit =
+      uiSessionStatGrowthSessionLimit(
+        safeOptions.session_limit
+      );
+    const context =
+      uiSessionStatGrowthContext(
+        safeOptions.context
+      );
 
     if (
       !growth?.valid_logs
@@ -17277,7 +17346,7 @@
             ${escapeActivityHtml(timeBasis)}; all-time totals do not.
           </div>
 
-          ${renderStatGrowthCumulativeChart(growth, focus)}
+          ${renderStatGrowthCumulativeChart(growth, focus, context, sessionLimit)}
 
           ${renderStatGrowthScopedGainSummary(growth, focus, scope)}
 
@@ -17406,6 +17475,11 @@
     root.__taStatGrowthContext =
       uiSessionStatGrowthContext(
         uiState.stat_growth_context
+      );
+
+    root.__taStatGrowthSessionLimit =
+      uiSessionStatGrowthSessionLimit(
+        uiState.stat_growth_session_limit
       );
 
     const columns =
@@ -17608,14 +17682,6 @@
         chart?.addEventListener(
           'click',
           event => {
-            if (
-              event.target?.getAttribute?.(
-                'data-ta-stat-total-detail'
-              )
-            ) {
-              return;
-            }
-
             const rect =
               chart.getBoundingClientRect?.();
             const viewWidth =
@@ -17695,7 +17761,8 @@
                 root.__taStatGrowth ||
                 {},
                 root.__taStatGrowthFocus,
-                root.__taStatGrowthContext
+                root.__taStatGrowthContext,
+                root.__taStatGrowthSessionLimit
               );
 
             refreshScopedGainSummary();
@@ -17729,7 +17796,41 @@
                 root.__taStatGrowth ||
                 {},
                 root.__taStatGrowthFocus,
-                root.__taStatGrowthContext
+                root.__taStatGrowthContext,
+                root.__taStatGrowthSessionLimit
+              );
+
+            bindCumulativeInteractions(
+              root
+            );
+          }
+        );
+
+        const sessionLimitSelect =
+          card.querySelector(
+            '[data-ta-stat-total-session-limit]'
+          );
+
+        sessionLimitSelect?.addEventListener(
+          'change',
+          () => {
+            root.__taStatGrowthSessionLimit =
+              uiSessionStatGrowthSessionLimit(
+                sessionLimitSelect.value
+              );
+
+            writeUiSessionState({
+              stat_growth_session_limit:
+                root.__taStatGrowthSessionLimit
+            });
+
+            card.outerHTML =
+              renderStatGrowthCumulativeChart(
+                root.__taStatGrowth ||
+                {},
+                root.__taStatGrowthFocus,
+                root.__taStatGrowthContext,
+                root.__taStatGrowthSessionLimit
               );
 
             bindCumulativeInteractions(
@@ -17855,6 +17956,14 @@
       'all'
         ? 'all'
         : 'selected';
+    const context =
+      uiSessionStatGrowthContext(
+        state.stat_growth_context
+      );
+    const sessionLimit =
+      uiSessionStatGrowthSessionLimit(
+        state.stat_growth_session_limit
+      );
 
     const meta = [
       readiness?.energy === null ||
@@ -17878,7 +17987,10 @@
           ${renderStatGrowthDashboard(growth, {
             open: statGrowthOpen,
             focus,
-            scope
+            scope,
+            context,
+            session_limit:
+              sessionLimit
           })}
         </div>
       </details>
