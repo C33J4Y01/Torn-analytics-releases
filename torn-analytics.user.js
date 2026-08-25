@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.17.3
+// @version      2.17.4
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.17.3';
+  const VERSION = '2.17.4';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -16308,11 +16308,21 @@
           }
         </div>
 
-        <div class="ta-metric-card ta-stat-gain-primary">
-          <div class="ta-metric-label">Observed stat gain</div>
-          <div class="ta-metric-value">${escapeActivityHtml(statGrowthFormatGain(summary.gain))}</div>
-          <div class="ta-metric-note">
-            ${escapeActivityHtml(summary.label)} · ${summary.actions.toLocaleString()} training actions
+        <div class="ta-stat-summary-tiles">
+          <div class="ta-metric-card ta-stat-gain-primary">
+            <div class="ta-metric-label">Observed stat gain</div>
+            <div class="ta-metric-value">${escapeActivityHtml(statGrowthFormatGain(summary.gain))}</div>
+            <div class="ta-metric-note">
+              ${escapeActivityHtml(summary.label)}
+            </div>
+          </div>
+
+          <div class="ta-metric-card ta-stat-training-actions-tile">
+            <div class="ta-metric-label">Training actions</div>
+            <div class="ta-metric-value">${summary.actions.toLocaleString()}</div>
+            <div class="ta-metric-note">
+              ${escapeActivityHtml(summary.label)} scope
+            </div>
           </div>
         </div>
       </div>
@@ -21929,6 +21939,54 @@
 
         #${MODAL_ID} .ta-stat-total-label {
           font-size: 14px;
+        }
+      }
+
+
+      /* v2.17.4: compact, glanceable Training summary tiles. */
+      #${MODAL_ID} .ta-stat-summary-tiles {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      #${MODAL_ID} .ta-stat-summary-tiles .ta-metric-card {
+        min-width: 0;
+        min-height: 92px;
+        margin: 0;
+        padding: 10px;
+        border-radius: 9px;
+      }
+
+      #${MODAL_ID} .ta-stat-summary-tiles .ta-metric-label {
+        font-size: 10px;
+        letter-spacing: .045em;
+      }
+
+      #${MODAL_ID} .ta-stat-summary-tiles .ta-metric-value {
+        margin-top: 5px;
+        font-size: 22px;
+        line-height: 1.08;
+      }
+
+      #${MODAL_ID} .ta-stat-summary-tiles .ta-metric-note {
+        margin-top: 5px;
+        font-size: 11px;
+        line-height: 1.3;
+      }
+
+      #${MODAL_ID} .ta-stat-training-actions-tile {
+        border-color: #343434;
+        background: #161616;
+      }
+
+      #${MODAL_ID} .ta-stat-training-actions-tile .ta-metric-value {
+        color: #e2e2e2;
+      }
+
+      @media(max-width:360px) {
+        #${MODAL_ID} .ta-stat-summary-tiles {
+          grid-template-columns: 1fr;
         }
       }
 
