@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.3
+// @version      2.18.4
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.3';
+  const VERSION = '2.18.4';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13901,6 +13901,8 @@
       1;
     let latest =
       null;
+    let latestIndex =
+      -1;
 
     while (
       low <= high
@@ -13935,6 +13937,8 @@
 
       latest =
         event;
+      latestIndex =
+        middle;
       low =
         middle +
         1;
@@ -13946,6 +13950,43 @@
         timestamp -
         safeWindow
     ) {
+      const boosts =
+        [];
+
+      for (
+        let index =
+          latestIndex;
+        index >= 0;
+        index--
+      ) {
+        const event =
+          events[index];
+        const eventTimestamp =
+          Number(
+            event?.timestamp
+          );
+
+        if (
+          eventTimestamp <
+          timestamp -
+          safeWindow
+        ) {
+          break;
+        }
+
+        boosts.push({
+          seconds_before:
+            timestamp -
+            eventTimestamp,
+          source:
+            event.source,
+          source_log_id:
+            Number(event.log_id),
+          source_event_id:
+            String(event.id || '')
+        });
+      }
+
       return {
         status:
           'happiness_boost_observed',
@@ -13966,7 +14007,8 @@
           String(
             latest.id ||
             ''
-          )
+          ),
+        boosts
       };
     }
 
@@ -15890,25 +15932,14 @@
       status ===
       'happiness_boost_observed'
     ) {
-      const secondsBefore =
-        Math.max(
-          0,
-          Number(
-            context?.seconds_before
-          ) ||
-          0
-        );
-      const timing =
-        secondsBefore < 60
-          ? '<1m'
-          : `${Math.floor(secondsBefore / 60)}m`;
-      const source =
-        String(
-          context?.source ||
-          'Happiness item'
+      const boosters =
+        statGrowthTrainingContextBoosters(
+          context
         );
 
-      return `Happiness boost observed ${timing} before (${source})`;
+      return boosters.length === 1
+        ? `Happiness boost observed ${boosters[0]}`
+        : `${boosters.length} Happiness boosts observed: ${boosters.join(', ')}`;
     }
 
     if (
@@ -15919,6 +15950,52 @@
     }
 
     return 'Training context unavailable';
+  }
+
+  function statGrowthTrainingContextBoosters(
+    context
+  ) {
+    const listed =
+      Array.isArray(
+        context?.boosts
+      )
+        ? context.boosts
+        : [];
+    const rows =
+      listed.length
+        ? listed
+        : [
+            {
+              seconds_before:
+                context?.seconds_before,
+              source:
+                context?.source
+            }
+          ];
+
+    return rows.map(
+      boost => {
+        const secondsBefore =
+          Math.max(
+            0,
+            Number(
+              boost?.seconds_before
+            ) ||
+            0
+          );
+        const timing =
+          secondsBefore < 60
+            ? '<1m'
+            : `${Math.floor(secondsBefore / 60)}m`;
+        const source =
+          String(
+            boost?.source ||
+            'Happiness item'
+          );
+
+        return `${source} · ${timing} before`;
+      }
+    );
   }
 
   function statGrowthTrainingContextSummary(
