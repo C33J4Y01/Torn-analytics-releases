@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.17.2
+// @version      2.17.3
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.17.2';
+  const VERSION = '2.17.3';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -16420,8 +16420,8 @@
 
         <div class="ta-section-body">
           <div class="ta-section-intro">
-            Observed gym-training history from Torn logs. Daily grouping follows
-            ${escapeActivityHtml(timeBasis)} selected in Settings. All-time gain and energy totals do not change with the time basis.
+            Observed gym-training history. Daily dates use
+            ${escapeActivityHtml(timeBasis)}; all-time totals do not.
           </div>
 
           ${renderStatGrowthCumulativeChart(growth, focus)}
@@ -21819,6 +21819,116 @@
 
         #${MODAL_ID} .ta-resource-breakdown-topline {
           align-items: flex-start;
+        }
+      }
+
+
+      /* v2.17.3: training readability hierarchy for compact phone layouts. */
+      #${MODAL_ID} .ta-stat-growth-section .ta-section-intro {
+        margin: 0 0 10px;
+        padding: 0 1px;
+        color: #aaa;
+        font-size: 12px;
+        line-height: 1.42;
+      }
+
+      #${MODAL_ID} .ta-stat-total-chart {
+        padding: 12px;
+        border-color: #3a3a3a;
+        background: linear-gradient(180deg, #171717 0%, #121212 100%);
+      }
+
+      #${MODAL_ID} .ta-stat-total-chart .ta-chart-heading {
+        align-items: flex-start;
+        gap: 8px;
+        margin-bottom: 9px;
+      }
+
+      #${MODAL_ID} .ta-stat-total-chart .ta-chart-heading > span:first-child {
+        color: #f2f2f2;
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: -.01em;
+        line-height: 1.18;
+      }
+
+      #${MODAL_ID} .ta-stat-total-chart .ta-chart-heading > span:last-child {
+        max-width: 46%;
+        color: #bbb;
+        font-size: 12px;
+        line-height: 1.25;
+        opacity: .78;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls {
+        margin: 0 0 8px;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls select {
+        min-height: 38px;
+        padding: 7px 34px 7px 10px;
+        font-size: 15px;
+      }
+
+      #${MODAL_ID} .ta-stat-total-label {
+        fill: #c5c5c5;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      #${MODAL_ID} .ta-stat-total-legend {
+        gap: 14px;
+        margin-top: 7px;
+        color: #d0d0d0;
+        font-size: 13px;
+        opacity: .86;
+      }
+
+      #${MODAL_ID} .ta-stat-total-line-key {
+        width: 20px;
+        height: 4px;
+      }
+
+      #${MODAL_ID} .ta-stat-total-bar-key {
+        width: 12px;
+        height: 12px;
+      }
+
+      #${MODAL_ID} .ta-stat-total-chart .ta-chart-detail {
+        margin-top: 10px;
+        padding: 10px 11px;
+        border-color: #3c3428;
+        border-left: 3px solid #dba854;
+        border-radius: 7px;
+        background: #191715;
+        color: #e1e1e1;
+        font-size: 14px;
+        line-height: 1.42;
+      }
+
+      @media(max-width:520px) {
+        #${MODAL_ID} .ta-stat-total-chart {
+          padding: 11px;
+        }
+
+        #${MODAL_ID} .ta-stat-total-chart .ta-chart-heading > span:first-child {
+          font-size: 17px;
+        }
+
+        #${MODAL_ID} .ta-stat-total-chart .ta-chart-heading > span:last-child {
+          font-size: 12px;
+        }
+
+        #${MODAL_ID} .ta-stat-total-label {
+          font-size: 14px;
         }
       }
 
