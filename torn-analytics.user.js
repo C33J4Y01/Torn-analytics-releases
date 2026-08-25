@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.6
+// @version      2.18.7
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.6';
+  const VERSION = '2.18.7';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -12913,6 +12913,18 @@
         uiSessionStatGrowthSessionLimit(
           state.stat_growth_session_limit
         ),
+      resource_energy_open:
+        uiSessionOptionalBoolean(
+          state.resource_energy_open
+        ),
+      resource_nerve_open:
+        uiSessionOptionalBoolean(
+          state.resource_nerve_open
+        ),
+      resource_happiness_open:
+        uiSessionOptionalBoolean(
+          state.resource_happiness_open
+        ),
       updated_at:
         Date.now()
     };
@@ -13009,6 +13021,18 @@
           uiSessionStatGrowthSessionLimit(
             parsed.stat_growth_session_limit
           ),
+        resource_energy_open:
+          uiSessionOptionalBoolean(
+            parsed.resource_energy_open
+          ),
+        resource_nerve_open:
+          uiSessionOptionalBoolean(
+            parsed.resource_nerve_open
+          ),
+        resource_happiness_open:
+          uiSessionOptionalBoolean(
+            parsed.resource_happiness_open
+          ),
         updated_at:
           Math.max(
             0,
@@ -13049,6 +13073,12 @@
         'all',
       stat_growth_session_limit:
         12,
+      resource_energy_open:
+        null,
+      resource_nerve_open:
+        null,
+      resource_happiness_open:
+        null,
       updated_at:
         0
     };
@@ -13136,6 +13166,18 @@
         stat_growth_session_limit:
           uiSessionStatGrowthSessionLimit(
             parsed.stat_growth_session_limit
+          ),
+        resource_energy_open:
+          uiSessionOptionalBoolean(
+            parsed.resource_energy_open
+          ),
+        resource_nerve_open:
+          uiSessionOptionalBoolean(
+            parsed.resource_nerve_open
+          ),
+        resource_happiness_open:
+          uiSessionOptionalBoolean(
+            parsed.resource_happiness_open
           ),
         updated_at:
           Math.max(
@@ -13356,6 +13398,18 @@
       stat_growth_session_limit:
         uiSessionStatGrowthSessionLimit(
           source?.stat_growth_session_limit
+        ),
+      resource_energy_open:
+        uiSessionOptionalBoolean(
+          source?.resource_energy_open
+        ),
+      resource_nerve_open:
+        uiSessionOptionalBoolean(
+          source?.resource_nerve_open
+        ),
+      resource_happiness_open:
+        uiSessionOptionalBoolean(
+          source?.resource_happiness_open
         )
     });
 
@@ -18196,10 +18250,14 @@
   function renderStoredAnalysisDashboards(
     analysis
   ) {
+    const state =
+      readUiSessionState();
+
     return (
       renderResourceDashboard(
         analysis?.resource_flow,
-        analysis?.resource_bars
+        analysis?.resource_bars,
+        state
       ) +
       renderTrainingWorkspace(
         analysis?.training_readiness,
@@ -20255,7 +20313,8 @@
 
   function renderResourceDashboard(
     flow,
-    barsSnapshot
+    barsSnapshot,
+    options = {}
   ) {
     if (
       !flow
@@ -20273,27 +20332,60 @@
       barsSnapshot?.status ===
       'available';
 
-    const liveHtml =
-      liveAvailable
-        ? `
-          <div class="ta-resource-live-grid">
-            ${renderResourceDashboardLiveCard('energy', barsSnapshot.energy, barsSnapshot.fetched_at)}
-            ${renderResourceDashboardLiveCard('nerve', barsSnapshot.nerve, barsSnapshot.fetched_at)}
-            ${renderResourceDashboardLiveCard('happiness', barsSnapshot.happiness, barsSnapshot.fetched_at)}
-          </div>
-          <div class="ta-resource-freshness">
-            Refreshed ${escapeResourceDashboardHtml(new Date(barsSnapshot.fetched_at).toLocaleTimeString())}.
-            Analyze Stored Logs again for a fresh API reading.
-          </div>
-        `
-        : `
-          <div class="ta-resource-live-unavailable">
-            <b>Live resources unavailable</b>
-            <span>
-              Historical totals still work. A valid saved API key is needed for current bars and refill times.
-            </span>
-          </div>
+    const states =
+      options &&
+      typeof options === 'object'
+        ? options
+        : {};
+    const resourcePanel =
+      resource => {
+        const summary =
+          flow?.[resource] ||
+          resourceFlowBlankResource(
+            resource
+          );
+        const bar =
+          liveAvailable
+            ? barsSnapshot?.[resource]
+            : null;
+        const title =
+          resource === 'energy'
+            ? 'Energy'
+            : resource === 'nerve'
+              ? 'Nerve'
+              : 'Happiness';
+        const stateKey =
+          `resource_${resource}_open`;
+        const open =
+          states[stateKey] ===
+          true;
+        const summaryText =
+          bar
+            ? `${resourceDashboardFormatNumber(bar.current)} / ${resourceDashboardFormatNumber(bar.maximum)}`
+            : `${resourceDashboardFormatNumber(summary.gain_total)} gained`;
+
+        return `
+          <details class="ta-resource-panel" data-ta-resource-panel="${resource}" ${open ? 'open' : ''}>
+            <summary>
+              <span>${title}</span>
+              <b>${escapeResourceDashboardHtml(summaryText)}</b>
+            </summary>
+            <div class="ta-resource-panel-body">
+              ${
+                bar
+                  ? renderResourceDashboardLiveCard(resource, bar, barsSnapshot.fetched_at)
+                  : `
+                    <div class="ta-resource-live-unavailable">
+                      <b>Live ${title} unavailable</b>
+                      <span>Historical totals still work. A valid saved API key is needed for current bars and refill times.</span>
+                    </div>
+                  `
+              }
+              ${renderResourceDashboardHistoryCard(flow, resource)}
+            </div>
+          </details>
         `;
+      };
 
     return `
       <details class="ta-section ta-resource-section">
@@ -20307,12 +20399,21 @@
           <div class="ta-section-intro">
             See what you have now, when it will refill, and how your recorded Energy, Nerve, and Happiness moved over time.
           </div>
-          ${liveHtml}
-          <div class="ta-resource-history-grid">
-            ${renderResourceDashboardHistoryCard(flow, 'energy')}
-            ${renderResourceDashboardHistoryCard(flow, 'nerve')}
-            ${renderResourceDashboardHistoryCard(flow, 'happiness')}
+          <div class="ta-resource-panel-list">
+            ${resourcePanel('energy')}
+            ${resourcePanel('nerve')}
+            ${resourcePanel('happiness')}
           </div>
+          ${
+            liveAvailable
+              ? `
+                <div class="ta-resource-freshness">
+                  Refreshed ${escapeResourceDashboardHtml(new Date(barsSnapshot.fetched_at).toLocaleTimeString())}.
+                  Analyze Stored Logs again for a fresh API reading.
+                </div>
+              `
+              : ''
+          }
           <div class="ta-resource-limit-note">
             Natural regeneration is not included in historical gains because Torn does not record it in personal log history. Actions without a recorded resource amount are not guessed. Live bars and refill times above come directly from Torn's API.
           </div>
@@ -20324,6 +20425,40 @@
   function bindResourceDashboardInteractions(
     root
   ) {
+    for (
+      const panel
+      of root?.querySelectorAll?.(
+        '[data-ta-resource-panel]'
+      ) || []
+    ) {
+      panel.addEventListener(
+        'toggle',
+        () => {
+          const resource =
+            panel.getAttribute(
+              'data-ta-resource-panel'
+            );
+
+          if (
+            ![
+              'energy',
+              'nerve',
+              'happiness'
+            ].includes(
+              resource
+            )
+          ) {
+            return;
+          }
+
+          writeUiSessionState({
+            [`resource_${resource}_open`]:
+              panel.open === true
+          });
+        }
+      );
+    }
+
     const countdowns =
       root?.querySelectorAll?.(
         '[data-ta-resource-full-at]'
@@ -23001,6 +23136,71 @@
 
       #${MODAL_ID} .ta-resource-limit-note {
         margin-top: 10px;
+      }
+
+      /* v2.18.7: three concise, independently expandable resource drawers. */
+      #${MODAL_ID} .ta-resource-panel-list {
+        display: grid;
+        gap: 7px;
+      }
+
+      #${MODAL_ID} .ta-resource-panel {
+        overflow: hidden;
+        border: 1px solid #303030;
+        border-radius: 8px;
+        background: #151515;
+      }
+
+      #${MODAL_ID} .ta-resource-panel > summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 46px;
+        padding: 0 10px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      #${MODAL_ID} .ta-resource-panel > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-resource-panel > summary > span {
+        color: #efefef;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-resource-panel > summary > b {
+        overflow-wrap: anywhere;
+        color: #cfcfcf;
+        font-size: 13px;
+        text-align: right;
+      }
+
+      #${MODAL_ID} .ta-resource-panel > summary::after {
+        content: '⌄';
+        margin-left: 4px;
+        color: #999;
+        font-size: 16px;
+      }
+
+      #${MODAL_ID} .ta-resource-panel[open] > summary::after {
+        transform: rotate(180deg);
+      }
+
+      #${MODAL_ID} .ta-resource-panel-body {
+        display: grid;
+        gap: 8px;
+        padding: 0 9px 9px;
+        border-top: 1px solid #2a2a2a;
+      }
+
+      #${MODAL_ID} .ta-resource-panel-body > .ta-resource-live-card,
+      #${MODAL_ID} .ta-resource-panel-body > .ta-resource-history-card,
+      #${MODAL_ID} .ta-resource-panel-body > .ta-resource-live-unavailable {
+        margin-top: 9px;
       }
       @media(max-width:520px) {
 
