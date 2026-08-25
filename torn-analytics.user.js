@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.17.7
+// @version      2.17.8
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.17.7';
+  const VERSION = '2.17.8';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -15667,6 +15667,41 @@
         }
       ).join('');
 
+    const barHits =
+      samples.map(
+        (
+          action,
+          index
+        ) => {
+          const detail =
+            statGrowthCumulativeSampleDetail(
+              action
+            );
+          const hitWidth =
+            Math.min(
+              36,
+              Math.max(
+                24,
+                barWidth +
+                16
+              )
+            );
+
+          return `
+            <rect
+              x="${(pointX(index) - hitWidth / 2).toFixed(2)}"
+              y="${top}"
+              width="${hitWidth.toFixed(2)}"
+              height="${plotHeight.toFixed(2)}"
+              class="ta-stat-total-bar-hit"
+              data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
+              aria-hidden="true"
+              tabindex="-1"
+            ></rect>
+          `;
+        }
+      ).join('');
+
     const points =
       samples.map(
         (
@@ -15682,7 +15717,7 @@
             <circle
               cx="${pointX(index).toFixed(2)}"
               cy="${pointY(Number(action.stat_after || 0)).toFixed(2)}"
-              r="8"
+              r="18"
               class="ta-stat-total-hit"
               data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
               role="button"
@@ -15746,6 +15781,7 @@
           ${bars}
           <path d="${line}" class="ta-stat-total-line"></path>
           ${points}
+          ${barHits}
           <text x="${left - 8}" y="${top + 4}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(statGrowthFormatNumber(maximumTotal, 2))}</text>
           <text x="${left - 8}" y="${top + plotHeight}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(statGrowthFormatNumber(minimumTotal, 2))}</text>
           <text x="${left}" y="${height - 8}" class="ta-stat-total-label">${escapeActivityHtml(firstDate)}</text>
@@ -16781,7 +16817,7 @@
               statGrowthNearestCumulativePoint(
                 Array.from(
                   card.querySelectorAll(
-                    '[data-ta-stat-total-detail]'
+                    'circle[data-ta-stat-total-detail]'
                   )
                 ).map(
                   point => ({
@@ -21250,7 +21286,8 @@
         pointer-events: none;
       }
 
-      #${MODAL_ID} .ta-stat-total-hit {
+      #${MODAL_ID} .ta-stat-total-hit,
+      #${MODAL_ID} .ta-stat-total-bar-hit {
         fill: transparent;
         cursor: pointer;
         touch-action: manipulation;
@@ -21259,6 +21296,10 @@
       #${MODAL_ID} .ta-stat-total-hit:focus-visible {
         fill: rgba(255, 255, 255, .16);
         outline: none;
+      }
+
+      #${MODAL_ID} .ta-stat-total-bar-hit {
+        pointer-events: all;
       }
 
       #${MODAL_ID} .ta-stat-total-label {
