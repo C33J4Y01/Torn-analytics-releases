@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.5
+// @version      2.18.6
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.5';
+  const VERSION = '2.18.6';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -15945,8 +15945,8 @@
           : boosters.length;
 
       return boosters.length === 1
-        ? `Happiness boost observed ${boosters[0]}`
-        : `${observedCount} Happiness boosts observed: ${boosters.join(', ')}`;
+        ? `1 Happiness booster used: ${boosters[0]}`
+        : `${observedCount} Happiness boosters used: ${boosters.join(', ')}`;
     }
 
     if (
@@ -16062,6 +16062,28 @@
     );
   }
 
+  function statGrowthPotentialHappyJump(
+    action
+  ) {
+    const boosters =
+      action?.training_context?.boosts;
+    const boosterCount =
+      Array.isArray(
+        boosters
+      )
+        ? boosters.length
+        : action?.training_context?.status ===
+          'happiness_boost_observed'
+          ? 1
+          : 0;
+
+    return Number(
+      action?.energy_used ||
+      0
+    ) >= 750 &&
+      boosterCount >= 2;
+  }
+
   function statGrowthTrainingContextSummary(
     growth,
     stat
@@ -16150,9 +16172,9 @@
     ) {
       return {
         label:
-          'Boost observed',
+          'Boosters used',
         evidence:
-          'Directly correlated logs',
+          'Observed item-use logs',
         detail:
           statGrowthTrainingContextDetail(
             context
@@ -16254,6 +16276,12 @@
           : 'Not recorded',
       context_label:
         context.label,
+      jump_label:
+        statGrowthPotentialHappyJump(
+          action
+        )
+          ? 'Potential happy jump'
+          : '',
       context_evidence:
         context.evidence,
       context_detail:
@@ -16309,7 +16337,10 @@
             <span class="ta-stat-session-eyebrow">Selected session</span>
             <strong data-ta-stat-session-field="title">${escapeActivityHtml(model.title)}</strong>
           </div>
-          <span class="ta-stat-session-context-badge" data-ta-stat-session-field="context_label">${escapeActivityHtml(model.context_label)}</span>
+          <div class="ta-stat-session-badges">
+            <span class="ta-stat-session-context-badge" data-ta-stat-session-field="context_label">${escapeActivityHtml(model.context_label)}</span>
+            <span class="ta-stat-session-jump-badge" data-ta-stat-session-field="jump_label">${escapeActivityHtml(model.jump_label)}</span>
+          </div>
         </div>
 
         <div class="ta-stat-session-date">
@@ -23237,8 +23268,6 @@
       }
 
       #${MODAL_ID} .ta-stat-session-context-badge {
-        flex: 0 0 auto;
-        max-width: 48%;
         padding: 5px 7px;
         border: 1px solid #594829;
         border-radius: 999px;
@@ -23248,6 +23277,30 @@
         font-weight: 800;
         line-height: 1.2;
         text-align: center;
+      }
+
+      #${MODAL_ID} .ta-stat-session-badges {
+        display: grid;
+        justify-items: end;
+        gap: 4px;
+        flex: 0 0 auto;
+        max-width: 48%;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-badge {
+        padding: 5px 7px;
+        border: 1px solid #b88130;
+        border-radius: 999px;
+        background: #2b1d0c;
+        color: #f3c46d;
+        font-size: 10px;
+        font-weight: 800;
+        line-height: 1.2;
+        text-align: center;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-badge:empty {
+        display: none;
       }
 
       #${MODAL_ID} .ta-stat-session-date {
