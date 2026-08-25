@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.17.6
+// @version      2.17.7
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.17.6';
+  const VERSION = '2.17.7';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -14819,6 +14819,26 @@
     }[stat] || 'Strength';
   }
 
+  function trainingReadinessConfidenceLabel(
+    confidence
+  ) {
+    const value =
+      String(
+        confidence ||
+        ''
+      ).trim();
+
+    if (
+      value === 'Insufficient'
+    ) {
+      return 'Not enough comparable sessions yet';
+    }
+
+    return value
+      ? `${value} confidence`
+      : 'Not enough comparable sessions yet';
+  }
+
   function trainingReadinessFormatDuration(
     seconds
   ) {
@@ -14939,7 +14959,7 @@
       ? `Predicted ${trainingReadinessStatLabel(readiness.default_stat)} gain: ${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}`
       : 'Not enough comparable training samples yet';
     const sampleText =
-      `${Number(defaultModel?.samples || 0)} comparable samples · ${defaultModel?.confidence || 'Insufficient'} confidence`;
+      `${Number(defaultModel?.samples || 0)} comparable samples · ${trainingReadinessConfidenceLabel(defaultModel?.confidence)}`;
     const resetDuration = trainingReadinessFormatDuration(
       readiness.quarter_hour?.seconds_until
     );
@@ -15136,7 +15156,7 @@
       }
 
       if (samples) {
-        samples.textContent = `${model.samples} comparable samples · ${model.confidence} confidence`;
+        samples.textContent = `${model.samples} comparable samples · ${trainingReadinessConfidenceLabel(model.confidence)}`;
       }
 
       if (history) {
@@ -15519,10 +15539,10 @@
       230;
 
     const left =
-      54;
+      64;
 
     const right =
-      54;
+      20;
 
     const top =
       20;
@@ -15726,10 +15746,8 @@
           ${bars}
           <path d="${line}" class="ta-stat-total-line"></path>
           ${points}
-          <text x="0" y="${top + 4}" class="ta-stat-total-label">${escapeActivityHtml(statGrowthFormatNumber(maximumTotal, 2))}</text>
-          <text x="0" y="${top + plotHeight}" class="ta-stat-total-label">${escapeActivityHtml(statGrowthFormatNumber(minimumTotal, 2))}</text>
-          <text x="${width}" y="${top + 4}" text-anchor="end" class="ta-stat-total-label">+${escapeActivityHtml(statGrowthFormatNumber(maximumGain, 2))}</text>
-          <text x="${width}" y="${top + plotHeight}" text-anchor="end" class="ta-stat-total-label">0</text>
+          <text x="${left - 8}" y="${top + 4}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(statGrowthFormatNumber(maximumTotal, 2))}</text>
+          <text x="${left - 8}" y="${top + plotHeight}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(statGrowthFormatNumber(minimumTotal, 2))}</text>
           <text x="${left}" y="${height - 8}" class="ta-stat-total-label">${escapeActivityHtml(firstDate)}</text>
           <text x="${left + plotWidth}" y="${height - 8}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(lastDate)}</text>
         </svg>
@@ -15737,6 +15755,9 @@
         <div class="ta-stat-total-legend">
           <span><i class="ta-stat-total-line-key"></i>Total stat</span>
           <span><i class="ta-stat-total-bar-key"></i>Session gain</span>
+        </div>
+        <div class="ta-stat-total-scale">
+          Session gain scale: 0–+${escapeActivityHtml(statGrowthFormatNumber(maximumGain, 2))}
         </div>
 
         <div class="ta-chart-detail" data-ta-stat-total-detail-output>
@@ -21990,6 +22011,14 @@
 
       #${MODAL_ID} .ta-stat-training-actions-tile .ta-metric-value {
         color: #e2e2e2;
+      }
+
+      #${MODAL_ID} .ta-stat-total-scale {
+        margin-top: 4px;
+        color: #c6a15e;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.35;
       }
 
       @media(max-width:360px) {
