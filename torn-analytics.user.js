@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.1
+// @version      2.18.2
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.1';
+  const VERSION = '2.18.2';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -15938,6 +15938,290 @@
       );
   }
 
+  function statGrowthSessionContextEvidence(
+    context
+  ) {
+    const status =
+      String(
+        context?.status ||
+        ''
+      );
+
+    if (
+      status ===
+      'happiness_boost_observed'
+    ) {
+      return {
+        label:
+          'Boost observed',
+        evidence:
+          'Directly correlated logs',
+        detail:
+          statGrowthTrainingContextDetail(
+            context
+          ),
+        note:
+          'A supported Happiness item is logged in the prior 15 minutes. Exact Happiness at train time is unknown.'
+      };
+    }
+
+    if (
+      status ===
+      'no_happiness_boost_observed'
+    ) {
+      return {
+        label:
+          'No recent boost observed',
+        evidence:
+          'Covered 15-minute lookback',
+        detail:
+          'No supported Happiness item was logged in the prior 15 minutes.',
+        note:
+          'This separates the session from an observed boost window, but does not prove the exact Happiness at train time.'
+      };
+    }
+
+    return {
+      label:
+        'Context unavailable',
+      evidence:
+        'Lookback not covered',
+      detail:
+        'Stored history does not fully cover the prior 15 minutes.',
+      note:
+        'The session totals remain observed; only the recent Happiness context is unavailable.'
+    };
+  }
+
+  function statGrowthSessionInspectorModel(
+    action
+  ) {
+    const energy =
+      Number(
+        action?.energy_used ||
+        0
+      );
+    const gain =
+      Number(
+        action?.stat_increased ||
+        0
+      );
+    const happyKnown =
+      typeof action?.happy_used ===
+        'number' &&
+      Number.isFinite(
+        action.happy_used
+      );
+    const context =
+      statGrowthSessionContextEvidence(
+        action?.training_context
+      );
+
+    return {
+      title:
+        `${action?.stat_label || 'Stat'} ${statGrowthFormatGain(gain)}`,
+      date:
+        new Date(
+          Number(action?.timestamp || 0) *
+          1000
+        ).toLocaleString(),
+      energy:
+        Number(energy || 0).toLocaleString(),
+      trains:
+        Number(action?.trains || 0).toLocaleString(),
+      gain_per_10e:
+        energy > 0
+          ? statGrowthFormatRate(
+              gain /
+              energy *
+              10
+            )
+          : '—',
+      gym:
+        statGrowthGymName(
+          action?.gym
+        ),
+      stat_before:
+        statGrowthFormatNumber(
+          action?.stat_before,
+          2
+        ),
+      stat_after:
+        statGrowthFormatNumber(
+          action?.stat_after,
+          2
+        ),
+      happiness_used:
+        happyKnown
+          ? Number(action.happy_used).toLocaleString()
+          : 'Not recorded',
+      context_label:
+        context.label,
+      context_evidence:
+        context.evidence,
+      context_detail:
+        context.detail,
+      context_note:
+        context.note
+    };
+  }
+
+  function statGrowthEncodedSessionModel(
+    action
+  ) {
+    return encodeURIComponent(
+      JSON.stringify(
+        statGrowthSessionInspectorModel(
+          action
+        )
+      )
+    );
+  }
+
+  function renderStatGrowthSessionInspector(
+    action
+  ) {
+    const model =
+      statGrowthSessionInspectorModel(
+        action
+      );
+
+    const field =
+      (
+        name,
+        value
+      ) =>
+        `<span data-ta-stat-session-field="${name}">${escapeActivityHtml(value)}</span>`;
+
+    const metric =
+      (
+        label,
+        name,
+        value
+      ) => `
+        <div class="ta-stat-session-metric">
+          <span>${escapeActivityHtml(label)}</span>
+          <strong data-ta-stat-session-field="${name}">${escapeActivityHtml(value)}</strong>
+        </div>
+      `;
+
+    return `
+      <section class="ta-stat-session-inspector" data-ta-stat-session-inspector aria-live="polite">
+        <div class="ta-stat-session-header">
+          <div>
+            <span class="ta-stat-session-eyebrow">Selected session</span>
+            <strong data-ta-stat-session-field="title">${escapeActivityHtml(model.title)}</strong>
+          </div>
+          <span class="ta-stat-session-context-badge" data-ta-stat-session-field="context_label">${escapeActivityHtml(model.context_label)}</span>
+        </div>
+
+        <div class="ta-stat-session-date">
+          ${field('date', model.date)}
+        </div>
+
+        <div class="ta-stat-session-grid">
+          ${metric('Energy', 'energy', model.energy)}
+          ${metric('Trains', 'trains', model.trains)}
+          ${metric('Gain / 10E', 'gain_per_10e', model.gain_per_10e)}
+          ${metric('Gym', 'gym', model.gym)}
+          ${metric('Total before', 'stat_before', model.stat_before)}
+          ${metric('Total after', 'stat_after', model.stat_after)}
+          ${metric('Happiness used', 'happiness_used', model.happiness_used)}
+        </div>
+
+        <div class="ta-stat-session-context">
+          <strong data-ta-stat-session-field="context_evidence">${escapeActivityHtml(model.context_evidence)}</strong>
+          <span data-ta-stat-session-field="context_detail">${escapeActivityHtml(model.context_detail)}</span>
+          <small data-ta-stat-session-field="context_note">${escapeActivityHtml(model.context_note)}</small>
+        </div>
+      </section>
+    `;
+  }
+
+  function statGrowthSessionModelFromElement(
+    element
+  ) {
+    try {
+      const encoded =
+        element?.getAttribute?.(
+          'data-ta-stat-session-model'
+        );
+
+      if (
+        !encoded
+      ) {
+        return null;
+      }
+
+      const model =
+        JSON.parse(
+          decodeURIComponent(
+            encoded
+          )
+        );
+
+      return model &&
+        typeof model ===
+          'object' &&
+        !Array.isArray(
+          model
+        )
+          ? model
+          : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function statGrowthApplySessionInspector(
+    card,
+    model
+  ) {
+    if (
+      !card?.querySelector ||
+      !model ||
+      typeof model !==
+        'object'
+    ) {
+      return;
+    }
+
+    const panel =
+      card.querySelector(
+        '[data-ta-stat-session-inspector]'
+      );
+
+    if (
+      !panel
+    ) {
+      return;
+    }
+
+    for (
+      const field
+      of panel.querySelectorAll(
+        '[data-ta-stat-session-field]'
+      )
+    ) {
+      const name =
+        field.getAttribute(
+          'data-ta-stat-session-field'
+        );
+
+      if (
+        Object.prototype.hasOwnProperty.call(
+          model,
+          name
+        )
+      ) {
+        field.textContent =
+          String(
+            model[name]
+          );
+      }
+    }
+  }
+
   function renderStatGrowthCumulativeChart(
     growth,
     focus = 'recent',
@@ -16120,7 +16404,11 @@
                 .36
             );
 
-          return `<rect x="${(pointX(index) - barWidth / 2).toFixed(2)}" y="${(top + plotHeight - barHeight).toFixed(2)}" width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2" class="ta-stat-total-bar"></rect>`;
+          const active =
+            index ===
+            samples.length - 1;
+
+          return `<rect x="${(pointX(index) - barWidth / 2).toFixed(2)}" y="${(top + plotHeight - barHeight).toFixed(2)}" width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2" class="ta-stat-total-bar${active ? ' ta-stat-session-active' : ''}" data-ta-stat-session-visual="${index}"></rect>`;
         }
       ).join('');
 
@@ -16132,6 +16420,10 @@
         ) => {
           const detail =
             statGrowthCumulativeSampleDetail(
+              action
+            );
+          const model =
+            statGrowthEncodedSessionModel(
               action
             );
           const hitWidth =
@@ -16152,6 +16444,8 @@
               height="${plotHeight.toFixed(2)}"
               class="ta-stat-total-bar-hit"
               data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
+              data-ta-stat-session-index="${index}"
+              data-ta-stat-session-model="${escapeActivityHtml(model)}"
               aria-hidden="true"
               tabindex="-1"
             ></rect>
@@ -16169,6 +16463,13 @@
             statGrowthCumulativeSampleDetail(
               action
             );
+          const model =
+            statGrowthEncodedSessionModel(
+              action
+            );
+          const active =
+            index ===
+            samples.length - 1;
 
           return `
             <circle
@@ -16177,15 +16478,19 @@
               r="18"
               class="ta-stat-total-hit"
               data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
+              data-ta-stat-session-index="${index}"
+              data-ta-stat-session-model="${escapeActivityHtml(model)}"
               role="button"
               tabindex="0"
+              aria-pressed="${active ? 'true' : 'false'}"
               aria-label="${escapeActivityHtml(detail)}"
             ></circle>
             <circle
               cx="${pointX(index).toFixed(2)}"
               cy="${pointY(Number(action.stat_after || 0)).toFixed(2)}"
               r="3.7"
-              class="ta-stat-total-point"
+              class="ta-stat-total-point${active ? ' ta-stat-session-active' : ''}"
+              data-ta-stat-session-visual="${index}"
             ></circle>
           `;
         }
@@ -16221,6 +16526,10 @@
           samples.length - 1
         ]
       );
+    const firstSession =
+      samples[
+        samples.length - 1
+      ];
 
     return `
       <div class="ta-chart-card ta-stat-total-chart" data-ta-stat-total-card>
@@ -16231,7 +16540,7 @@
 
         ${renderStatGrowthFocusControl(focus, selectedContext)}
 
-        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars" class="ta-stat-total-svg">
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars" class="ta-stat-total-svg" data-ta-stat-total-svg>
           <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
           <line x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
           <line x1="${left}" y1="${top + plotHeight / 2}" x2="${left + plotWidth}" y2="${top + plotHeight / 2}" class="ta-stat-total-guide"></line>
@@ -16256,6 +16565,8 @@
         <div class="ta-chart-detail" data-ta-stat-total-detail-output>
           ${escapeActivityHtml(firstDetail)}
         </div>
+
+        ${renderStatGrowthSessionInspector(firstSession)}
 
         <div class="ta-stat-context-summary">
           <strong>Observed training context · ${escapeActivityHtml(contextSummary.label)}</strong>
@@ -17207,6 +17518,53 @@
                   'data-ta-stat-total-detail'
                 ) ||
                 '';
+            }
+
+            const model =
+              statGrowthSessionModelFromElement(
+                point
+              );
+
+            statGrowthApplySessionInspector(
+              card,
+              model
+            );
+
+            const index =
+              point.getAttribute(
+                'data-ta-stat-session-index'
+              );
+
+            for (
+              const visual
+              of card.querySelectorAll(
+                '[data-ta-stat-session-visual]'
+              )
+            ) {
+              visual.classList.toggle(
+                'ta-stat-session-active',
+                visual.getAttribute(
+                  'data-ta-stat-session-visual'
+                ) ===
+                  index
+              );
+            }
+
+            for (
+              const selectable
+              of card.querySelectorAll(
+                '[data-ta-stat-session-index][role="button"]'
+              )
+            ) {
+              selectable.setAttribute(
+                'aria-pressed',
+                selectable.getAttribute(
+                  'data-ta-stat-session-index'
+                ) ===
+                  index
+                  ? 'true'
+                  : 'false'
+              );
             }
           };
 
@@ -21778,6 +22136,12 @@
         opacity: .72;
       }
 
+      #${MODAL_ID} .ta-stat-total-bar.ta-stat-session-active {
+        opacity: 1;
+        stroke: #ffe0a5;
+        stroke-width: 2;
+      }
+
       #${MODAL_ID} .ta-stat-total-line {
         fill: none;
         stroke: #f2f2f2;
@@ -21789,6 +22153,12 @@
       #${MODAL_ID} .ta-stat-total-point {
         fill: #f2f2f2;
         pointer-events: none;
+      }
+
+      #${MODAL_ID} .ta-stat-total-point.ta-stat-session-active {
+        fill: #dba854;
+        stroke: #fff1d0;
+        stroke-width: 3;
       }
 
       #${MODAL_ID} .ta-stat-total-hit,
@@ -22589,6 +22959,139 @@
       #${MODAL_ID} .ta-stat-context-summary small {
         color: #aaa;
         font-size: 11px;
+      }
+
+      /* v2.18.2: structured, evidence-aware selected-session inspector. */
+      #${MODAL_ID} .ta-stat-session-inspector {
+        display: grid;
+        gap: 9px;
+        margin-top: 10px;
+        padding: 11px;
+        border: 1px solid #3b3b3b;
+        border-radius: 9px;
+        background: #141414;
+      }
+
+      #${MODAL_ID} .ta-stat-session-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-header > div {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-session-eyebrow {
+        color: #aaa;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .07em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-stat-session-header strong {
+        color: #f3f3f3;
+        font-size: 17px;
+        line-height: 1.2;
+      }
+
+      #${MODAL_ID} .ta-stat-session-context-badge {
+        flex: 0 0 auto;
+        max-width: 48%;
+        padding: 5px 7px;
+        border: 1px solid #594829;
+        border-radius: 999px;
+        background: #211b12;
+        color: #e2bd77;
+        font-size: 10px;
+        font-weight: 800;
+        line-height: 1.2;
+        text-align: center;
+      }
+
+      #${MODAL_ID} .ta-stat-session-date {
+        color: #bdbdbd;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      #${MODAL_ID} .ta-stat-session-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-metric {
+        display: grid;
+        align-content: start;
+        gap: 3px;
+        min-width: 0;
+        min-height: 56px;
+        padding: 7px 8px;
+        border: 1px solid #2e2e2e;
+        border-radius: 7px;
+        background: #191919;
+      }
+
+      #${MODAL_ID} .ta-stat-session-metric > span {
+        color: #999;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: .035em;
+        line-height: 1.2;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-stat-session-metric > strong {
+        overflow-wrap: anywhere;
+        color: #e8e8e8;
+        font-size: 13px;
+        line-height: 1.25;
+      }
+
+      #${MODAL_ID} .ta-stat-session-context {
+        display: grid;
+        gap: 3px;
+        padding: 8px 9px;
+        border-left: 3px solid #c79642;
+        border-radius: 6px;
+        background: #191713;
+        color: #d2d2d2;
+        font-size: 12px;
+        line-height: 1.38;
+      }
+
+      #${MODAL_ID} .ta-stat-session-context strong {
+        color: #f0f0f0;
+        font-size: 12px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-context small {
+        color: #aaa;
+        font-size: 10px;
+        line-height: 1.4;
+      }
+
+      @media(max-width:520px) {
+        #${MODAL_ID} .ta-stat-session-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        #${MODAL_ID} .ta-stat-session-metric {
+          min-height: 60px;
+        }
+
+        #${MODAL_ID} .ta-stat-session-metric > span {
+          font-size: 10px;
+        }
+
+        #${MODAL_ID} .ta-stat-session-metric > strong {
+          font-size: 14px;
+        }
       }
 
       @media(max-width:360px) {
