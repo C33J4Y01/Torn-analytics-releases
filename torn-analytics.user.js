@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.17.4
+// @version      2.17.5
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.17.4';
+  const VERSION = '2.17.5';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -14936,18 +14936,26 @@
       .join('');
 
     const projectionText = projection.available
-      ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)} observed gain`
+      ? `Predicted ${trainingReadinessStatLabel(readiness.default_stat)} gain: ${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}`
       : 'Not enough comparable training samples yet';
     const sampleText =
       `${Number(defaultModel?.samples || 0)} comparable samples · ${defaultModel?.confidence || 'Insufficient'} confidence`;
     const resetDuration = trainingReadinessFormatDuration(
       readiness.quarter_hour?.seconds_until
     );
+    const boosterReadyAt =
+      Number(readiness.booster_ready_at);
+    const boosterAvailable =
+      Number.isSafeInteger(boosterReadyAt) &&
+      boosterReadyAt > 0 &&
+      boosterReadyAt <= Math.floor(Date.now() / 1000);
     const recommendation = readiness.energy === null
       ? 'Live Energy is unavailable. Historical estimates still work.'
       : readiness.energy <= 0
-        ? 'Wait for Energy before training.'
-        : 'Ready to train. For a happiness boost, use a booster just after a TCT quarter-hour and train before the next one.';
+        ? 'No Energy available.'
+        : boosterAvailable
+          ? `${Number(readiness.energy).toLocaleString()} Energy available. For a better workout, use a booster to increase your Happiness for maximum gains.`
+          : `${Number(readiness.energy).toLocaleString()} Energy available.`;
     const recommendationHtml =
       readiness.over_happiness && readiness.energy !== null && readiness.energy > 0
         ? `Train before the next quarter-hour reset (<span data-ta-quarter-countdown>${escapeActivityHtml(resetDuration)}</span>).`
@@ -15123,7 +15131,7 @@
 
       if (output) {
         output.textContent = projection.available
-          ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)} observed gain`
+          ? `Predicted ${trainingReadinessStatLabel(option?.value || 'strength')} gain: ${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}`
           : 'Not enough comparable training samples yet';
       }
 
