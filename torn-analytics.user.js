@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.10
+// @version      2.18.11
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.10';
+  const VERSION = '2.18.11';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -17020,7 +17020,7 @@
                   ${escapeActivityHtml(activityDashboardShortDate(row.date))}
                   ${isPartial ? '<span class="ta-chart-partial-badge">partial</span>' : ''}
                 </div>
-              </div>
+              </details>
             `;
           }
         )
@@ -17098,11 +17098,11 @@
                   );
 
             return `
-              <div class="ta-stat-compact-row">
-                <div class="ta-stat-compact-main">
+              <details class="ta-stat-compact-row">
+                <summary class="ta-stat-compact-main">
                   <strong>${escapeActivityHtml(row.label)}</strong>
                   <b>${escapeActivityHtml(statGrowthFormatGain(row.gain))}</b>
-                </div>
+                </summary>
                 <div class="ta-stat-compact-facts">
                   <span><i>Energy</i><b>${Number(row.energy_used || 0).toLocaleString()}</b></span>
                   <span><i>Gain / E</i><b>${escapeActivityHtml(statGrowthFormatRate(row.gain_per_energy))}</b></span>
@@ -23727,6 +23727,25 @@
         margin-top: 3px;
         font-size: 10px;
         line-height: 1.25;
+      }
+
+      #${MODAL_ID} details.ta-stat-compact-row > summary {
+        cursor: pointer;
+        list-style: none;
+      }
+
+      #${MODAL_ID} details.ta-stat-compact-row > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} details.ta-stat-compact-row > summary::after {
+        content: '⌄';
+        color: #999;
+        font-size: 15px;
+      }
+
+      #${MODAL_ID} details.ta-stat-compact-row[open] > summary::after {
+        transform: rotate(180deg);
       }
 
       #${MODAL_ID} .ta-stat-compact-list {
