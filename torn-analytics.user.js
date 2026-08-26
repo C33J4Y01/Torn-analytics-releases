@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.21
+// @version      2.18.22
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.21';
+  const VERSION = '2.18.22';
 
-  // v2.18.21 adds compact plan-based Gym Trainer guidance.
+  // v2.18.22 compacts selected-session facts into evidence-aware badges and drawers.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -17057,7 +17057,7 @@
     ) {
       return {
         label:
-          'Energy source unavailable',
+          'Source unavailable',
         evidence:
           'Lookback not fully covered',
         detail:
@@ -17073,7 +17073,7 @@
     ) {
       return {
         label:
-          'No recent source observed',
+          'Source unclear',
         evidence:
           boundary,
         detail:
@@ -17137,11 +17137,11 @@
 
     const labels = {
       xanax_observed:
-        'Xanax-assisted training',
+        'Xanax observed',
       point_refill_observed:
-        'Point-refill-assisted training',
+        'Point refill observed',
       mixed_sources_observed:
-        'Mixed-source training'
+        'Mixed sources observed'
     };
 
     return {
@@ -17245,6 +17245,23 @@
       statGrowthSessionEnergyEvidence(
         action?.energy_source_evidence
       );
+    const rawEnergySourceStatus =
+      String(
+        action?.energy_source_evidence?.status ||
+        'energy_context_unavailable'
+      );
+    const energySourceStatus =
+      [
+        'xanax_observed',
+        'point_refill_observed',
+        'mixed_sources_observed',
+        'no_energy_source_observed',
+        'energy_context_unavailable'
+      ].includes(
+        rawEnergySourceStatus
+      )
+        ? rawEnergySourceStatus
+        : 'energy_context_unavailable';
 
     return {
       title:
@@ -17300,6 +17317,8 @@
         context.note,
       energy_source_label:
         energyEvidence.label,
+      energy_source_status:
+        energySourceStatus,
       energy_source_evidence:
         energyEvidence.evidence,
       energy_source_detail:
@@ -17336,54 +17355,63 @@
       ) =>
         `<span data-ta-stat-session-field="${name}">${escapeActivityHtml(value)}</span>`;
 
-    const metric =
-      (
-        label,
-        name,
-        value
-      ) => `
-        <div class="ta-stat-session-metric">
-          <span>${escapeActivityHtml(label)}</span>
-          <strong data-ta-stat-session-field="${name}">${escapeActivityHtml(value)}</strong>
-        </div>
-      `;
-
     return `
       <section class="ta-stat-session-inspector" data-ta-stat-session-inspector aria-live="polite">
         <div class="ta-stat-session-header">
           <div>
             <span class="ta-stat-session-eyebrow">Selected session</span>
             <strong data-ta-stat-session-field="title">${escapeActivityHtml(model.title)}</strong>
+            <span class="ta-stat-session-date">
+              ${field('date', model.date)}
+            </span>
           </div>
-          <div class="ta-stat-session-badges">
-            <span class="ta-stat-session-context-badge" data-ta-stat-session-field="context_label">${escapeActivityHtml(model.context_label)}</span>
-            <span class="ta-stat-session-jump-badge" data-ta-stat-session-field="jump_label">${escapeActivityHtml(model.jump_label)}</span>
+        </div>
+
+        <div class="ta-stat-session-quickline">
+          <strong>${field('energy', model.energy)}E</strong>
+          <span>·</span>
+          <strong>${field('trains', model.trains)} trains</strong>
+          <span>·</span>
+          <strong data-ta-stat-session-field="gym">${escapeActivityHtml(model.gym)}</strong>
+        </div>
+
+        <div class="ta-stat-session-badges">
+          <span class="ta-stat-session-energy-badge" data-ta-stat-energy-source="${escapeActivityHtml(model.energy_source_status)}" data-ta-stat-session-field="energy_source_label">${escapeActivityHtml(model.energy_source_label)}</span>
+          <span class="ta-stat-session-context-badge" data-ta-stat-session-field="context_label">${escapeActivityHtml(model.context_label)}</span>
+          <span class="ta-stat-session-jump-badge" data-ta-stat-session-field="jump_label">${escapeActivityHtml(model.jump_label)}</span>
+        </div>
+
+        <details class="ta-stat-session-details">
+          <summary>
+            <span>Session details</span>
+            <strong>${field('gain_per_10e', model.gain_per_10e)} gain / 10E</strong>
+          </summary>
+          <div>
+            <div class="ta-stat-session-facts">
+              <span>
+                <i>Total before</i>
+                <b data-ta-stat-session-field="stat_before">${escapeActivityHtml(model.stat_before)}</b>
+              </span>
+              <span>
+                <i>Total after</i>
+                <b data-ta-stat-session-field="stat_after">${escapeActivityHtml(model.stat_after)}</b>
+              </span>
+              <span>
+                <i>Happiness used</i>
+                <b data-ta-stat-session-field="happiness_used">${escapeActivityHtml(model.happiness_used)}</b>
+              </span>
+            </div>
+            <div class="ta-stat-session-context">
+              <strong data-ta-stat-session-field="context_evidence">${escapeActivityHtml(model.context_evidence)}</strong>
+              <span data-ta-stat-session-field="context_detail">${escapeActivityHtml(model.context_detail)}</span>
+              <small data-ta-stat-session-field="context_note">${escapeActivityHtml(model.context_note)}</small>
+            </div>
           </div>
-        </div>
-
-        <div class="ta-stat-session-date">
-          ${field('date', model.date)}
-        </div>
-
-        <div class="ta-stat-session-grid">
-          ${metric('Energy', 'energy', model.energy)}
-          ${metric('Trains', 'trains', model.trains)}
-          ${metric('Gain / 10E', 'gain_per_10e', model.gain_per_10e)}
-          ${metric('Gym', 'gym', model.gym)}
-          ${metric('Total before', 'stat_before', model.stat_before)}
-          ${metric('Total after', 'stat_after', model.stat_after)}
-          ${metric('Happiness used', 'happiness_used', model.happiness_used)}
-        </div>
-
-        <div class="ta-stat-session-context">
-          <strong data-ta-stat-session-field="context_evidence">${escapeActivityHtml(model.context_evidence)}</strong>
-          <span data-ta-stat-session-field="context_detail">${escapeActivityHtml(model.context_detail)}</span>
-          <small data-ta-stat-session-field="context_note">${escapeActivityHtml(model.context_note)}</small>
-        </div>
+        </details>
 
         <details class="ta-stat-session-energy-evidence">
           <summary>
-            <span>Energy source</span>
+            <span>Why classified this way</span>
             <strong data-ta-stat-session-field="energy_source_label">${escapeActivityHtml(model.energy_source_label)}</strong>
           </summary>
           <div>
@@ -17477,6 +17505,23 @@
             model[name]
           );
       }
+    }
+
+    const energyBadge =
+      panel.querySelector(
+        '[data-ta-stat-energy-source]'
+      );
+
+    if (
+      energyBadge
+    ) {
+      energyBadge.setAttribute(
+        'data-ta-stat-energy-source',
+        String(
+          model.energy_source_status ||
+          'energy_context_unavailable'
+        )
+      );
     }
   }
 
@@ -24720,22 +24765,19 @@
         font-size: 11px;
       }
 
-      /* v2.18.2: structured, evidence-aware selected-session inspector. */
+      /* v2.18.22: compact selected-session summary with evidence badges. */
       #${MODAL_ID} .ta-stat-session-inspector {
         display: grid;
-        gap: 9px;
+        gap: 7px;
         margin-top: 10px;
-        padding: 11px;
+        padding: 10px;
         border: 1px solid #3b3b3b;
         border-radius: 9px;
         background: #141414;
       }
 
       #${MODAL_ID} .ta-stat-session-header {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 10px;
+        min-width: 0;
       }
 
       #${MODAL_ID} .ta-stat-session-header > div {
@@ -24746,7 +24788,7 @@
 
       #${MODAL_ID} .ta-stat-session-eyebrow {
         color: #aaa;
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 700;
         letter-spacing: .07em;
         text-transform: uppercase;
@@ -24754,166 +24796,219 @@
 
       #${MODAL_ID} .ta-stat-session-header strong {
         color: #f3f3f3;
-        font-size: 17px;
+        font-size: 18px;
         line-height: 1.2;
       }
 
-      #${MODAL_ID} .ta-stat-session-context-badge {
-        padding: 5px 7px;
-        border: 1px solid #594829;
-        border-radius: 999px;
-        background: #211b12;
-        color: #e2bd77;
-        font-size: 10px;
-        font-weight: 800;
-        line-height: 1.2;
-        text-align: center;
+      #${MODAL_ID} .ta-stat-session-date {
+        color: #aaa;
+        font-size: 11px;
+        line-height: 1.3;
+      }
+
+      #${MODAL_ID} .ta-stat-session-quickline {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 3px 6px;
+        color: #9e9e9e;
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      #${MODAL_ID} .ta-stat-session-quickline strong {
+        color: #dedede;
+        font-size: 12px;
       }
 
       #${MODAL_ID} .ta-stat-session-badges {
-        display: grid;
-        justify-items: end;
-        gap: 4px;
-        flex: 0 0 auto;
-        max-width: 48%;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 5px;
       }
 
+      #${MODAL_ID} .ta-stat-session-energy-badge,
+      #${MODAL_ID} .ta-stat-session-context-badge,
       #${MODAL_ID} .ta-stat-session-jump-badge {
-        padding: 5px 7px;
-        border: 1px solid #b88130;
+        padding: 4px 7px;
+        border: 1px solid #4a4a4a;
         border-radius: 999px;
-        background: #2b1d0c;
-        color: #f3c46d;
         font-size: 10px;
         font-weight: 800;
         line-height: 1.2;
-        text-align: center;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-badge {
+        border-color: #31556a;
+        background: #111d23;
+        color: #b9dbea;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-badge[data-ta-stat-energy-source="point_refill_observed"] {
+        border-color: #665184;
+        background: #1c1725;
+        color: #d8c3f2;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-badge[data-ta-stat-energy-source="mixed_sources_observed"] {
+        border-color: #4d6c73;
+        background: linear-gradient(90deg, #111d23 0 50%, #1c1725 50% 100%);
+        color: #d6e7ed;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-badge[data-ta-stat-energy-source="no_energy_source_observed"],
+      #${MODAL_ID} .ta-stat-session-energy-badge[data-ta-stat-energy-source="energy_context_unavailable"] {
+        border-color: #4b4b4b;
+        background: #1a1a1a;
+        color: #c2c2c2;
+      }
+
+      #${MODAL_ID} .ta-stat-session-context-badge {
+        border-color: #594829;
+        background: #211b12;
+        color: #e2bd77;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-badge {
+        border-color: #b88130;
+        background: #2b1d0c;
+        color: #f3c46d;
       }
 
       #${MODAL_ID} .ta-stat-session-jump-badge:empty {
         display: none;
       }
 
-      #${MODAL_ID} .ta-stat-session-date {
-        color: #bdbdbd;
-        font-size: 12px;
-        line-height: 1.35;
-      }
-
-      #${MODAL_ID} .ta-stat-session-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 6px;
-      }
-
-      #${MODAL_ID} .ta-stat-session-metric {
-        display: grid;
-        align-content: start;
-        gap: 3px;
-        min-width: 0;
-        min-height: 56px;
-        padding: 7px 8px;
-        border: 1px solid #2e2e2e;
-        border-radius: 7px;
-        background: #191919;
-      }
-
-      #${MODAL_ID} .ta-stat-session-metric > span {
-        color: #999;
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: .035em;
-        line-height: 1.2;
-        text-transform: uppercase;
-      }
-
-      #${MODAL_ID} .ta-stat-session-metric > strong {
-        overflow-wrap: anywhere;
-        color: #e8e8e8;
-        font-size: 13px;
-        line-height: 1.25;
-      }
-
-      #${MODAL_ID} .ta-stat-session-context {
-        display: grid;
-        gap: 3px;
-        padding: 8px 9px;
-        border-left: 3px solid #c79642;
-        border-radius: 6px;
-        background: #191713;
-        color: #d2d2d2;
-        font-size: 12px;
-        line-height: 1.38;
-      }
-
-      #${MODAL_ID} .ta-stat-session-context strong {
-        color: #f0f0f0;
-        font-size: 12px;
-      }
-
-      #${MODAL_ID} .ta-stat-session-context small {
-        color: #aaa;
-        font-size: 10px;
-        line-height: 1.4;
-      }
-
-      /* v2.18.19: compact, evidence-only Energy source drawer. */
+      #${MODAL_ID} .ta-stat-session-details,
       #${MODAL_ID} .ta-stat-session-energy-evidence {
         overflow: hidden;
-        border: 1px solid #314955;
-        border-left: 3px solid #5f91a8;
+        border: 1px solid #343434;
         border-radius: 7px;
+        background: #171717;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence {
+        border-color: #314955;
+        border-left: 3px solid #5f91a8;
         background: #12191d;
       }
 
+      #${MODAL_ID} .ta-stat-session-details > summary,
       #${MODAL_ID} .ta-stat-session-energy-evidence > summary {
         display: flex;
         align-items: center;
         gap: 8px;
-        min-height: 42px;
-        padding: 7px 9px;
+        min-height: 38px;
+        padding: 6px 8px;
         cursor: pointer;
         list-style: none;
       }
 
+      #${MODAL_ID} .ta-stat-session-details > summary::-webkit-details-marker,
       #${MODAL_ID} .ta-stat-session-energy-evidence > summary::-webkit-details-marker {
         display: none;
       }
 
+      #${MODAL_ID} .ta-stat-session-details > summary > span,
       #${MODAL_ID} .ta-stat-session-energy-evidence > summary > span {
-        color: #8fa8b3;
+        color: #a8a8a8;
         font-size: 9px;
         font-weight: 800;
         letter-spacing: .04em;
         text-transform: uppercase;
       }
 
+      #${MODAL_ID} .ta-stat-session-details > summary > strong,
       #${MODAL_ID} .ta-stat-session-energy-evidence > summary > strong {
         margin-left: auto;
-        color: #d9edf5;
-        font-size: 11px;
+        color: #dedede;
+        font-size: 10px;
         line-height: 1.25;
         text-align: right;
       }
 
+      #${MODAL_ID} .ta-stat-session-energy-evidence > summary > strong {
+        color: #d9edf5;
+      }
+
+      #${MODAL_ID} .ta-stat-session-details > summary::after,
       #${MODAL_ID} .ta-stat-session-energy-evidence > summary::after {
         content: '▸';
-        color: #83a8b8;
+        color: #999;
         font-size: 10px;
       }
 
+      #${MODAL_ID} .ta-stat-session-details[open] > summary::after,
       #${MODAL_ID} .ta-stat-session-energy-evidence[open] > summary::after {
         content: '▾';
       }
 
+      #${MODAL_ID} .ta-stat-session-details > div,
       #${MODAL_ID} .ta-stat-session-energy-evidence > div {
         display: grid;
+        gap: 7px;
+        padding: 8px;
+        border-top: 1px solid #303030;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence > div {
         gap: 3px;
-        padding: 8px 9px 9px;
-        border-top: 1px solid rgba(95, 145, 168, .22);
+        border-top-color: rgba(95, 145, 168, .22);
         color: #d2d2d2;
         font-size: 12px;
         line-height: 1.38;
+      }
+
+      #${MODAL_ID} .ta-stat-session-facts {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-facts span {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-session-facts i {
+        color: #969696;
+        font-size: 9px;
+        font-style: normal;
+        font-weight: 700;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-stat-session-facts b {
+        overflow-wrap: anywhere;
+        color: #e3e3e3;
+        font-size: 12px;
+        line-height: 1.25;
+      }
+
+      #${MODAL_ID} .ta-stat-session-context {
+        display: grid;
+        gap: 3px;
+        padding: 7px 8px;
+        border-left: 3px solid #c79642;
+        border-radius: 6px;
+        background: #191713;
+        color: #d2d2d2;
+        font-size: 11px;
+        line-height: 1.38;
+      }
+
+      #${MODAL_ID} .ta-stat-session-context strong {
+        color: #f0f0f0;
+        font-size: 11px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-context small {
+        color: #aaa;
+        font-size: 10px;
+        line-height: 1.4;
       }
 
       #${MODAL_ID} .ta-stat-session-energy-evidence > div > strong {
@@ -25023,20 +25118,17 @@
       }
 
       @media(max-width:520px) {
-        #${MODAL_ID} .ta-stat-session-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+        #${MODAL_ID} .ta-stat-session-inspector {
+          padding: 9px;
         }
 
-        #${MODAL_ID} .ta-stat-session-metric {
-          min-height: 60px;
+        #${MODAL_ID} .ta-stat-session-header strong {
+          font-size: 17px;
         }
 
-        #${MODAL_ID} .ta-stat-session-metric > span {
-          font-size: 10px;
-        }
-
-        #${MODAL_ID} .ta-stat-session-metric > strong {
-          font-size: 14px;
+        #${MODAL_ID} .ta-stat-session-quickline strong,
+        #${MODAL_ID} .ta-stat-session-facts b {
+          font-size: 12px;
         }
 
         #${MODAL_ID} .ta-stat-compact-row {
