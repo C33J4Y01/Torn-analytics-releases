@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.7
+// @version      2.18.8
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.7';
+  const VERSION = '2.18.8';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -12925,6 +12925,10 @@
         uiSessionOptionalBoolean(
           state.resource_happiness_open
         ),
+      resource_dashboard_open:
+        uiSessionOptionalBoolean(
+          state.resource_dashboard_open
+        ),
       updated_at:
         Date.now()
     };
@@ -13033,6 +13037,10 @@
           uiSessionOptionalBoolean(
             parsed.resource_happiness_open
           ),
+        resource_dashboard_open:
+          uiSessionOptionalBoolean(
+            parsed.resource_dashboard_open
+          ),
         updated_at:
           Math.max(
             0,
@@ -13078,6 +13086,8 @@
       resource_nerve_open:
         null,
       resource_happiness_open:
+        null,
+      resource_dashboard_open:
         null,
       updated_at:
         0
@@ -13178,6 +13188,10 @@
         resource_happiness_open:
           uiSessionOptionalBoolean(
             parsed.resource_happiness_open
+          ),
+        resource_dashboard_open:
+          uiSessionOptionalBoolean(
+            parsed.resource_dashboard_open
           ),
         updated_at:
           Math.max(
@@ -13410,6 +13424,10 @@
       resource_happiness_open:
         uiSessionOptionalBoolean(
           source?.resource_happiness_open
+        ),
+      resource_dashboard_open:
+        uiSessionOptionalBoolean(
+          source?.resource_dashboard_open
         )
     });
 
@@ -20337,6 +20355,9 @@
       typeof options === 'object'
         ? options
         : {};
+    const dashboardOpen =
+      states.resource_dashboard_open ===
+      true;
     const resourcePanel =
       resource => {
         const summary =
@@ -20388,7 +20409,7 @@
       };
 
     return `
-      <details class="ta-section ta-resource-section">
+      <details class="ta-section ta-resource-section" ${dashboardOpen ? 'open' : ''}>
         <summary class="ta-section-summary-row">
           <span class="ta-section-title">Energy, Nerve &amp; Happiness</span>
           <span class="ta-section-meta">
@@ -20425,6 +20446,21 @@
   function bindResourceDashboardInteractions(
     root
   ) {
+    const dashboard =
+      root?.querySelector?.(
+        '.ta-resource-section'
+      );
+
+    dashboard?.addEventListener(
+      'toggle',
+      () => {
+        writeUiSessionState({
+          resource_dashboard_open:
+            dashboard.open === true
+        });
+      }
+    );
+
     for (
       const panel
       of root?.querySelectorAll?.(
@@ -20452,6 +20488,8 @@
           }
 
           writeUiSessionState({
+            resource_dashboard_open:
+              true,
             [`resource_${resource}_open`]:
               panel.open === true
           });
