@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.20
+// @version      2.18.21
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.20';
+  const VERSION = '2.18.21';
 
-  // v2.18.20 adds an exact live Energy stack indicator.
+  // v2.18.21 adds compact plan-based Gym Trainer guidance.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -15497,6 +15497,228 @@
     }
   }
 
+
+  const TRAINING_PLAN_STORAGE_KEY = 'tornAnalyticsTrainingPlanV1';
+
+  function trainingReadinessPlan(
+    value
+  ) {
+    const plan = String(value || '').trim().toLowerCase();
+
+    return [
+      'natural_e',
+      'xanax_training',
+      'happy_jump'
+    ].includes(plan)
+      ? plan
+      : 'natural_e';
+  }
+
+  function trainingReadinessPlanStorage() {
+    try {
+      return typeof localStorage !== 'undefined'
+        ? localStorage
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function readTrainingReadinessPlan() {
+    try {
+      return trainingReadinessPlan(
+        trainingReadinessPlanStorage()?.getItem(TRAINING_PLAN_STORAGE_KEY)
+      );
+    } catch {
+      return 'natural_e';
+    }
+  }
+
+  function writeTrainingReadinessPlan(
+    value
+  ) {
+    const plan = trainingReadinessPlan(value);
+
+    try {
+      trainingReadinessPlanStorage()?.setItem(
+        TRAINING_PLAN_STORAGE_KEY,
+        plan
+      );
+    } catch {
+      // A blocked preference store should not break read-only guidance.
+    }
+
+    return plan;
+  }
+
+  function trainingReadinessPlanAdvice(
+    readiness,
+    planValue,
+    nowSeconds = Math.floor(Date.now() / 1000)
+  ) {
+    const plan = trainingReadinessPlan(planValue);
+    const now = Number.isFinite(Number(nowSeconds))
+      ? Math.floor(Number(nowSeconds))
+      : Math.floor(Date.now() / 1000);
+    const finiteValue = value =>
+      value !== null &&
+      value !== undefined &&
+      value !== '' &&
+      Number.isFinite(Number(value))
+        ? Number(value)
+        : null;
+    const energy = finiteValue(readiness?.energy);
+    const happiness = finiteValue(readiness?.happiness);
+    const happinessMaximum = finiteValue(readiness?.happiness_maximum);
+    const cooldownState = readyAtValue => {
+      const readyAt = finiteValue(readyAtValue);
+
+      if (readyAt === null || !Number.isSafeInteger(readyAt) || readyAt <= 0) {
+        return 'unavailable';
+      }
+
+      return readyAt <= now
+        ? 'ready'
+        : 'waiting';
+    };
+    const boosterState = cooldownState(readiness?.booster_ready_at);
+    const drugState = cooldownState(readiness?.drug_ready_at);
+    const candySuggestion =
+      happiness !== null &&
+      happinessMaximum !== null &&
+      happiness < happinessMaximum &&
+      boosterState === 'ready';
+
+    if (energy === null) {
+      return {
+        plan,
+        title: 'Live Energy unavailable',
+        detail: 'Refresh live bars before using training guidance.',
+        tone: 'info'
+      };
+    }
+
+    if (plan === 'xanax_training') {
+      if (energy > 750) {
+        return {
+          plan,
+          title: 'Train some Energy first',
+          detail: 'Make room so a full Xanax Energy gain is not wasted.',
+          tone: 'wait'
+        };
+      }
+
+      if (drugState === 'unavailable') {
+        return {
+          plan,
+          title: 'Drug cooldown unavailable',
+          detail: 'Refresh live cooldowns before planning Xanax training.',
+          tone: 'info'
+        };
+      }
+
+      if (drugState === 'waiting') {
+        return {
+          plan,
+          title: 'Wait for drug cooldown',
+          detail: 'Xanax is not ready yet.',
+          tone: 'wait'
+        };
+      }
+
+      const happinessAfterXanax =
+        happiness === null
+          ? null
+          : happiness + 75;
+      const needsCandyAfterXanax =
+        happinessAfterXanax !== null &&
+        happinessMaximum !== null &&
+        happinessAfterXanax < happinessMaximum &&
+        boosterState === 'ready';
+
+      return {
+        plan,
+        title: 'Take a Xanax, then train promptly',
+        detail: needsCandyAfterXanax
+          ? 'After Xanax: If you have candy, consider eating some to train at your natural maximum Happiness.'
+          : 'Train promptly after taking it so natural Energy regeneration can resume.',
+        tone: 'ready'
+      };
+    }
+
+    if (plan === 'happy_jump') {
+      if (readiness?.over_happiness && energy > 0) {
+        return {
+          plan,
+          title: 'Train now',
+          detail: 'Use the elevated Happiness before the next TCT Happiness reset.',
+          tone: 'ready'
+        };
+      }
+
+      if (energy < 750) {
+        return {
+          plan,
+          title: 'Build your Energy stack',
+          detail: 'Hold Happiness boosters until your planned stack is ready.',
+          tone: 'wait'
+        };
+      }
+
+      if (boosterState === 'unavailable') {
+        return {
+          plan,
+          title: 'Booster cooldown unavailable',
+          detail: 'Refresh live cooldowns before planning a Happy Jump.',
+          tone: 'info'
+        };
+      }
+
+      if (boosterState === 'waiting') {
+        return {
+          plan,
+          title: 'Wait for booster cooldown',
+          detail: 'Happiness boosters are not ready yet.',
+          tone: 'wait'
+        };
+      }
+
+      return {
+        plan,
+        title: 'Prepare your Happiness boost',
+        detail: 'Use Happiness boosters shortly after the next TCT quarter-hour reset, then train.',
+        tone: 'ready'
+      };
+    }
+
+    if (energy <= 0) {
+      return {
+        plan,
+        title: 'No Energy available',
+        detail: 'Wait for Energy before training.',
+        tone: 'wait'
+      };
+    }
+
+    if (readiness?.over_happiness) {
+      return {
+        plan,
+        title: 'Train now',
+        detail: 'Use the elevated Happiness before the next TCT Happiness reset.',
+        tone: 'ready'
+      };
+    }
+
+    return {
+      plan,
+      title: 'Train available Energy',
+      detail: candySuggestion
+        ? 'If you have candy, consider eating some to train at your natural maximum Happiness.'
+        : 'No booster suggested for Natural-E training.',
+      tone: 'ready'
+    };
+  }
+
   function trainingReadinessQuarterHour(
     nowMs = Date.now()
   ) {
@@ -15833,6 +16055,13 @@
     const defaultModel = readiness.models?.[readiness.default_stat];
     const plannedEnergy = Math.max(1, Math.floor(Number(readiness.energy) || 250));
     const projection = trainingReadinessProjection(defaultModel, plannedEnergy);
+    const trainingPlan = trainingReadinessPlan(
+      safeRenderOptions.plan || readTrainingReadinessPlan()
+    );
+    const planAdvice = trainingReadinessPlanAdvice(
+      readiness,
+      trainingPlan
+    );
 
     const options = ['strength', 'defense', 'speed', 'dexterity']
       .map(stat => {
@@ -15852,24 +16081,6 @@
     const resetDuration = trainingReadinessFormatDuration(
       readiness.quarter_hour?.seconds_until
     );
-    const boosterReadyAt =
-      Number(readiness.booster_ready_at);
-    const boosterAvailable =
-      Number.isSafeInteger(boosterReadyAt) &&
-      boosterReadyAt > 0 &&
-      boosterReadyAt <= Math.floor(Date.now() / 1000);
-    const recommendation = readiness.energy === null
-      ? 'Live Energy is unavailable. Historical estimates still work.'
-      : readiness.energy <= 0
-        ? 'No Energy available.'
-        : boosterAvailable
-          ? `${Number(readiness.energy).toLocaleString()} Energy available. For a better workout, use a booster to increase your Happiness for maximum gains.`
-          : `${Number(readiness.energy).toLocaleString()} Energy available.`;
-    const recommendationHtml =
-      readiness.over_happiness && readiness.energy !== null && readiness.energy > 0
-        ? `Train before the next quarter-hour reset (<span data-ta-quarter-countdown>${escapeActivityHtml(resetDuration)}</span>).`
-        : escapeActivityHtml(recommendation);
-
     const sectionOpen =
       safeRenderOptions.open === true ||
       (
@@ -15910,7 +16121,7 @@
     };
 
     return `
-      <details class="ta-section ta-training-readiness-section" ${sectionOpen ? 'open' : ''}>
+      <details class="ta-section ta-training-readiness-section" ${sectionOpen ? 'open' : ''} data-ta-live-energy="${readiness.energy === null ? '' : Number(readiness.energy)}" data-ta-live-happiness="${readiness.happiness === null ? '' : Number(readiness.happiness)}" data-ta-live-happiness-maximum="${readiness.happiness_maximum === null ? '' : Number(readiness.happiness_maximum)}" data-ta-over-happiness="${readiness.over_happiness ? 'true' : 'false'}" data-ta-drug-ready-at="${readiness.drug_ready_at === null ? '' : Number(readiness.drug_ready_at)}" data-ta-booster-ready-at="${readiness.booster_ready_at === null ? '' : Number(readiness.booster_ready_at)}">
         <summary class="ta-section-summary-row">
           <span class="ta-section-title">Training Readiness</span>
           <span class="ta-section-meta">${readiness.energy === null ? 'Historical only' : `${Number(readiness.energy).toLocaleString()} E`}</span>
@@ -15921,7 +16132,21 @@
             Read-only guidance from live bars and your own observed gym history. Estimates are historical ranges, not Torn formula guarantees.
           </div>
 
-          <div class="ta-training-status" data-ta-training-recommendation>${recommendationHtml}</div>
+          <div class="ta-training-plan-card ta-training-plan-${escapeActivityHtml(planAdvice.tone)}" data-ta-training-plan-card>
+            <label class="ta-training-plan-picker">
+              <span>Training plan</span>
+              <select data-ta-training-plan>
+                <option value="natural_e" ${trainingPlan === 'natural_e' ? 'selected' : ''}>Natural-E</option>
+                <option value="xanax_training" ${trainingPlan === 'xanax_training' ? 'selected' : ''}>Xanax training</option>
+                <option value="happy_jump" ${trainingPlan === 'happy_jump' ? 'selected' : ''}>Happy Jump</option>
+              </select>
+            </label>
+            <div class="ta-training-next-step">
+              <span>Next step</span>
+              <strong data-ta-training-plan-title>${escapeActivityHtml(planAdvice.title)}</strong>
+              <small data-ta-training-plan-detail>${escapeActivityHtml(planAdvice.detail)}</small>
+            </div>
+          </div>
 
           <div class="ta-metric-grid">
             ${activityDashboardMetric('Live Energy', readiness.energy === null ? '—' : Number(readiness.energy).toLocaleString(), readiness.energy === null ? 'Live Energy unavailable' : 'Live from Torn')}
@@ -15979,6 +16204,51 @@
     const historyMeta = history
       ?.closest('details')
       ?.querySelector('.ta-section-meta');
+    const planSelect = section.querySelector('[data-ta-training-plan]');
+    const planCard = section.querySelector('[data-ta-training-plan-card]');
+    const planTitle = section.querySelector('[data-ta-training-plan-title]');
+    const planDetail = section.querySelector('[data-ta-training-plan-detail]');
+    const datasetNumber = key => {
+      const value = section.dataset?.[key];
+
+      return value !== undefined &&
+        value !== null &&
+        value !== '' &&
+        Number.isFinite(Number(value))
+          ? Number(value)
+          : null;
+    };
+    const refreshPlan = () => {
+      const advice = trainingReadinessPlanAdvice(
+        {
+          energy: datasetNumber('taLiveEnergy'),
+          happiness: datasetNumber('taLiveHappiness'),
+          happiness_maximum: datasetNumber('taLiveHappinessMaximum'),
+          over_happiness: section.dataset?.taOverHappiness === 'true',
+          drug_ready_at: datasetNumber('taDrugReadyAt'),
+          booster_ready_at: datasetNumber('taBoosterReadyAt')
+        },
+        planSelect?.value,
+        Math.floor(Date.now() / 1000)
+      );
+
+      if (planTitle) {
+        planTitle.textContent = advice.title;
+      }
+
+      if (planDetail) {
+        planDetail.textContent = advice.detail;
+      }
+
+      if (planCard) {
+        planCard.classList.remove(
+          'ta-training-plan-ready',
+          'ta-training-plan-wait',
+          'ta-training-plan-info'
+        );
+        planCard.classList.add(`ta-training-plan-${advice.tone}`);
+      }
+    };
 
     const refreshQuarterHour = () => {
       if (!section.isConnected) {
@@ -15992,6 +16262,8 @@
       for (const clock of section.querySelectorAll('[data-ta-quarter-countdown]')) {
         clock.textContent = duration;
       }
+
+      refreshPlan();
 
       for (const cooldown of section.querySelectorAll('[data-ta-cooldown-ready-at]')) {
         const readyAt = Number(
@@ -16062,6 +16334,11 @@
 
     select?.addEventListener('change', refresh);
     input?.addEventListener('input', refresh);
+    planSelect?.addEventListener('change', () => {
+      writeTrainingReadinessPlan(planSelect.value);
+      refreshPlan();
+    });
+    refreshPlan();
     refreshQuarterHour();
   }
   // ============================================================
@@ -23039,6 +23316,76 @@
         border-radius: 8px;
         background: #151515;
         line-height: 1.4;
+      }
+
+      #${MODAL_ID} .ta-training-plan-card {
+        margin: 0 0 12px;
+        overflow: hidden;
+        border: 1px solid #5b4930;
+        border-left: 4px solid #c89b45;
+        border-radius: 8px;
+        background: #18140f;
+      }
+
+      #${MODAL_ID} .ta-training-plan-picker {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 10px;
+      }
+
+      #${MODAL_ID} .ta-training-plan-picker > span,
+      #${MODAL_ID} .ta-training-next-step > span {
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: .05em;
+        text-transform: uppercase;
+        opacity: .62;
+      }
+
+      #${MODAL_ID} .ta-training-plan-picker select {
+        box-sizing: border-box;
+        width: min(190px, 58%);
+        min-height: 36px;
+        padding: 7px 9px;
+        border: 1px solid #665536;
+        border-radius: 7px;
+        background: #202020;
+        color: #fff;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      #${MODAL_ID} .ta-training-next-step {
+        display: grid;
+        gap: 3px;
+        padding: 8px 10px 10px;
+        border-top: 1px solid #40341f;
+      }
+
+      #${MODAL_ID} .ta-training-next-step strong {
+        font-size: 14px;
+        line-height: 1.3;
+      }
+
+      #${MODAL_ID} .ta-training-next-step small {
+        font-size: 11px;
+        line-height: 1.4;
+        opacity: .74;
+      }
+
+      #${MODAL_ID} .ta-training-plan-ready {
+        border-left-color: #d6a84e;
+      }
+
+      #${MODAL_ID} .ta-training-plan-wait {
+        border-left-color: #9f7b3b;
+      }
+
+      #${MODAL_ID} .ta-training-plan-info {
+        border-left-color: #6699bb;
       }
 
       #${MODAL_ID} .ta-training-controls {
