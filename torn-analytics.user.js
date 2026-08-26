@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.15
+// @version      2.18.16
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.15';
+  const VERSION = '2.18.16';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -23292,6 +23292,50 @@
 
       #${MODAL_ID} .ta-resource-limit-note {
         margin-top: 10px;
+      }
+
+      /* v2.18.16: restrained color hierarchy for faster mobile scanning. */
+      #${MODAL_ID} .ta-section {
+        box-shadow: inset 3px 0 0 #555;
+      }
+
+      #${MODAL_ID} .ta-resource-section {
+        border-color: #385343;
+        background: linear-gradient(90deg, #102018 0%, #101010 42%);
+        box-shadow: inset 3px 0 0 #4fa56b;
+      }
+
+      #${MODAL_ID} .ta-training-workspace-section,
+      #${MODAL_ID} .ta-stat-growth-section,
+      #${MODAL_ID} .ta-training-readiness-section {
+        border-color: #5b4930;
+        background: linear-gradient(90deg, #211a10 0%, #101010 42%);
+        box-shadow: inset 3px 0 0 #d1a34b;
+      }
+
+      #${MODAL_ID} .ta-activity-section {
+        border-color: #34495d;
+        background: linear-gradient(90deg, #101b25 0%, #101010 42%);
+        box-shadow: inset 3px 0 0 #6197c6;
+      }
+
+      #${MODAL_ID} .ta-settings-section {
+        border-color: #4b4b56;
+        background: linear-gradient(90deg, #181820 0%, #101010 42%);
+        box-shadow: inset 3px 0 0 #9898aa;
+      }
+
+      #${MODAL_ID} .ta-stat-subsection {
+        border-left: 3px solid #6b5634;
+        background: #15120e;
+      }
+
+      #${MODAL_ID} .ta-stat-subsection > summary {
+        background: rgba(255, 255, 255, .025);
+      }
+
+      #${MODAL_ID} .ta-stat-subsection[open] > summary {
+        border-bottom: 1px solid rgba(209, 163, 75, .18);
       }
 
       /* v2.18.7: three concise, independently expandable resource drawers. */
