@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.22
+// @version      2.18.23
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.22';
+  const VERSION = '2.18.23';
 
-  // v2.18.22 compacts selected-session facts into evidence-aware badges and drawers.
+  // v2.18.23 adds evidence-aware session-bar colors and separate Happy Jump markers.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -16990,6 +16990,55 @@
     };
   }
 
+
+  function statGrowthSessionVisualClassification(
+    action
+  ) {
+    const status =
+      String(
+        action?.energy_source_evidence?.status ||
+        'energy_context_unavailable'
+      );
+    const sources = {
+      xanax_observed: {
+        key: 'xanax',
+        label: 'Xanax observed',
+        class_name: 'ta-stat-bar-xanax'
+      },
+      point_refill_observed: {
+        key: 'point-refill',
+        label: 'Point refill observed',
+        class_name: 'ta-stat-bar-point-refill'
+      },
+      mixed_sources_observed: {
+        key: 'mixed',
+        label: 'Mixed sources observed',
+        class_name: 'ta-stat-bar-mixed'
+      },
+      no_energy_source_observed: {
+        key: 'source-unclear',
+        label: 'Source unclear',
+        class_name: 'ta-stat-bar-source-unclear'
+      },
+      energy_context_unavailable: {
+        key: 'source-unavailable',
+        label: 'Source unavailable',
+        class_name: 'ta-stat-bar-source-unavailable'
+      }
+    };
+    const source =
+      sources[status] ||
+      sources.energy_context_unavailable;
+
+    return {
+      ...source,
+      happy_jump:
+        statGrowthPotentialHappyJump(
+          action
+        )
+    };
+  }
+
   function statGrowthCumulativeSampleDetail(
     action
   ) {
@@ -16999,12 +17048,18 @@
         1000
       ).toLocaleString();
 
+    const visual =
+      statGrowthSessionVisualClassification(
+        action
+      );
+
     return `${date} · ${action?.stat_label || 'Stat'} ` +
       `${statGrowthFormatGain(action?.stat_increased)} · ` +
       `${Number(action?.energy_used || 0).toLocaleString()} energy · ` +
       `${Number(action?.trains || 0).toLocaleString()} trains · ` +
       `${statGrowthGymName(action?.gym)} · ` +
       `total after ${statGrowthFormatNumber(action?.stat_after, 2)} · ` +
+      `${visual.label}${visual.happy_jump ? ' · Potential Happy Jump' : ''} · ` +
       statGrowthTrainingContextDetail(
         action?.training_context
       );
@@ -17650,6 +17705,11 @@
         ...gains
       );
 
+    const sessionVisuals =
+      samples.map(
+        statGrowthSessionVisualClassification
+      );
+
     const pointX =
       index =>
         samples.length === 1
@@ -17691,34 +17751,95 @@
         )
       );
 
+    const barHeightFor =
+      action =>
+        Math.max(
+          2,
+          Number(
+            action?.stat_increased ||
+            0
+          ) /
+            maximumGain *
+            plotHeight *
+            .36
+        );
+
     const bars =
       samples.map(
         (
           action,
           index
         ) => {
-          const gain =
-            Number(
-              action.stat_increased ||
-              0
-            );
-
           const barHeight =
-            Math.max(
-              2,
-              gain /
-                maximumGain *
-                plotHeight *
-                .36
+            barHeightFor(
+              action
             );
-
+          const visual =
+            sessionVisuals[
+              index
+            ];
           const active =
             index ===
             samples.length - 1;
 
-          return `<rect x="${(pointX(index) - barWidth / 2).toFixed(2)}" y="${(top + plotHeight - barHeight).toFixed(2)}" width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2" class="ta-stat-total-bar${active ? ' ta-stat-session-active' : ''}" data-ta-stat-session-visual="${index}"></rect>`;
+          return `<rect x="${(pointX(index) - barWidth / 2).toFixed(2)}" y="${(top + plotHeight - barHeight).toFixed(2)}" width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2" class="ta-stat-total-bar ${visual.class_name}${active ? ' ta-stat-session-active' : ''}" data-ta-stat-energy-source="${visual.key}" data-ta-stat-session-visual="${index}"></rect>`;
         }
       ).join('');
+
+    const happyJumpMarkers =
+      samples.map(
+        (
+          action,
+          index
+        ) => {
+          const visual =
+            sessionVisuals[
+              index
+            ];
+
+          if (
+            !visual.happy_jump
+          ) {
+            return '';
+          }
+
+          const markerY =
+            Math.max(
+              top + 4,
+              top +
+                plotHeight -
+                barHeightFor(
+                  action
+                ) -
+                7
+            );
+
+          return `<circle cx="${pointX(index).toFixed(2)}" cy="${markerY.toFixed(2)}" r="4" class="ta-stat-happy-jump-marker" aria-hidden="true"></circle>`;
+        }
+      ).join('');
+
+    const sourceLegend =
+      Array.from(
+        new Map(
+          sessionVisuals.map(
+            visual => [
+              visual.key,
+              visual
+            ]
+          )
+        ).values()
+      ).map(
+        visual =>
+          `<span><i class="ta-stat-source-key ta-stat-source-key-${visual.key}"></i>${escapeActivityHtml(visual.label)}</span>`
+      ).join('');
+
+    const happyJumpLegend =
+      sessionVisuals.some(
+        visual =>
+          visual.happy_jump
+      )
+        ? '<span><i class="ta-stat-happy-jump-key"></i>Potential Happy Jump</span>'
+        : '';
 
     const barHits =
       samples.map(
@@ -17848,11 +17969,20 @@
 
         ${renderStatGrowthFocusControl(focus, selectedContext, selectedLimit)}
 
-        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars" class="ta-stat-total-svg" data-ta-stat-total-svg>
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars classified by observed Energy-source evidence" class="ta-stat-total-svg" data-ta-stat-total-svg>
           <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
           <line x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
           <line x1="${left}" y1="${top + plotHeight / 2}" x2="${left + plotWidth}" y2="${top + plotHeight / 2}" class="ta-stat-total-guide"></line>
+          <defs>
+            <linearGradient id="ta-stat-mixed-energy" x1="0" x2="1">
+              <stop offset="0%" stop-color="#4f9dce"></stop>
+              <stop offset="48%" stop-color="#4f9dce"></stop>
+              <stop offset="52%" stop-color="#9a77d4"></stop>
+              <stop offset="100%" stop-color="#9a77d4"></stop>
+            </linearGradient>
+          </defs>
           ${bars}
+          ${happyJumpMarkers}
           <path d="${line}" class="ta-stat-total-line"></path>
           ${points}
           ${barHits}
@@ -17862,9 +17992,10 @@
           <text x="${left + plotWidth}" y="${height - 8}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(lastDate)}</text>
         </svg>
 
-        <div class="ta-stat-total-legend">
+        <div class="ta-stat-total-legend" aria-label="Session bar classification legend">
           <span><i class="ta-stat-total-line-key"></i>Total stat</span>
-          <span><i class="ta-stat-total-bar-key"></i>Session gain</span>
+          ${sourceLegend}
+          ${happyJumpLegend}
         </div>
         <div class="ta-stat-total-scale">
           Session gain scale: 0–${escapeActivityHtml(statGrowthFormatCompactGain(maximumGain))} · tap a bar or point for exact values
@@ -23793,8 +23924,35 @@
       }
 
       #${MODAL_ID} .ta-stat-total-bar {
-        fill: #dba854;
-        opacity: .72;
+        fill: #777;
+        opacity: .78;
+      }
+
+      #${MODAL_ID} .ta-stat-bar-xanax {
+        fill: #4f9dce;
+      }
+
+      #${MODAL_ID} .ta-stat-bar-point-refill {
+        fill: #9a77d4;
+      }
+
+      #${MODAL_ID} .ta-stat-bar-mixed {
+        fill: url(#ta-stat-mixed-energy);
+      }
+
+      #${MODAL_ID} .ta-stat-bar-source-unclear {
+        fill: #777;
+      }
+
+      #${MODAL_ID} .ta-stat-bar-source-unavailable {
+        fill: #4f5961;
+      }
+
+      #${MODAL_ID} .ta-stat-happy-jump-marker {
+        fill: #f4c76b;
+        stroke: #2b1d0c;
+        stroke-width: 2;
+        pointer-events: none;
       }
 
       #${MODAL_ID} .ta-stat-total-bar.ta-stat-session-active {
@@ -23846,10 +24004,10 @@
       #${MODAL_ID} .ta-stat-total-legend {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 6px 10px;
         margin-top: 4px;
         font-size: 11px;
-        opacity: .68;
+        opacity: .82;
       }
 
       #${MODAL_ID} .ta-stat-total-legend span {
@@ -23869,11 +24027,40 @@
         background: #f2f2f2;
       }
 
-      #${MODAL_ID} .ta-stat-total-bar-key {
+      #${MODAL_ID} .ta-stat-source-key,
+      #${MODAL_ID} .ta-stat-happy-jump-key {
         width: 10px;
         height: 10px;
         border-radius: 2px;
-        background: #dba854;
+        background: #777;
+      }
+
+      #${MODAL_ID} .ta-stat-source-key-xanax {
+        background: #4f9dce;
+      }
+
+      #${MODAL_ID} .ta-stat-source-key-point-refill {
+        background: #9a77d4;
+      }
+
+      #${MODAL_ID} .ta-stat-source-key-mixed {
+        background: linear-gradient(90deg, #4f9dce 0 48%, #9a77d4 52% 100%);
+      }
+
+      #${MODAL_ID} .ta-stat-source-key-source-unclear {
+        background: #777;
+      }
+
+      #${MODAL_ID} .ta-stat-source-key-source-unavailable {
+        background: #4f5961;
+      }
+
+      #${MODAL_ID} .ta-stat-happy-jump-key {
+        width: 8px;
+        height: 8px;
+        border: 2px solid #2b1d0c;
+        border-radius: 50%;
+        background: #f4c76b;
       }
 
       #${MODAL_ID} .ta-category-list {
@@ -24656,9 +24843,14 @@
         height: 4px;
       }
 
-      #${MODAL_ID} .ta-stat-total-bar-key {
+      #${MODAL_ID} .ta-stat-source-key {
         width: 12px;
         height: 12px;
+      }
+
+      #${MODAL_ID} .ta-stat-happy-jump-key {
+        width: 9px;
+        height: 9px;
       }
 
       #${MODAL_ID} .ta-stat-total-chart .ta-chart-detail {
