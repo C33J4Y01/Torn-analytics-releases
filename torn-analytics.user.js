@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.18
+// @version      2.18.19
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.18';
+  const VERSION = '2.18.19';
 
-  // v2.18.18 keeps chart labels compact while selected details remain exact.
+  // v2.18.19 adds conservative Xanax and point-refill Energy source evidence.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13963,6 +13963,354 @@
     };
   }
 
+  function statGrowthEnergySourceEvent(
+    log
+  ) {
+    const logId =
+      Number(
+        log?.log ??
+        log?.details?.id
+      );
+    const timestamp =
+      Number(
+        log?.timestamp
+      );
+
+    if (
+      !Number.isSafeInteger(
+        timestamp
+      ) ||
+      timestamp <= 0
+    ) {
+      return null;
+    }
+
+    const data =
+      log?.data;
+
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      Array.isArray(
+        data
+      )
+    ) {
+      return null;
+    }
+
+    if (
+      logId === 2290
+    ) {
+      if (
+        statGrowthPositiveInteger(
+          data.item
+        ) !== 206
+      ) {
+        return null;
+      }
+
+      return {
+        id:
+          String(
+            log?.id ??
+            ''
+          ),
+        log_id: 2290,
+        timestamp,
+        kind: 'xanax',
+        label: 'Xanax',
+        energy_granted: 250,
+        happiness_granted: 75,
+        basis: 'derived_rule'
+      };
+    }
+
+    if (
+      logId === 4900
+    ) {
+      const energyGranted =
+        statGrowthPositiveInteger(
+          data.energy_increased
+        );
+
+      if (
+        energyGranted === null
+      ) {
+        return null;
+      }
+
+      return {
+        id:
+          String(
+            log?.id ??
+            ''
+          ),
+        log_id: 4900,
+        timestamp,
+        kind: 'point_refill',
+        label: 'Point refill',
+        energy_granted:
+          energyGranted,
+        happiness_granted: 0,
+        basis: 'observed_exact'
+      };
+    }
+
+    return null;
+  }
+
+  function statGrowthEnergySourceEvidence(
+    action,
+    energySourceEvents,
+    historyFirstTimestamp,
+    previousTrainingTimestamp = null,
+    windowSeconds = 30 * 60 * 60
+  ) {
+    const timestamp =
+      Number(
+        action?.timestamp
+      );
+    const historyStart =
+      Number(
+        historyFirstTimestamp
+      );
+    const previousTimestamp =
+      Number(
+        previousTrainingTimestamp
+      );
+    const safeWindow =
+      Number.isSafeInteger(
+        Number(
+          windowSeconds
+        )
+      ) &&
+      Number(windowSeconds) > 0
+        ? Number(windowSeconds)
+        : 30 * 60 * 60;
+
+    if (
+      !Number.isSafeInteger(
+        timestamp
+      ) ||
+      timestamp <= 0
+    ) {
+      return {
+        status:
+          'energy_context_unavailable',
+        window_seconds:
+          safeWindow
+      };
+    }
+
+    const hasPreviousTraining =
+      Number.isSafeInteger(
+        previousTimestamp
+      ) &&
+      previousTimestamp > 0 &&
+      previousTimestamp <=
+        timestamp;
+    const boundaryTimestamp =
+      hasPreviousTraining
+        ? previousTimestamp
+        : timestamp -
+          safeWindow;
+
+    if (
+      !Number.isSafeInteger(
+        historyStart
+      ) ||
+      historyStart <= 0 ||
+      historyStart >
+        boundaryTimestamp
+    ) {
+      return {
+        status:
+          'energy_context_unavailable',
+        window_seconds:
+          timestamp -
+          boundaryTimestamp,
+        boundary_reason:
+          hasPreviousTraining
+            ? 'previous_training'
+            : '30_hour_lookback'
+      };
+    }
+
+    const grouped =
+      new Map();
+
+    for (
+      const event
+      of Array.isArray(
+        energySourceEvents
+      )
+        ? energySourceEvents
+        : []
+    ) {
+      const eventTimestamp =
+        Number(
+          event?.timestamp
+        );
+
+      if (
+        !Number.isSafeInteger(
+          eventTimestamp
+        ) ||
+        eventTimestamp <=
+          boundaryTimestamp
+      ) {
+        continue;
+      }
+
+      if (
+        eventTimestamp >
+        timestamp
+      ) {
+        break;
+      }
+
+      const kind =
+        String(
+          event?.kind ||
+          ''
+        );
+
+      if (
+        !kind
+      ) {
+        continue;
+      }
+
+      const secondsBefore =
+        timestamp -
+        eventTimestamp;
+      const existing =
+        grouped.get(
+          kind
+        ) || {
+          kind,
+          label:
+            String(
+              event?.label ||
+              'Energy source'
+            ),
+          count: 0,
+          energy_total: 0,
+          happiness_total: 0,
+          nearest_seconds_before:
+            secondsBefore,
+          furthest_seconds_before:
+            secondsBefore,
+          basis:
+            String(
+              event?.basis ||
+              'observed'
+            )
+        };
+
+      existing.count++;
+      existing.energy_total +=
+        Number(
+          event?.energy_granted ||
+          0
+        );
+      existing.happiness_total +=
+        Number(
+          event?.happiness_granted ||
+          0
+        );
+      existing.nearest_seconds_before =
+        Math.min(
+          existing.nearest_seconds_before,
+          secondsBefore
+        );
+      existing.furthest_seconds_before =
+        Math.max(
+          existing.furthest_seconds_before,
+          secondsBefore
+        );
+
+      grouped.set(
+        kind,
+        existing
+      );
+    }
+
+    const sources =
+      Array.from(
+        grouped.values()
+      );
+    const kinds =
+      new Set(
+        sources.map(
+          source =>
+            source.kind
+        )
+      );
+
+    if (
+      !sources.length
+    ) {
+      return {
+        status:
+          'no_energy_source_observed',
+        window_seconds:
+          timestamp -
+          boundaryTimestamp,
+        boundary_reason:
+          hasPreviousTraining
+            ? 'previous_training'
+            : '30_hour_lookback',
+        natural_or_stored_energy_possible:
+          true,
+        sources: []
+      };
+    }
+
+    const status =
+      kinds.size > 1
+        ? 'mixed_sources_observed'
+        : kinds.has(
+            'xanax'
+          )
+          ? 'xanax_observed'
+          : 'point_refill_observed';
+
+    return {
+      status,
+      window_seconds:
+        timestamp -
+        boundaryTimestamp,
+      boundary_reason:
+        hasPreviousTraining
+          ? 'previous_training'
+          : '30_hour_lookback',
+      supported_energy_total:
+        sources.reduce(
+          (
+            total,
+            source
+          ) =>
+            total +
+            source.energy_total,
+          0
+        ),
+      supported_happiness_total:
+        sources.reduce(
+          (
+            total,
+            source
+          ) =>
+            total +
+            source.happiness_total,
+          0
+        ),
+      natural_or_stored_energy_possible:
+        true,
+      sources
+    };
+  }
+
   function statGrowthTrainingContext(
     action,
     happinessBoostEvents,
@@ -14557,6 +14905,9 @@
     const happinessBoostEvents =
       [];
 
+    const energySourceEvents =
+      [];
+
     let recognizedLogs = 0;
     let historyFirstTimestamp = null;
     let historyLastTimestamp = null;
@@ -14608,6 +14959,19 @@
       ) {
         happinessBoostEvents.push(
           happinessBoostEvent
+        );
+      }
+
+      const energySourceEvent =
+        statGrowthEnergySourceEvent(
+          log
+        );
+
+      if (
+        energySourceEvent
+      ) {
+        energySourceEvents.push(
+          energySourceEvent
         );
       }
 
@@ -14685,6 +15049,21 @@
         )
     );
 
+    energySourceEvents.sort(
+      (
+        left,
+        right
+      ) =>
+        left.timestamp -
+          right.timestamp ||
+        left.id.localeCompare(
+          right.id
+        )
+    );
+
+    let previousTrainingTimestamp =
+      null;
+
     for (
       const action
       of actions
@@ -14695,6 +15074,15 @@
           happinessBoostEvents,
           historyFirstTimestamp
         );
+      action.energy_source_evidence =
+        statGrowthEnergySourceEvidence(
+          action,
+          energySourceEvents,
+          historyFirstTimestamp,
+          previousTrainingTimestamp
+        );
+      previousTrainingTimestamp =
+        action.timestamp;
     }
 
     const stats =
@@ -14959,6 +15347,8 @@
         actions,
       training_context_window_seconds:
         15 * 60,
+      energy_source_lookback_seconds:
+        30 * 60 * 60,
       trains:
         totalTrains,
       energy_used:
@@ -16343,6 +16733,159 @@
       );
   }
 
+  function statGrowthEnergyEvidenceTiming(
+    seconds
+  ) {
+    const safeSeconds =
+      Math.max(
+        0,
+        Number(
+          seconds
+        ) ||
+        0
+      );
+
+    if (
+      safeSeconds < 60
+    ) {
+      return '<1m';
+    }
+
+    if (
+      safeSeconds < 60 * 60
+    ) {
+      return `${Math.floor(safeSeconds / 60)}m`;
+    }
+
+    return `${statGrowthFormatNumber(safeSeconds / (60 * 60), 1)}h`;
+  }
+
+  function statGrowthSessionEnergyEvidence(
+    evidence
+  ) {
+    const status =
+      String(
+        evidence?.status ||
+        ''
+      );
+    const boundary =
+      evidence?.boundary_reason ===
+        'previous_training'
+        ? 'Since the previous gym session'
+        : 'Covered 30-hour lookback';
+
+    if (
+      status ===
+      'energy_context_unavailable'
+    ) {
+      return {
+        label:
+          'Energy source unavailable',
+        evidence:
+          'Lookback not fully covered',
+        detail:
+          'Stored history does not fully cover the relevant period before this session.',
+        note:
+          'The training Energy used remains exact; only its possible sources are unavailable.'
+      };
+    }
+
+    if (
+      status ===
+      'no_energy_source_observed'
+    ) {
+      return {
+        label:
+          'No recent source observed',
+        evidence:
+          boundary,
+        detail:
+          'No supported Xanax or Energy point-refill log was found before this training session.',
+        note:
+          'Natural Energy, older stored Energy, and unsupported sources remain possible.'
+      };
+    }
+
+    const sourceRows =
+      (
+        Array.isArray(
+          evidence?.sources
+        )
+          ? evidence.sources
+          : []
+      ).map(
+        source => {
+          const nearest =
+            statGrowthEnergyEvidenceTiming(
+              source?.nearest_seconds_before
+            );
+          const furthest =
+            statGrowthEnergyEvidenceTiming(
+              source?.furthest_seconds_before
+            );
+          const timing =
+            nearest === furthest
+              ? nearest
+              : `${nearest}–${furthest}`;
+          const quantity =
+            Number(
+              source?.count ||
+              0
+            ) > 1
+              ? ` ×${Number(source.count)}`
+              : '';
+          const energy =
+            Number(
+              source?.energy_total ||
+              0
+            ).toLocaleString();
+          const happiness =
+            Number(
+              source?.happiness_total ||
+              0
+            );
+          const energyCopy =
+            source?.kind ===
+              'point_refill'
+              ? `+${energy}E recorded`
+              : `${energy}E granted`;
+          const happinessCopy =
+            happiness > 0
+              ? ` · +${happiness.toLocaleString()} Happiness`
+              : '';
+
+          return `${source?.label || 'Energy source'}${quantity} · ${energyCopy}${happinessCopy} · ${timing} before`;
+        }
+      );
+
+    const labels = {
+      xanax_observed:
+        'Xanax-assisted training',
+      point_refill_observed:
+        'Point-refill-assisted training',
+      mixed_sources_observed:
+        'Mixed-source training'
+    };
+
+    return {
+      label:
+        labels[status] ||
+        'Energy source evidence',
+      evidence:
+        status ===
+          'mixed_sources_observed'
+          ? 'Multiple timestamped sources observed'
+          : 'Timestamped source observed',
+      detail:
+        sourceRows.join(
+          '; '
+        ) ||
+        'Supported source details unavailable.',
+      note:
+        `${boundary}. These logs show possible contributors, not exact attribution; natural or previously stored Energy may also have been used.`
+    };
+  }
+
   function statGrowthSessionContextEvidence(
     context
   ) {
@@ -16421,6 +16964,10 @@
       statGrowthSessionContextEvidence(
         action?.training_context
       );
+    const energyEvidence =
+      statGrowthSessionEnergyEvidence(
+        action?.energy_source_evidence
+      );
 
     return {
       title:
@@ -16473,7 +17020,15 @@
       context_detail:
         context.detail,
       context_note:
-        context.note
+        context.note,
+      energy_source_label:
+        energyEvidence.label,
+      energy_source_evidence:
+        energyEvidence.evidence,
+      energy_source_detail:
+        energyEvidence.detail,
+      energy_source_note:
+        energyEvidence.note
     };
   }
 
@@ -16548,6 +17103,18 @@
           <span data-ta-stat-session-field="context_detail">${escapeActivityHtml(model.context_detail)}</span>
           <small data-ta-stat-session-field="context_note">${escapeActivityHtml(model.context_note)}</small>
         </div>
+
+        <details class="ta-stat-session-energy-evidence">
+          <summary>
+            <span>Energy source</span>
+            <strong data-ta-stat-session-field="energy_source_label">${escapeActivityHtml(model.energy_source_label)}</strong>
+          </summary>
+          <div>
+            <strong data-ta-stat-session-field="energy_source_evidence">${escapeActivityHtml(model.energy_source_evidence)}</strong>
+            <span data-ta-stat-session-field="energy_source_detail">${escapeActivityHtml(model.energy_source_detail)}</span>
+            <small data-ta-stat-session-field="energy_source_note">${escapeActivityHtml(model.energy_source_note)}</small>
+          </div>
+        </details>
       </section>
     `;
   }
@@ -23830,6 +24397,76 @@
 
       #${MODAL_ID} .ta-stat-session-context small {
         color: #aaa;
+        font-size: 10px;
+        line-height: 1.4;
+      }
+
+      /* v2.18.19: compact, evidence-only Energy source drawer. */
+      #${MODAL_ID} .ta-stat-session-energy-evidence {
+        overflow: hidden;
+        border: 1px solid #314955;
+        border-left: 3px solid #5f91a8;
+        border-radius: 7px;
+        background: #12191d;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence > summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 7px 9px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence > summary > span {
+        color: #8fa8b3;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence > summary > strong {
+        margin-left: auto;
+        color: #d9edf5;
+        font-size: 11px;
+        line-height: 1.25;
+        text-align: right;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence > summary::after {
+        content: '▸';
+        color: #83a8b8;
+        font-size: 10px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence[open] > summary::after {
+        content: '▾';
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence > div {
+        display: grid;
+        gap: 3px;
+        padding: 8px 9px 9px;
+        border-top: 1px solid rgba(95, 145, 168, .22);
+        color: #d2d2d2;
+        font-size: 12px;
+        line-height: 1.38;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence > div > strong {
+        color: #e6f1f5;
+        font-size: 11px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-energy-evidence > div > small {
+        color: #9faeb4;
         font-size: 10px;
         line-height: 1.4;
       }
