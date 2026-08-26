@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.19
+// @version      2.18.20
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.19';
+  const VERSION = '2.18.20';
 
-  // v2.18.19 adds conservative Xanax and point-refill Energy source evidence.
+  // v2.18.20 adds an exact live Energy stack indicator.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -20646,6 +20646,63 @@
     return etaText;
   }
 
+  function resourceDashboardEnergyStackStatus(
+    current,
+    maximum
+  ) {
+    const normalizedCurrent =
+      typeof current === 'number'
+        ? current
+        : Number.NaN;
+    const normalizedMaximum =
+      typeof maximum === 'number'
+        ? maximum
+        : Number.NaN;
+
+    if (
+      !Number.isFinite(
+        normalizedCurrent
+      ) ||
+      !Number.isFinite(
+        normalizedMaximum
+      ) ||
+      normalizedCurrent < 0 ||
+      normalizedMaximum < 1
+    ) {
+      return {
+        active: false,
+        amount: null,
+        label:
+          'Live data unavailable'
+      };
+    }
+
+    const amount =
+      normalizedCurrent -
+      normalizedMaximum;
+
+    if (
+      amount > 0
+    ) {
+      return {
+        active: true,
+        amount,
+        label:
+          'Stack active · +' +
+          resourceDashboardFormatNumber(
+            amount
+          ) +
+          ' above natural max'
+      };
+    }
+
+    return {
+      active: false,
+      amount: 0,
+      label: 'Not stacked'
+    };
+  }
+
   function resourceDashboardSourceLabel(
     event
   ) {
@@ -20937,6 +20994,14 @@
         fullAt
       );
 
+    const stackStatus =
+      resource === 'energy'
+        ? resourceDashboardEnergyStackStatus(
+            bar.current,
+            bar.maximum
+          )
+        : null;
+
     return `
       <div class="ta-resource-live-card">
         <div class="ta-resource-live-topline">
@@ -20946,6 +21011,16 @@
         <div class="ta-resource-live-track">
           <div style="width:${percentage.toFixed(2)}%"></div>
         </div>
+        ${
+          stackStatus
+            ? `
+              <div class="ta-resource-stack-status ${stackStatus.active ? 'is-active' : ''}">
+                <span>Energy stack</span>
+                <b>${escapeResourceDashboardHtml(stackStatus.label)}</b>
+              </div>
+            `
+            : ''
+        }
         <div
           class="ta-resource-eta"
           data-ta-resource-full-at="${fullAt}"
@@ -23696,6 +23771,40 @@
         height: 100%;
         border-radius: inherit;
         background: #aaa;
+      }
+
+      #${MODAL_ID} .ta-resource-stack-status {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 0 0 8px;
+        padding: 6px 8px;
+        border: 1px solid #33434a;
+        border-radius: 6px;
+        background: #11181b;
+        color: #aab9bf;
+        font-size: 11px;
+        line-height: 1.3;
+      }
+
+      #${MODAL_ID} .ta-resource-stack-status > span {
+        flex: 0 0 auto;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-resource-stack-status > b {
+        min-width: 0;
+        color: #d5e5eb;
+        text-align: right;
+      }
+
+      #${MODAL_ID} .ta-resource-stack-status.is-active {
+        border-color: #477184;
+        background: #132027;
       }
 
       #${MODAL_ID} .ta-resource-eta {
