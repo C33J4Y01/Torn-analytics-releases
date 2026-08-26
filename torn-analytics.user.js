@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.23
+// @version      2.18.24
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.23';
+  const VERSION = '2.18.24';
 
-  // v2.18.23 adds evidence-aware session-bar colors and separate Happy Jump markers.
+  // v2.18.24 unifies Natural-E and Xanax guidance into one Efficient training plan.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -15505,13 +15505,11 @@
   ) {
     const plan = String(value || '').trim().toLowerCase();
 
-    return [
-      'natural_e',
-      'xanax_training',
-      'happy_jump'
-    ].includes(plan)
-      ? plan
-      : 'natural_e';
+    if (plan === 'happy_jump') {
+      return plan;
+    }
+
+    return 'efficient_training';
   }
 
   function trainingReadinessPlanStorage() {
@@ -15530,7 +15528,7 @@
         trainingReadinessPlanStorage()?.getItem(TRAINING_PLAN_STORAGE_KEY)
       );
     } catch {
-      return 'natural_e';
+      return 'efficient_training';
     }
   }
 
@@ -15598,54 +15596,6 @@
       };
     }
 
-    if (plan === 'xanax_training') {
-      if (energy > 750) {
-        return {
-          plan,
-          title: 'Train some Energy first',
-          detail: 'Make room so a full Xanax Energy gain is not wasted.',
-          tone: 'wait'
-        };
-      }
-
-      if (drugState === 'unavailable') {
-        return {
-          plan,
-          title: 'Drug cooldown unavailable',
-          detail: 'Refresh live cooldowns before planning Xanax training.',
-          tone: 'info'
-        };
-      }
-
-      if (drugState === 'waiting') {
-        return {
-          plan,
-          title: 'Wait for drug cooldown',
-          detail: 'Xanax is not ready yet.',
-          tone: 'wait'
-        };
-      }
-
-      const happinessAfterXanax =
-        happiness === null
-          ? null
-          : happiness + 75;
-      const needsCandyAfterXanax =
-        happinessAfterXanax !== null &&
-        happinessMaximum !== null &&
-        happinessAfterXanax < happinessMaximum &&
-        boosterState === 'ready';
-
-      return {
-        plan,
-        title: 'Take a Xanax, then train promptly',
-        detail: needsCandyAfterXanax
-          ? 'After Xanax: If you have candy, consider eating some to train at your natural maximum Happiness.'
-          : 'Train promptly after taking it so natural Energy regeneration can resume.',
-        tone: 'ready'
-      };
-    }
-
     if (plan === 'happy_jump') {
       if (readiness?.over_happiness && energy > 0) {
         return {
@@ -15691,16 +15641,7 @@
       };
     }
 
-    if (energy <= 0) {
-      return {
-        plan,
-        title: 'No Energy available',
-        detail: 'Wait for Energy before training.',
-        tone: 'wait'
-      };
-    }
-
-    if (readiness?.over_happiness) {
+    if (readiness?.over_happiness && energy > 0) {
       return {
         plan,
         title: 'Train now',
@@ -15709,13 +15650,72 @@
       };
     }
 
+    if (drugState === 'ready') {
+      if (energy > 750) {
+        return {
+          plan,
+          title: 'Train some Energy first',
+          detail: 'Make room so a full 250E Xanax gain is not wasted.',
+          tone: 'wait'
+        };
+      }
+
+      const happinessAfterXanax =
+        happiness === null
+          ? null
+          : happiness + 75;
+      const needsCandyAfterXanax =
+        happinessAfterXanax !== null &&
+        happinessMaximum !== null &&
+        happinessAfterXanax < happinessMaximum &&
+        boosterState === 'ready';
+
+      return {
+        plan,
+        title: 'Take a Xanax, then train promptly',
+        detail: needsCandyAfterXanax
+          ? 'After Xanax: If you have candy, consider eating some to train at your natural maximum Happiness.'
+          : 'Train promptly after taking it so natural Energy regeneration can resume.',
+        tone: 'ready'
+      };
+    }
+
+    if (drugState === 'waiting') {
+      if (energy > 0) {
+        return {
+          plan,
+          title: 'Train available Energy',
+          detail: candySuggestion
+            ? 'If you have candy, consider eating some to train at your natural maximum Happiness.'
+            : 'Keep natural Energy regenerating while the Xanax cooldown clears.',
+          tone: 'ready'
+        };
+      }
+
+      return {
+        plan,
+        title: 'Wait for Energy or Xanax cooldown',
+        detail: 'Train when Energy returns, or use Xanax when the drug cooldown clears.',
+        tone: 'wait'
+      };
+    }
+
+    if (energy > 0) {
+      return {
+        plan,
+        title: 'Train available Energy',
+        detail: candySuggestion
+          ? 'If you have candy, consider eating some to train at your natural maximum Happiness.'
+          : 'Drug cooldown is unavailable; refresh live cooldowns before planning the next Xanax.',
+        tone: 'info'
+      };
+    }
+
     return {
       plan,
-      title: 'Train available Energy',
-      detail: candySuggestion
-        ? 'If you have candy, consider eating some to train at your natural maximum Happiness.'
-        : 'No booster suggested for Natural-E training.',
-      tone: 'ready'
+      title: 'Drug cooldown unavailable',
+      detail: 'Refresh live cooldowns before planning the next Xanax.',
+      tone: 'info'
     };
   }
 
@@ -16136,8 +16136,7 @@
             <label class="ta-training-plan-picker">
               <span>Training plan</span>
               <select data-ta-training-plan>
-                <option value="natural_e" ${trainingPlan === 'natural_e' ? 'selected' : ''}>Natural-E</option>
-                <option value="xanax_training" ${trainingPlan === 'xanax_training' ? 'selected' : ''}>Xanax training</option>
+                <option value="efficient_training" ${trainingPlan === 'efficient_training' ? 'selected' : ''}>Efficient training</option>
                 <option value="happy_jump" ${trainingPlan === 'happy_jump' ? 'selected' : ''}>Happy Jump</option>
               </select>
             </label>
