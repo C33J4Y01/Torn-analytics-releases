@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.17
+// @version      2.18.18
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.17';
+  const VERSION = '2.18.18';
+
+  // v2.18.18 keeps chart labels compact while selected details remain exact.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -15767,6 +15769,72 @@
     );
   }
 
+  function statGrowthFormatCompactNumber(
+    value,
+    maximumFractionDigits = 2
+  ) {
+    const number =
+      Number(
+        value
+      );
+
+    if (
+      !Number.isFinite(
+        number
+      )
+    ) {
+      return '—';
+    }
+
+    const absolute =
+      Math.abs(
+        number
+      );
+    const unit =
+      absolute >= 1e9
+        ? ['b', 1e9]
+        : absolute >= 1e6
+          ? ['m', 1e6]
+          : absolute >= 1e3
+            ? ['k', 1e3]
+            : null;
+
+    if (
+      !unit
+    ) {
+      return statGrowthFormatNumber(
+        number,
+        maximumFractionDigits
+      );
+    }
+
+    return `${statGrowthFormatNumber(
+      number / unit[1],
+      absolute >= 1e5
+        ? 1
+        : maximumFractionDigits
+    )}${unit[0]}`;
+  }
+
+  function statGrowthFormatCompactGain(
+    value
+  ) {
+    const number =
+      Number(
+        value
+      );
+
+    if (
+      !Number.isFinite(
+        number
+      )
+    ) {
+      return '—';
+    }
+
+    return `${number >= 0 ? '+' : ''}${statGrowthFormatCompactNumber(number, 2)}`;
+  }
+
   function statGrowthFormatGain(
     value
   ) {
@@ -16899,8 +16967,8 @@
           <path d="${line}" class="ta-stat-total-line"></path>
           ${points}
           ${barHits}
-          <text x="${left - 8}" y="${top + 4}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(statGrowthFormatNumber(maximumTotal, 2))}</text>
-          <text x="${left - 8}" y="${top + plotHeight}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(statGrowthFormatNumber(minimumTotal, 2))}</text>
+          <text x="${left - 8}" y="${top + 4}" text-anchor="end" class="ta-stat-total-label" aria-label="Exact maximum total ${escapeActivityHtml(statGrowthFormatNumber(maximumTotal, 2))}"><title>Exact maximum total ${escapeActivityHtml(statGrowthFormatNumber(maximumTotal, 2))}</title>${escapeActivityHtml(statGrowthFormatCompactNumber(maximumTotal, 2))}</text>
+          <text x="${left - 8}" y="${top + plotHeight}" text-anchor="end" class="ta-stat-total-label" aria-label="Exact minimum total ${escapeActivityHtml(statGrowthFormatNumber(minimumTotal, 2))}"><title>Exact minimum total ${escapeActivityHtml(statGrowthFormatNumber(minimumTotal, 2))}</title>${escapeActivityHtml(statGrowthFormatCompactNumber(minimumTotal, 2))}</text>
           <text x="${left}" y="${height - 8}" class="ta-stat-total-label">${escapeActivityHtml(firstDate)}</text>
           <text x="${left + plotWidth}" y="${height - 8}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(lastDate)}</text>
         </svg>
@@ -16910,7 +16978,7 @@
           <span><i class="ta-stat-total-bar-key"></i>Session gain</span>
         </div>
         <div class="ta-stat-total-scale">
-          Session gain scale: 0–+${escapeActivityHtml(statGrowthFormatNumber(maximumGain, 2))}
+          Session gain scale: 0–${escapeActivityHtml(statGrowthFormatCompactGain(maximumGain))} · tap a bar or point for exact values
         </div>
 
         <div class="ta-chart-detail" data-ta-stat-total-detail-output>
@@ -17008,7 +17076,7 @@
                 title="${escapeActivityHtml(detail)}"
               >
                 <div class="ta-chart-value">
-                  ${escapeActivityHtml(statGrowthFormatGain(gain))}
+                  ${escapeActivityHtml(statGrowthFormatCompactGain(gain))}
                 </div>
                 <div class="ta-chart-rail">
                   <div
