@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.8
+// @version      2.18.9
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.8';
+  const VERSION = '2.18.9';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -12732,6 +12732,11 @@
   const UI_ORIENTATION_HANDOFF_MAX_AGE_MS =
     30 * 1000;
 
+  // Compact display preferences survive TornPDA's fresh-page reopen path.
+  // They contain no account data and never restore the modal itself.
+  const UI_RESOURCE_PREFERENCES_STORAGE_KEY =
+    'tornAnalyticsResourcePreferencesV1';
+
   function uiSessionOrientation() {
     const width =
       Number(
@@ -12780,6 +12785,45 @@
     } catch (_) {
       return null;
     }
+  }
+
+  function readResourceDashboardPreferences() {
+    try {
+      const raw = uiOrientationHandoffStorage()?.getItem(
+        UI_RESOURCE_PREFERENCES_STORAGE_KEY
+      );
+      const parsed = raw ? JSON.parse(raw) : null;
+      return {
+        resource_dashboard_open: uiSessionOptionalBoolean(parsed?.resource_dashboard_open),
+        resource_energy_open: uiSessionOptionalBoolean(parsed?.resource_energy_open),
+        resource_nerve_open: uiSessionOptionalBoolean(parsed?.resource_nerve_open),
+        resource_happiness_open: uiSessionOptionalBoolean(parsed?.resource_happiness_open)
+      };
+    } catch (_) {
+      return {
+        resource_dashboard_open: null,
+        resource_energy_open: null,
+        resource_nerve_open: null,
+        resource_happiness_open: null
+      };
+    }
+  }
+
+  function writeResourceDashboardPreferences(patch = {}) {
+    const keys = ['resource_dashboard_open', 'resource_energy_open', 'resource_nerve_open', 'resource_happiness_open'];
+    const current = readResourceDashboardPreferences();
+    const next = { ...current };
+    for (const key of keys) {
+      const value = uiSessionOptionalBoolean(patch[key]);
+      if (value !== null) next[key] = value;
+    }
+    if (JSON.stringify(next) === JSON.stringify(current)) return;
+    try {
+      uiOrientationHandoffStorage()?.setItem(
+        UI_RESOURCE_PREFERENCES_STORAGE_KEY,
+        JSON.stringify(next)
+      );
+    } catch (_) {}
   }
 
   function clearUiOrientationHandoff() {
@@ -13236,6 +13280,8 @@
         )
       );
     } catch (_) {}
+
+    writeResourceDashboardPreferences(patch);
 
     if (
       next.modal_open !==
@@ -18152,7 +18198,10 @@
     }
 
     const state =
-      readUiSessionState();
+      {
+        ...readUiSessionState(),
+        ...readResourceDashboardPreferences()
+      };
 
     const defaultOpen =
       readiness?.page_is_gym ===
