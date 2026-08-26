@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.16
+// @version      2.18.17
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.16';
+  const VERSION = '2.18.17';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -23294,7 +23294,7 @@
         margin-top: 10px;
       }
 
-      /* v2.18.16: restrained color hierarchy for faster mobile scanning. */
+      /* v2.18.17: restrained color hierarchy, with lighter nested Training rails. */
       #${MODAL_ID} .ta-section {
         box-shadow: inset 3px 0 0 #555;
       }
@@ -23326,8 +23326,8 @@
       }
 
       #${MODAL_ID} .ta-stat-subsection {
-        border-left: 3px solid #6b5634;
-        background: #15120e;
+        border-left: 2px solid #5a472b;
+        background: #14120f;
       }
 
       #${MODAL_ID} .ta-stat-subsection > summary {
