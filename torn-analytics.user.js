@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.9
+// @version      2.18.10
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.9';
+  const VERSION = '2.18.10';
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -20495,6 +20495,12 @@
   function bindResourceDashboardInteractions(
     root
   ) {
+    const persist =
+      () => {
+        persistResourceDashboardState(
+          root
+        );
+      };
     const dashboard =
       root?.querySelector?.(
         '.ta-resource-section'
@@ -20502,12 +20508,7 @@
 
     dashboard?.addEventListener(
       'toggle',
-      () => {
-        writeUiSessionState({
-          resource_dashboard_open:
-            dashboard.open === true
-        });
-      }
+      persist
     );
 
     for (
@@ -20518,33 +20519,34 @@
     ) {
       panel.addEventListener(
         'toggle',
-        () => {
-          const resource =
-            panel.getAttribute(
-              'data-ta-resource-panel'
-            );
-
-          if (
-            ![
-              'energy',
-              'nerve',
-              'happiness'
-            ].includes(
-              resource
-            )
-          ) {
-            return;
-          }
-
-          writeUiSessionState({
-            resource_dashboard_open:
-              true,
-            [`resource_${resource}_open`]:
-              panel.open === true
-          });
-        }
+        persist
       );
     }
+
+    // TornPDA's embedded WebKit can miss a details "toggle" event after a
+    // touch. A deferred summary-click capture reads the final native state.
+    root?.addEventListener?.(
+      'click',
+      event => {
+        const summary =
+          event.target?.closest?.(
+            'summary'
+          );
+
+        if (
+          !summary?.parentElement?.matches?.(
+            '.ta-resource-section, [data-ta-resource-panel]'
+          )
+        ) {
+          return;
+        }
+
+        setTimeout(
+          persist,
+          0
+        );
+      }
+    );
 
     const countdowns =
       root?.querySelectorAll?.(
@@ -20621,6 +20623,49 @@
       };
 
     update();
+  }
+
+  function persistResourceDashboardState(
+    root
+  ) {
+    const dashboard =
+      root?.querySelector?.(
+        '.ta-resource-section'
+      );
+
+    if (!dashboard) {
+      return;
+    }
+
+    const patch = {
+      resource_dashboard_open:
+        dashboard.open === true
+    };
+
+    for (
+      const panel
+      of dashboard.querySelectorAll?.(
+        '[data-ta-resource-panel]'
+      ) || []
+    ) {
+      const resource =
+        panel.getAttribute(
+          'data-ta-resource-panel'
+        );
+
+      if (
+        [
+          'energy',
+          'nerve',
+          'happiness'
+        ].includes(resource)
+      ) {
+        patch[`resource_${resource}_open`] =
+          panel.open === true;
+      }
+    }
+
+    writeUiSessionState(patch);
   }
   // ============================================================
   // LIVE RESOURCE FAILURE DIAGNOSTICS
@@ -25345,6 +25390,14 @@
         ) {
           return;
         }
+
+        // Save the actual rendered drawer states immediately before TornPDA
+        // removes this modal; this is the reliable fallback for touch WebKit.
+        persistResourceDashboardState(
+          document.getElementById(
+            'ta-status'
+          )
+        );
 
         writeUiSessionState({
           modal_open: false,
