@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.28
+// @version      2.18.29
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -17,14 +17,13 @@
 // ==/UserScript==
 
 (() => {
-  'use strict';
-  // ============================================================
+  'use strict';  // ============================================================
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.28';
+  const VERSION = '2.18.29';
 
-  // v2.18.28 proves TornPDA snapshot access without spending Energy.
+  // v2.18.29 uses TornPDA's native bridge for active-tab snapshots and files.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -60,8 +59,7 @@
     15 * 60 * 1000;
 
   const AUTO_SYNC_LEASE_MS =
-    10 * 60 * 1000;
-  // ============================================================
+    10 * 60 * 1000;  // ============================================================
   // STORAGE
   // ============================================================
 
@@ -931,6 +929,444 @@
   }
 
   // ============================================================
+  // TORN PDA NATIVE BRIDGE
+  // ============================================================
+
+  const TORN_PDA_BRIDGE_READY_TIMEOUT_MS =
+    3000;
+
+  let tornPdaTabStateCache =
+    null;
+
+  let tornPdaTabStateListenerInstalled =
+    false;
+
+  function tornPdaBridgeObject() {
+    const bridge =
+      globalThis?.flutter_inappwebview;
+
+    return bridge &&
+      typeof bridge.callHandler ===
+        'function'
+      ? bridge
+      : null;
+  }
+
+  async function waitForTornPdaBridge(
+    timeoutMilliseconds =
+      TORN_PDA_BRIDGE_READY_TIMEOUT_MS
+  ) {
+    if (
+      tornPdaBridgeObject()
+    ) {
+      return true;
+    }
+
+    if (
+      typeof window ===
+        'undefined' ||
+      typeof window.addEventListener !==
+        'function'
+    ) {
+      return false;
+    }
+
+    const timeout =
+      Number(
+        timeoutMilliseconds
+      );
+
+    await new Promise(
+      resolve => {
+        let settled =
+          false;
+
+        let timer =
+          null;
+
+        const finish =
+          () => {
+            if (
+              settled
+            ) {
+              return;
+            }
+
+            settled =
+              true;
+
+            if (
+              timer !== null &&
+              typeof clearTimeout ===
+                'function'
+            ) {
+              clearTimeout(
+                timer
+              );
+            }
+
+            window.removeEventListener?.(
+              'flutterInAppWebViewPlatformReady',
+              finish
+            );
+
+            resolve();
+          };
+
+        window.addEventListener(
+          'flutterInAppWebViewPlatformReady',
+          finish,
+          { once: true }
+        );
+
+        if (
+          Number.isFinite(
+            timeout
+          ) &&
+          timeout >= 0 &&
+          typeof setTimeout ===
+            'function'
+        ) {
+          timer =
+            setTimeout(
+              finish,
+              timeout
+            );
+        }
+      }
+    );
+
+    return Boolean(
+      tornPdaBridgeObject()
+    );
+  }
+
+  async function callTornPdaHandler(
+    handler,
+    ...args
+  ) {
+    const allowed =
+      new Set([
+        'PDA_getTabState',
+        'PDA_httpGet',
+        'shareFile'
+      ]);
+
+    if (
+      !allowed.has(
+        handler
+      )
+    ) {
+      throw new Error(
+        'Refusing to call an unsupported Torn PDA handler.'
+      );
+    }
+
+    const ready =
+      await waitForTornPdaBridge();
+
+    const bridge =
+      tornPdaBridgeObject();
+
+    if (
+      !ready ||
+      !bridge
+    ) {
+      throw new Error(
+        'Torn PDA native bridge is unavailable.'
+      );
+    }
+
+    return bridge.callHandler(
+      handler,
+      ...args
+    );
+  }
+
+  function normalizeTornPdaTabState(
+    state
+  ) {
+    if (
+      !state ||
+      typeof state !==
+        'object' ||
+      Array.isArray(
+        state
+      ) ||
+      typeof state.isActiveTab !==
+        'boolean' ||
+      typeof state.isWebViewVisible !==
+        'boolean'
+    ) {
+      return null;
+    }
+
+    const uid =
+      typeof state.uid ===
+        'string' &&
+      state.uid.trim()
+        ? state.uid
+            .trim()
+            .slice(
+              0,
+              120
+            )
+        : null;
+
+    return {
+      uid,
+      isActiveTab:
+        state.isActiveTab,
+      isWebViewVisible:
+        state.isWebViewVisible
+    };
+  }
+
+  function currentTornPdaTabState() {
+    if (
+      !tornPdaTabStateCache
+    ) {
+      const injected =
+        normalizeTornPdaTabState(
+          globalThis?.__tornpda
+            ?.tab?.state
+        );
+
+      if (
+        injected
+      ) {
+        tornPdaTabStateCache =
+          injected;
+      }
+    }
+
+    return tornPdaTabStateCache;
+  }
+
+  function updateTornPdaTabState(
+    state
+  ) {
+    const normalized =
+      normalizeTornPdaTabState(
+        state
+      );
+
+    if (
+      normalized
+    ) {
+      tornPdaTabStateCache =
+        normalized;
+    }
+
+    return normalized;
+  }
+
+  async function refreshTornPdaTabState() {
+    if (
+      !tornPdaRuntimeDetected()
+    ) {
+      return null;
+    }
+
+    try {
+      return updateTornPdaTabState(
+        await callTornPdaHandler(
+          'PDA_getTabState'
+        )
+      );
+    } catch (
+      error
+    ) {
+      console.warn(
+        '[Torn Analytics] Torn PDA tab state is unavailable:',
+        error
+      );
+
+      return currentTornPdaTabState();
+    }
+  }
+
+  function tornPdaTabAllowsWork(
+    documentValue =
+      typeof document !==
+        'undefined'
+        ? document
+        : null
+  ) {
+    const pageVisible =
+      !documentValue?.visibilityState ||
+      documentValue.visibilityState ===
+        'visible';
+
+    if (
+      !tornPdaRuntimeDetected()
+    ) {
+      return pageVisible;
+    }
+
+    const state =
+      currentTornPdaTabState();
+
+    if (
+      !state
+    ) {
+      return pageVisible;
+    }
+
+    return (
+      pageVisible &&
+      state.isActiveTab &&
+      state.isWebViewVisible
+    );
+  }
+
+  function installTornPdaBridgeState() {
+    if (
+      tornPdaTabStateListenerInstalled ||
+      typeof window ===
+        'undefined' ||
+      typeof window.addEventListener !==
+        'function'
+    ) {
+      return false;
+    }
+
+    tornPdaTabStateListenerInstalled =
+      true;
+
+    window.addEventListener(
+      'tornpda:tabState',
+      event => {
+        updateTornPdaTabState(
+          event?.detail
+        );
+      },
+      { passive: true }
+    );
+
+    currentTornPdaTabState();
+
+    if (
+      tornPdaRuntimeDetected()
+    ) {
+      void refreshTornPdaTabState();
+    }
+
+    return true;
+  }
+
+  async function tornPdaNativeHttpGet(
+    url,
+    headers = {}
+  ) {
+    if (
+      typeof PDA_httpGet ===
+        'function'
+    ) {
+      return PDA_httpGet(
+        url,
+        headers
+      );
+    }
+
+    return callTornPdaHandler(
+      'PDA_httpGet',
+      url,
+      headers
+    );
+  }
+
+  function tornPdaNativeFileShareAvailable() {
+    return Boolean(
+      tornPdaBridgeObject()
+    );
+  }
+
+  function tornPdaUtf8ToBase64(
+    text
+  ) {
+    if (
+      typeof TextEncoder !==
+        'function' ||
+      typeof btoa !==
+        'function'
+    ) {
+      throw new Error(
+        'UTF-8 file encoding is unavailable.'
+      );
+    }
+
+    const bytes =
+      new TextEncoder()
+        .encode(
+          String(
+            text ??
+            ''
+          )
+        );
+
+    let binary =
+      '';
+
+    const chunkSize =
+      0x8000;
+
+    for (
+      let offset = 0;
+      offset < bytes.length;
+      offset += chunkSize
+    ) {
+      binary +=
+        String.fromCharCode(
+          ...bytes.subarray(
+            offset,
+            Math.min(
+              bytes.length,
+              offset + chunkSize
+            )
+          )
+        );
+    }
+
+    return btoa(
+      binary
+    );
+  }
+
+  async function shareTextFileThroughTornPda(
+    text,
+    filename
+  ) {
+    const result =
+      await callTornPdaHandler(
+        'shareFile',
+        {
+          base64Data:
+            tornPdaUtf8ToBase64(
+              text
+            ),
+          fileName:
+            String(
+              filename ||
+              ''
+            )
+        }
+      );
+
+    if (
+      result?.status ===
+        'error'
+    ) {
+      throw new Error(
+        String(
+          result.message ||
+          'Torn PDA could not share the file.'
+        )
+      );
+    }
+
+    return result;
+  }  // ============================================================
   // INDEXEDDB
   // ============================================================
 
@@ -5682,8 +6118,23 @@
   ) {
     if (
       typeof GM_xmlhttpRequest !==
-      'function'
+        'function'
     ) {
+      if (
+        tornPdaRuntimeDetected()
+      ) {
+        return tornPdaNativeHttpGet(
+          url,
+          {
+            Authorization:
+              `ApiKey ${apiKey}`,
+
+            Accept:
+              'application/json'
+          }
+        );
+      }
+
       throw new Error(
         'Secure Torn API transport is unavailable in this userscript manager.'
       );
@@ -5866,7 +6317,6 @@
       );
     }
   }
-
   // ============================================================
   // ACCOUNT DETECTION
   // ============================================================
@@ -8958,9 +9408,20 @@
       navigator.onLine !==
         false;
 
+    const activeTab =
+      typeof tornPdaTabAllowsWork !==
+        'function' ||
+      tornPdaTabAllowsWork(
+        typeof document !==
+          'undefined'
+          ? document
+          : null
+      );
+
     return (
       visible &&
-      online
+      online &&
+      activeTab
     );
   }
 
@@ -9845,7 +10306,8 @@
         of [
           'pageshow',
           'focus',
-          'online'
+          'online',
+          'tornpda:tabState'
         ]
       ) {
         window.addEventListener(
@@ -9865,8 +10327,7 @@
     scheduleAutomaticLogSync(
       AUTO_SYNC_INITIAL_DELAY_MS
     );
-  }
-  // ============================================================
+  }  // ============================================================
   // LOAD / ANALYZE STORED DATA
   // ============================================================
 
@@ -13506,6 +13967,9 @@
   const TRAINING_LIVE_BARS_REFRESH_INTERVAL_MS =
     15 * 1000;
 
+  const TRAINING_API_ARM_SOURCE =
+    'torn_api_v2_user_bars';
+
   const TRAINING_HAPPINESS_WINDOW_SECONDS =
     15 * 60;
 
@@ -13514,6 +13978,12 @@
 
   let passiveTrainingLiveBarsTimer =
     null;
+
+  let passiveTrainingApiArmPromise =
+    null;
+
+  let passiveTrainingApiArmAttemptKey =
+    '';
 
   function trainingSnapshotFiniteNumber(
     value
@@ -13923,7 +14393,8 @@
     const available =
       [
         'exact_live_snapshot',
-        'recent_live_snapshot'
+        'recent_live_snapshot',
+        'armed_api_snapshot'
       ].includes(
         rawStatus
       ) &&
@@ -13969,6 +14440,14 @@
               snapshot.observed_at
             )
           : capturedAt,
+      source:
+        available &&
+        snapshot?.source ===
+          TRAINING_API_ARM_SOURCE
+          ? TRAINING_API_ARM_SOURCE
+          : available
+            ? 'page_resource_bars'
+            : null,
       stat:
         [
           'strength',
@@ -14074,7 +14553,12 @@
         ),
       happiness,
       happiness_maximum:
-        happinessMaximum
+        happinessMaximum,
+      source:
+        snapshot?.source ===
+          TRAINING_API_ARM_SOURCE
+          ? TRAINING_API_ARM_SOURCE
+          : 'page_resource_bars'
     };
   }
 
@@ -14112,7 +14596,9 @@
       happiness:
         happiness.current,
       happiness_maximum:
-        happiness.maximum
+        happiness.maximum,
+      source:
+        'page_resource_bars'
     });
   }
 
@@ -14173,7 +14659,16 @@
       typeof passiveTrainingSnapshotCaptureInstalled !==
         'undefined' &&
       passiveTrainingSnapshotCaptureInstalled ===
-        true
+        true,
+    recentLiveBars =
+      readTrainingSnapshotLiveBars(
+        Math.floor(
+          Number(
+            nowMilliseconds
+          ) /
+          1000
+        )
+      )
   ) {
     const energyRootFound =
       Boolean(
@@ -14192,6 +14687,22 @@
         documentValue,
         nowMilliseconds
       );
+    const armedBars =
+      visibleBars
+        ? null
+        : trainingSnapshotSanitizeLiveBars(
+            recentLiveBars
+          );
+    const apiArmed =
+      armedBars?.source ===
+        TRAINING_API_ARM_SOURCE;
+    const availableBars =
+      visibleBars ||
+      (
+        apiArmed
+          ? armedBars
+          : null
+      );
     const gymPage =
       trainingSnapshotIsGymPage(
         locationValue
@@ -14204,7 +14715,7 @@
         : [];
     const barsReady =
       Boolean(
-        visibleBars
+        availableBars
       );
     const controlsReady =
       gymPage &&
@@ -14227,8 +14738,10 @@
           ? 'gym'
           : 'other',
       resource_bars:
-        barsReady
+        visibleBars
           ? 'ready'
+          : apiArmed
+            ? 'api_armed'
           : 'not_readable',
       energy_root:
         energyRootFound
@@ -14240,16 +14753,22 @@
           : 'not_found',
       energy:
         barsReady
-          ? visibleBars.energy
+          ? availableBars.energy
           : null,
       happiness:
         barsReady
-          ? visibleBars.happiness
+          ? availableBars.happiness
           : null,
       happiness_maximum:
         barsReady
-          ? visibleBars.happiness_maximum
+          ? availableBars.happiness_maximum
           : null,
+      snapshot_source:
+        apiArmed
+          ? TRAINING_API_ARM_SOURCE
+          : visibleBars
+            ? 'page_resource_bars'
+            : null,
       gym_controls:
         gymPage
           ? controlsReady
@@ -14283,6 +14802,9 @@
       probe?.resource_bars ===
         'ready'
         ? `Ready — Energy ${Number(probe.energy).toLocaleString()} · Happiness ${Number(probe.happiness).toLocaleString()} / ${Number(probe.happiness_maximum).toLocaleString()}`
+        : probe?.resource_bars ===
+            'api_armed'
+          ? `Not readable in the page — API snapshot ARMED at Energy ${Number(probe.energy).toLocaleString()} · Happiness ${Number(probe.happiness).toLocaleString()} / ${Number(probe.happiness_maximum).toLocaleString()}`
         : `Not readable — #barEnergy ${probe?.energy_root === 'found' ? 'found' : 'missing'} · #barHappy ${probe?.happiness_root === 'found' ? 'found' : 'missing'}`;
     const gymText =
       probe?.gym_controls ===
@@ -14303,12 +14825,227 @@
 
     return [
       `Capture listener: ${listenerText}`,
-      `Displayed resource bars: ${barsText}`,
+      `Resource snapshot: ${barsText}`,
       `Gym controls: ${gymText}`,
       `Result: ${resultText}`
     ].join(
       '\n'
     );
+  }
+
+  function trainingSnapshotLiveBarsFromResourceSnapshot(
+    snapshot
+  ) {
+    if (
+      snapshot?.status !==
+        'available'
+    ) {
+      return null;
+    }
+
+    return trainingSnapshotSanitizeLiveBars({
+      captured_at:
+        Math.floor(
+          Number(
+            snapshot.fetched_at
+          ) /
+          1000
+        ),
+      energy:
+        snapshot?.energy?.current,
+      energy_maximum:
+        snapshot?.energy?.maximum,
+      happiness:
+        snapshot?.happiness?.current,
+      happiness_maximum:
+        snapshot?.happiness?.maximum,
+      source:
+        TRAINING_API_ARM_SOURCE
+    });
+  }
+
+  function trainingSnapshotApiArmKey(
+    locationValue =
+      typeof location !==
+        'undefined'
+        ? location
+        : null
+  ) {
+    return [
+      String(
+        locationValue?.pathname ||
+        ''
+      ).toLowerCase(),
+      String(
+        locationValue?.search ||
+        ''
+      )
+    ].join('');
+  }
+
+  async function armPassiveTrainingSnapshotFromApi(
+    options = {}
+  ) {
+    const force =
+      options?.force ===
+        true;
+
+    const locationValue =
+      typeof location !==
+        'undefined'
+        ? location
+        : null;
+
+    if (
+      !trainingSnapshotIsGymPage(
+        locationValue
+      )
+    ) {
+      return {
+        status:
+          'not_gym'
+      };
+    }
+
+    if (
+      passiveTrainingApiArmPromise
+    ) {
+      return passiveTrainingApiArmPromise;
+    }
+
+    const attemptKey =
+      trainingSnapshotApiArmKey(
+        locationValue
+      );
+
+    const recent =
+      readTrainingSnapshotLiveBars();
+
+    if (
+      !force &&
+      recent?.source ===
+        TRAINING_API_ARM_SOURCE
+    ) {
+      return {
+        status:
+          'armed',
+        snapshot:
+          recent
+      };
+    }
+
+    if (
+      !force &&
+      passiveTrainingApiArmAttemptKey ===
+        attemptKey
+    ) {
+      return {
+        status:
+          'already_attempted'
+      };
+    }
+
+    const operation =
+      (async () => {
+        if (
+          tornPdaRuntimeDetected()
+        ) {
+          await refreshTornPdaTabState();
+        }
+
+        if (
+          !tornPdaTabAllowsWork(
+            typeof document !==
+              'undefined'
+              ? document
+              : null
+          )
+        ) {
+          return {
+            status:
+              'inactive_tab'
+          };
+        }
+
+        passiveTrainingApiArmAttemptKey =
+          attemptKey;
+
+        const apiKey =
+          await loadSecureApiKey();
+
+        if (
+          !apiKey
+        ) {
+          return {
+            status:
+              'no_api_key'
+          };
+        }
+
+        const resourceSnapshot =
+          await fetchResourceBarsSnapshot(
+            apiKey,
+            null
+          );
+
+        const armed =
+          writeTrainingSnapshotLiveBars(
+            trainingSnapshotLiveBarsFromResourceSnapshot(
+              resourceSnapshot
+            )
+          );
+
+        if (
+          !armed
+        ) {
+          throw new Error(
+            'Torn API bars could not be converted into a training snapshot.'
+          );
+        }
+
+        return {
+          status:
+            'armed',
+          snapshot:
+            armed
+        };
+      })();
+
+    passiveTrainingApiArmPromise =
+      operation;
+
+    try {
+      return await operation;
+    } catch (
+      error
+    ) {
+      console.warn(
+        '[Torn Analytics] Gym snapshot arming failed:',
+        error
+      );
+
+      return {
+        status:
+          'failed',
+        reason:
+          String(
+            error?.message ||
+            'Torn API bars are unavailable.'
+          )
+            .slice(
+              0,
+              160
+            )
+      };
+    } finally {
+      if (
+        passiveTrainingApiArmPromise ===
+          operation
+      ) {
+        passiveTrainingApiArmPromise =
+          null;
+      }
+    }
   }
 
   function writeTrainingSnapshotLiveBars(
@@ -14337,6 +15074,16 @@
     }
 
     return safe;
+  }
+
+  function clearTrainingSnapshotLiveBars() {
+    try {
+      trainingSnapshotStorage()?.removeItem(
+        TRAINING_LIVE_BARS_STORAGE_KEY
+      );
+    } catch {
+      // A consumed optional snapshot must never interrupt Torn training.
+    }
   }
 
   function readTrainingSnapshotLiveBars(
@@ -14620,7 +15367,10 @@
         exact
           ? 'exact_live_snapshot'
           : recent
-            ? 'recent_live_snapshot'
+            ? recent.source ===
+                TRAINING_API_ARM_SOURCE
+              ? 'armed_api_snapshot'
+              : 'recent_live_snapshot'
           : 'unavailable',
       energy_before:
         available?.energy,
@@ -14630,6 +15380,8 @@
         available?.happiness_maximum,
       observed_at:
         available?.captured_at,
+      source:
+        available?.source,
       stat:
         intent.stat,
       trains:
@@ -14639,7 +15391,9 @@
       reason:
         exact
           ? null
-          : 'live_bars_unavailable'
+          : recent
+            ? null
+            : 'live_bars_unavailable'
     });
   }
 
@@ -14683,6 +15437,13 @@
       return null;
     }
 
+    if (
+      snapshot.status ===
+        'armed_api_snapshot'
+    ) {
+      clearTrainingSnapshotLiveBars();
+    }
+
     writeTrainingSnapshots(
       [
         ...readTrainingSnapshots(
@@ -14723,6 +15484,8 @@
 
     if (
       !safeBars ||
+      safeBars.source ===
+        TRAINING_API_ARM_SOURCE ||
       !Number.isSafeInteger(
         capturedAt
       ) ||
@@ -14762,7 +15525,9 @@
       happiness_before:
         safeBars.happiness,
       happiness_maximum:
-        safeBars.happiness_maximum
+        safeBars.happiness_maximum,
+      source:
+        safeBars.source
     });
   }
 
@@ -14844,9 +15609,39 @@
           typeof document !==
             'undefined' &&
           document.visibilityState !==
-            'hidden'
+            'hidden' &&
+          tornPdaTabAllowsWork(
+            document
+          )
         ) {
           refreshPassiveTrainingLiveBars();
+        }
+      };
+
+    const refreshAndArm =
+      () => {
+        refresh();
+
+        if (
+          !tornPdaTabAllowsWork(
+            typeof document !==
+              'undefined'
+              ? document
+              : null
+          )
+        ) {
+          // Returning to this Gym tab starts a new single-use arm attempt.
+          // The inactive tab itself never performs the request.
+          passiveTrainingApiArmAttemptKey =
+            '';
+
+          return;
+        }
+
+        if (
+          trainingSnapshotIsGymPage()
+        ) {
+          void armPassiveTrainingSnapshotFromApi();
         }
       };
 
@@ -14862,7 +15657,13 @@
     ) {
       window.addEventListener(
         'pageshow',
-        refresh,
+        refreshAndArm,
+        { passive: true }
+      );
+
+      window.addEventListener(
+        'tornpda:tabState',
+        refreshAndArm,
         { passive: true }
       );
 
@@ -14876,6 +15677,12 @@
     }
 
     refresh();
+
+    if (
+      trainingSnapshotIsGymPage()
+    ) {
+      void armPassiveTrainingSnapshotFromApi();
+    }
 
     if (
       passiveTrainingLiveBarsTimer ===
@@ -14916,7 +15723,8 @@
           snapshot =>
             [
               'exact_live_snapshot',
-              'recent_live_snapshot'
+              'recent_live_snapshot',
+              'armed_api_snapshot'
             ].includes(
               snapshot?.status
             )
@@ -15074,13 +15882,14 @@
         happiness_before:
           match.happiness_before,
         happiness_maximum:
-          match.happiness_maximum
+          match.happiness_maximum,
+        source:
+          match.source
       };
     }
 
     return actions;
-  }
-  // ============================================================
+  }  // ============================================================
   // STAT GROWTH ANALYTICS
   // ============================================================
 
@@ -19074,7 +19883,8 @@
     const available =
       [
         'exact_live_snapshot',
-        'recent_live_snapshot'
+        'recent_live_snapshot',
+        'armed_api_snapshot'
       ].includes(
         status
       ) &&
@@ -19115,12 +19925,18 @@
       status ===
         'exact_live_snapshot';
 
+    const apiArmed =
+      status ===
+        'armed_api_snapshot';
+
     return {
       status,
       confidence:
         exact
           ? 'Exact live snapshot'
-          : 'Recent live snapshot',
+          : apiArmed
+            ? 'Armed API snapshot'
+            : 'Recent live snapshot',
       energy:
         Number(
           snapshot.energy_before
@@ -19137,7 +19953,9 @@
       note:
         exact
           ? 'Live Happiness and Energy were captured immediately before this training action.'
-          : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
+          : apiArmed
+            ? 'A read-only Torn API snapshot was armed on the active Gym tab before this training action.'
+            : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
     };
   }
 
@@ -19180,7 +19998,8 @@
         const available =
           [
             'exact_live_snapshot',
-            'recent_live_snapshot'
+            'recent_live_snapshot',
+            'armed_api_snapshot'
           ].includes(
             status
           ) &&
@@ -19221,12 +20040,18 @@
           status ===
             'exact_live_snapshot';
 
+        const apiArmed =
+          status ===
+            'armed_api_snapshot';
+
         return {
           status,
           confidence:
             exact
               ? 'Exact live snapshot'
-              : 'Recent live snapshot',
+              : apiArmed
+                ? 'Armed API snapshot'
+                : 'Recent live snapshot',
           energy:
             Number(
               snapshot.energy_before
@@ -19243,7 +20068,9 @@
           note:
             exact
               ? 'Live Happiness and Energy were captured immediately before this training action.'
-              : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
+              : apiArmed
+                ? 'A read-only Torn API snapshot was armed on the active Gym tab before this training action.'
+                : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
         };
       })();
     const rawEnergySourceStatus =
@@ -19321,7 +20148,7 @@
       context_detail:
         context.detail,
       context_note:
-        liveSnapshot.status === 'exact_live_snapshot'
+        liveSnapshot.status !== 'unavailable'
           ? liveSnapshot.note
           : context.note,
       energy_source_label:
@@ -21438,8 +22265,7 @@
       root,
       analysis?.stat_growth
     );
-  }
-  // ============================================================
+  }  // ============================================================
   // ENERGY / NERVE / HAPPINESS RESOURCE-FLOW FOUNDATION
   // ============================================================
 
@@ -24331,6 +25157,31 @@
       );
     }
 
+    const receipt = {
+      account: {
+        id: result.account.id,
+        name: result.account.name
+      },
+      filename: result.filename,
+      record_count: result.record_count,
+      first_timestamp: result.first_timestamp,
+      last_timestamp: result.last_timestamp,
+      digest: result.digest
+    };
+
+    if (
+      typeof tornPdaNativeFileShareAvailable ===
+        'function' &&
+      tornPdaNativeFileShareAvailable()
+    ) {
+      return shareTextFileThroughTornPda(
+        result.json,
+        result.filename
+      ).then(
+        () => receipt
+      );
+    }
+
     if (
       typeof File !== 'function' ||
       typeof globalThis.navigator?.share !== 'function'
@@ -24360,18 +25211,6 @@
         'This TornPDA/iOS browser cannot safely share the prepared JSON file.'
       );
     }
-
-    const receipt = {
-      account: {
-        id: result.account.id,
-        name: result.account.name
-      },
-      filename: result.filename,
-      record_count: result.record_count,
-      first_timestamp: result.first_timestamp,
-      last_timestamp: result.last_timestamp,
-      digest: result.digest
-    };
 
     // navigator.share() is intentionally invoked synchronously before this
     // function yields so the direct Save Export File tap retains user
@@ -24408,7 +25247,6 @@
       result
     );
   }
-
   // ============================================================
   // READ-ONLY HISTORY FORENSICS
   // ============================================================
@@ -27534,8 +28372,9 @@
               </b>
 
               <div class="small">
-                Read-only capability check. It does not train, spend Energy,
-                use an item, or make an API request.
+                Read-only capability check. On the Gym page it makes one
+                official bars request; it never trains, spends Energy, or
+                uses an item.
               </div>
 
               <button
@@ -27770,12 +28609,65 @@
       return probe;
     }
 
+    async function runTrainingSnapshotCapabilityCheck() {
+      if (
+        !trainingSnapshotCheckOutput
+      ) {
+        return null;
+      }
+
+      trainingSnapshotCheckButton.disabled =
+        true;
+
+      trainingSnapshotCheckOutput.textContent =
+        trainingSnapshotIsGymPage()
+          ? 'Checking the active Gym tab and arming one read-only API snapshot…'
+          : 'Checking this page…';
+
+      try {
+        const armResult =
+          await armPassiveTrainingSnapshotFromApi({
+            force: true
+          });
+
+        const probe =
+          refreshTrainingSnapshotCapabilityCheck();
+
+        if (
+          armResult?.status ===
+            'no_api_key'
+        ) {
+          trainingSnapshotCheckOutput.textContent +=
+            '\nAPI snapshot: Not armed — save the Torn API key in Settings first.';
+        } else if (
+          armResult?.status ===
+            'inactive_tab'
+        ) {
+          trainingSnapshotCheckOutput.textContent +=
+            '\nAPI snapshot: Not armed — this is not Torn PDA’s active visible tab.';
+        } else if (
+          armResult?.status ===
+            'failed'
+        ) {
+          trainingSnapshotCheckOutput.textContent +=
+            '\nAPI snapshot: Not armed — the read-only bars request failed.';
+        }
+
+        return probe;
+      } finally {
+        trainingSnapshotCheckButton.disabled =
+          false;
+      }
+    }
+
     if (
       trainingSnapshotCheckButton
     ) {
       trainingSnapshotCheckButton.addEventListener(
         'click',
-        refreshTrainingSnapshotCapabilityCheck
+        () => {
+          void runTrainingSnapshotCapabilityCheck();
+        }
       );
     }
 
@@ -28968,8 +29860,7 @@
           AUTO_SYNC_INITIAL_DELAY_MS
         );
       };
-  }
-  // ============================================================
+  }  // ============================================================
   // HISTORY PROTECTION UI
   // ============================================================
 
@@ -29528,6 +30419,16 @@
     removeStaleTornAnalyticsUi();
 
     installButton();
+
+    try {
+      installTornPdaBridgeState();
+    } catch (error) {
+      // Native helpers are optional; standard browser behavior remains valid.
+      console.warn(
+        '[Torn Analytics] Torn PDA bridge state could not be initialized:',
+        error
+      );
+    }
 
     let restoreState =
       null;
