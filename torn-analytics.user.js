@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.33
+// @version      2.18.34
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.33';
+  const VERSION = '2.18.34';
 
-  // v2.18.33 records bounded checkpoint-canary evidence without changing training attribution.
+  // v2.18.34 conservatively attaches qualifying API checkpoints to matched training bursts.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -17101,6 +17101,18 @@
       }
     }
 
+    if (
+      typeof trainingCheckpointCanaryAttachToActions ===
+        'function' &&
+      typeof readTrainingCheckpointCanaryState ===
+        'function'
+    ) {
+      trainingCheckpointCanaryAttachToActions(
+        actions,
+        readTrainingCheckpointCanaryState()
+      );
+    }
+
     let previousTrainingTimestamp =
       null;
 
@@ -19493,7 +19505,9 @@
     const available =
       [
         'exact_live_snapshot',
-        'recent_live_snapshot'
+        'recent_live_snapshot',
+        'armed_api_snapshot',
+        'pretrain_api_checkpoint'
       ].includes(
         status
       ) &&
@@ -19534,12 +19548,44 @@
       status ===
         'exact_live_snapshot';
 
+    const apiArmed =
+      status ===
+        'armed_api_snapshot';
+
+    const pretrainApi =
+      status ===
+        'pretrain_api_checkpoint';
+
+    const checkpointAge =
+      Number(
+        snapshot?.checkpoint_age_ms
+      );
+
+    const checkpointAgeText =
+      Number.isFinite(
+        checkpointAge
+      ) &&
+      checkpointAge >= 0
+        ? checkpointAge < 1000
+          ? `${Math.round(checkpointAge)} ms`
+          : `${(checkpointAge / 1000).toFixed(1)}s`
+        : 'a bounded interval';
+
+    const burstTapCount =
+      Number(
+        snapshot?.burst_tap_count
+      );
+
     return {
       status,
       confidence:
         exact
           ? 'Exact live snapshot'
-          : 'Recent live snapshot',
+          : pretrainApi
+            ? 'Pre-train API checkpoint'
+          : apiArmed
+            ? 'Armed API snapshot'
+            : 'Recent live snapshot',
       energy:
         Number(
           snapshot.energy_before
@@ -19556,7 +19602,13 @@
       note:
         exact
           ? 'Live Happiness and Energy were captured immediately before this training action.'
-          : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
+          : pretrainApi
+            ? burstTapCount > 1
+              ? `A read-only Torn API checkpoint completed ${checkpointAgeText} before the first of ${burstTapCount.toLocaleString()} matched Train taps. This is burst-start evidence, not a per-tap reading.`
+              : `A read-only Torn API checkpoint completed ${checkpointAgeText} before the matched Train tap.`
+          : apiArmed
+            ? 'A read-only Torn API snapshot was armed on the active Gym tab before this training action.'
+            : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
     };
   }
 
@@ -19599,7 +19651,9 @@
         const available =
           [
             'exact_live_snapshot',
-            'recent_live_snapshot'
+            'recent_live_snapshot',
+            'armed_api_snapshot',
+            'pretrain_api_checkpoint'
           ].includes(
             status
           ) &&
@@ -19640,12 +19694,44 @@
           status ===
             'exact_live_snapshot';
 
+        const apiArmed =
+          status ===
+            'armed_api_snapshot';
+
+        const pretrainApi =
+          status ===
+            'pretrain_api_checkpoint';
+
+        const checkpointAge =
+          Number(
+            snapshot?.checkpoint_age_ms
+          );
+
+        const checkpointAgeText =
+          Number.isFinite(
+            checkpointAge
+          ) &&
+          checkpointAge >= 0
+            ? checkpointAge < 1000
+              ? `${Math.round(checkpointAge)} ms`
+              : `${(checkpointAge / 1000).toFixed(1)}s`
+            : 'a bounded interval';
+
+        const burstTapCount =
+          Number(
+            snapshot?.burst_tap_count
+          );
+
         return {
           status,
           confidence:
             exact
               ? 'Exact live snapshot'
-              : 'Recent live snapshot',
+              : pretrainApi
+                ? 'Pre-train API checkpoint'
+              : apiArmed
+                ? 'Armed API snapshot'
+                : 'Recent live snapshot',
           energy:
             Number(
               snapshot.energy_before
@@ -19662,7 +19748,13 @@
           note:
             exact
               ? 'Live Happiness and Energy were captured immediately before this training action.'
-              : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
+              : pretrainApi
+                ? burstTapCount > 1
+                  ? `A read-only Torn API checkpoint completed ${checkpointAgeText} before the first of ${burstTapCount.toLocaleString()} matched Train taps. This is burst-start evidence, not a per-tap reading.`
+                  : `A read-only Torn API checkpoint completed ${checkpointAgeText} before the matched Train tap.`
+              : apiArmed
+                ? 'A read-only Torn API snapshot was armed on the active Gym tab before this training action.'
+                : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
         };
       })();
     const rawEnergySourceStatus =
@@ -19740,7 +19832,7 @@
       context_detail:
         context.detail,
       context_note:
-        liveSnapshot.status === 'exact_live_snapshot'
+        liveSnapshot.status !== 'unavailable'
           ? liveSnapshot.note
           : context.note,
       energy_source_label:
@@ -24407,6 +24499,12 @@
   const TRAINING_CHECKPOINT_INTENT_MAX_AGE_MS =
     30 * 24 * 60 * 60 * 1000;
 
+  const TRAINING_CHECKPOINT_BURST_GAP_MS =
+    15 * 1000;
+
+  const TRAINING_CHECKPOINT_LOG_MATCH_TOLERANCE_MS =
+    15 * 1000;
+
   let trainingCheckpointCanaryInstalled =
     false;
 
@@ -25146,6 +25244,337 @@
     return `${(safe / 1000).toFixed(1)}s`;
   }
 
+  function trainingCheckpointCanaryBursts(
+    state =
+      readTrainingCheckpointCanaryState()
+  ) {
+    const intents =
+      trainingCheckpointCanarySanitizeState(
+        state
+      )
+        .train_intents
+        .filter(
+          intent =>
+            intent.checkpoint_status ===
+              'completed_before_tap' &&
+            intent.checkpoint?.page_is_gym ===
+              true &&
+            Boolean(
+              intent.stat
+            )
+        );
+
+    const bursts =
+      [];
+
+    for (
+      const intent
+      of intents
+    ) {
+      const previous =
+        bursts[
+          bursts.length -
+            1
+        ];
+      const sameCheckpoint =
+        previous?.checkpoint?.id ===
+          intent.checkpoint?.id;
+      const sameStat =
+        previous?.stat ===
+          intent.stat;
+      const compatibleGym =
+        !previous?.gym ||
+        !intent.gym ||
+        previous.gym ===
+          intent.gym;
+      const gap =
+        previous
+          ? intent.tapped_at -
+            previous.ended_at
+          : null;
+
+      if (
+        previous &&
+        sameCheckpoint &&
+        sameStat &&
+        compatibleGym &&
+        gap >= 0 &&
+        gap <=
+          TRAINING_CHECKPOINT_BURST_GAP_MS
+      ) {
+        previous.intents.push(
+          intent
+        );
+        previous.ended_at =
+          intent.tapped_at;
+        previous.gym =
+          previous.gym ||
+          intent.gym ||
+          null;
+
+        continue;
+      }
+
+      bursts.push({
+        id:
+          `${intent.checkpoint.id}-${intent.tapped_at}`,
+        checkpoint:
+          intent.checkpoint,
+        checkpoint_age_ms:
+          intent.checkpoint_age_ms,
+        stat:
+          intent.stat,
+        gym:
+          intent.gym,
+        started_at:
+          intent.tapped_at,
+        ended_at:
+          intent.tapped_at,
+        intents: [
+          intent
+        ]
+      });
+    }
+
+    return bursts;
+  }
+
+  function trainingCheckpointCanaryMatchBurst(
+    actions,
+    burst
+  ) {
+    const availableActions =
+      (
+        Array.isArray(
+          actions
+        )
+          ? actions
+          : []
+      )
+        .filter(
+          action =>
+            action?.live_snapshot?.status ===
+              'unavailable' &&
+            action?.stat ===
+              burst?.stat &&
+            (
+              !burst?.gym ||
+              !action?.gym ||
+              Number(
+                action.gym
+              ) ===
+                Number(
+                  burst.gym
+                )
+            )
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            Number(
+              left.timestamp
+            ) -
+              Number(
+                right.timestamp
+              ) ||
+            String(
+              left.id ||
+              ''
+            ).localeCompare(
+              String(
+                right.id ||
+                ''
+              )
+            )
+        );
+
+    const matches =
+      availableActions
+        .filter(
+          action => {
+            const timestampMilliseconds =
+              Number(
+                action?.timestamp
+              ) *
+              1000;
+
+            return Number.isSafeInteger(
+              timestampMilliseconds
+            ) &&
+            timestampMilliseconds >=
+              burst.started_at -
+                TRAINING_CHECKPOINT_LOG_MATCH_TOLERANCE_MS &&
+            timestampMilliseconds <=
+              burst.ended_at +
+                TRAINING_CHECKPOINT_LOG_MATCH_TOLERANCE_MS;
+          }
+        );
+
+    if (
+      matches.length !==
+        burst?.intents?.length
+    ) {
+      return [];
+    }
+
+    const expectedTrains =
+      burst.intents
+        .map(
+          intent =>
+            intent.trains
+        )
+        .filter(
+          Boolean
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            left -
+            right
+        );
+
+    if (
+      expectedTrains.length ===
+        burst.intents.length
+    ) {
+      const observedTrains =
+        matches
+          .map(
+            action =>
+              Number(
+                action?.trains
+              )
+          )
+          .sort(
+            (
+              left,
+              right
+            ) =>
+              left -
+              right
+          );
+
+      if (
+        expectedTrains.some(
+          (
+            value,
+            index
+          ) =>
+            value !==
+              observedTrains[
+                index
+              ]
+        )
+      ) {
+        return [];
+      }
+    }
+
+    const energyUsed =
+      matches.reduce(
+        (
+          total,
+          action
+        ) =>
+          total +
+          Number(
+            action?.energy_used ||
+            0
+          ),
+        0
+      );
+
+    if (
+      matches.length !==
+        burst?.intents?.length ||
+      !Number.isFinite(
+        energyUsed
+      ) ||
+      energyUsed <= 0 ||
+      energyUsed >
+        Number(
+          burst?.checkpoint?.energy?.current ||
+          0
+        )
+    ) {
+      return [];
+    }
+
+    return matches;
+  }
+
+  function trainingCheckpointCanaryAttachToActions(
+    actions,
+    state =
+      readTrainingCheckpointCanaryState()
+  ) {
+    const bursts =
+      trainingCheckpointCanaryBursts(
+        state
+      );
+
+    for (
+      const burst
+      of bursts
+    ) {
+      const matches =
+        trainingCheckpointCanaryMatchBurst(
+          actions,
+          burst
+        );
+
+      if (
+        !matches.length
+      ) {
+        continue;
+      }
+
+      for (
+        const action
+        of matches
+      ) {
+        action.live_snapshot = {
+          status:
+            'pretrain_api_checkpoint',
+          captured_at:
+            Math.floor(
+              burst.started_at /
+              1000
+            ),
+          observed_at:
+            Math.floor(
+              burst.checkpoint.received_at /
+              1000
+            ),
+          checkpoint_age_ms:
+            burst.checkpoint_age_ms,
+          burst_id:
+            burst.id,
+          burst_tap_count:
+            burst.intents.length,
+          burst_started_at:
+            burst.started_at,
+          burst_ended_at:
+            burst.ended_at,
+          energy_before:
+            burst.checkpoint.energy.current,
+          happiness_before:
+            burst.checkpoint.happiness.current,
+          happiness_maximum:
+            burst.checkpoint.happiness.maximum,
+          source:
+            TRAINING_API_ARM_SOURCE
+        };
+      }
+    }
+
+    return actions;
+  }
+
   function trainingCheckpointCanaryStatusText(
     state =
       readTrainingCheckpointCanaryState(),
@@ -25219,7 +25648,7 @@
     }
 
     lines.push(
-      'Stage: Diagnostic evidence only — not attached to training analytics.'
+      'Stage: Attribution enabled — qualifying evidence attaches only after a matching training log is collected.'
     );
 
     return lines.join(
@@ -29168,13 +29597,13 @@
 
             <div class="ta-settings-group">
               <b>
-                Automatic checkpoint canary
+                Automatic pre-training checkpoints
               </b>
 
               <div class="small">
-                Capture-only diagnostic. It records bounded, timestamped
-                Energy and Happiness evidence but does not attach anything
-                to training analytics yet.
+                Records bounded, timestamped Energy and Happiness evidence.
+                A checkpoint appears in training analytics only after its
+                Train tap and Torn training log match conservatively.
               </div>
 
               <button
