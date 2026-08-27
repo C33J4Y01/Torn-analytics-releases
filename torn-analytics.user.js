@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.30
+// @version      2.18.31
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.30';
+  const VERSION = '2.18.31';
 
-  // v2.18.30 restores the last confirmed-working TornPDA runtime.
+  // v2.18.31 hardens launcher startup, diagnostics, and viewport recovery.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -70,6 +70,11 @@
 
   const BUTTON_POSITION_KEY =
     'tornAnalyticsButtonPosition';
+
+  // Non-sensitive launcher diagnostics only. Never place API keys, history
+  // keys, account data, or log contents in this localStorage record.
+  const STARTUP_HEALTH_STORAGE_KEY =
+    'tornAnalyticsStartupHealthV1';
 
   // Non-sensitive display preference only. Torn page code could alter this
   // localStorage-backed value without exposing API/history key material.
@@ -196,6 +201,248 @@
         API_KEY_STORAGE
       );
     } catch (_) {}
+  }
+  // ============================================================
+  // LAUNCHER STARTUP HEALTH
+  // ============================================================
+
+  const STARTUP_HEALTH_ERROR_LIMIT =
+    500;
+
+  let startupHealthLastStage =
+    'script_loaded';
+
+  let startupHealthLastError =
+    null;
+
+  let startupHealthLastErrorStage =
+    null;
+
+  function normalizeStartupHealthError(
+    error
+  ) {
+    if (
+      error === null ||
+      error === undefined
+    ) {
+      return null;
+    }
+
+    const message =
+      error &&
+      typeof error ===
+        'object' &&
+      typeof error.message ===
+        'string'
+        ? error.message
+        : String(error);
+
+    return message
+      .replace(
+        /[\r\n\t]+/g,
+        ' '
+      )
+      .replace(
+        /([?&]key=)[^&\s]+/gi,
+        '$1[redacted]'
+      )
+      .replace(
+        /\b(authorization|api[_\s-]?key)\s*[:=]\s*[^\s,;]+/gi,
+        '$1=[redacted]'
+      )
+      .trim()
+      .slice(
+        0,
+        STARTUP_HEALTH_ERROR_LIMIT
+      ) ||
+      'Unknown startup error';
+  }
+
+  function recordStartupHealth(
+    stage,
+    error = null
+  ) {
+    const normalizedStage =
+      typeof stage ===
+        'string' &&
+      stage.trim()
+        ? stage
+            .trim()
+            .slice(
+              0,
+              80
+            )
+        : 'unknown';
+
+    startupHealthLastStage =
+      normalizedStage;
+
+    const normalizedError =
+      normalizeStartupHealthError(
+        error
+      );
+
+    if (
+      normalizedError
+    ) {
+      startupHealthLastError =
+        normalizedError;
+
+      startupHealthLastErrorStage =
+        normalizedStage;
+    }
+
+    const record = {
+      schema_version: 1,
+      version: VERSION,
+      stage: normalizedStage,
+      recorded_at:
+        new Date().toISOString(),
+      error: normalizedError,
+      last_error:
+        startupHealthLastError,
+      last_error_stage:
+        startupHealthLastErrorStage
+    };
+
+    try {
+      localStorage.setItem(
+        STARTUP_HEALTH_STORAGE_KEY,
+        JSON.stringify(record)
+      );
+    } catch (_) {
+      // Startup health is optional and must never block the launcher.
+    }
+
+    return record;
+  }
+
+  function readStartupHealth() {
+    try {
+      const parsed =
+        JSON.parse(
+          localStorage.getItem(
+            STARTUP_HEALTH_STORAGE_KEY
+          ) ||
+          'null'
+        );
+
+      if (
+        !parsed ||
+        typeof parsed !==
+          'object' ||
+        parsed.schema_version !==
+          1
+      ) {
+        return null;
+      }
+
+      return {
+        schema_version: 1,
+        version:
+          typeof parsed.version ===
+            'string'
+            ? parsed.version
+            : null,
+        stage:
+          typeof parsed.stage ===
+            'string'
+            ? parsed.stage
+            : null,
+        recorded_at:
+          typeof parsed.recorded_at ===
+            'string'
+            ? parsed.recorded_at
+            : null,
+        error:
+          typeof parsed.error ===
+            'string'
+            ? parsed.error
+            : null,
+        last_error:
+          typeof parsed.last_error ===
+            'string'
+            ? parsed.last_error
+            : null,
+        last_error_stage:
+          typeof parsed.last_error_stage ===
+            'string'
+            ? parsed.last_error_stage
+            : null
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function launcherStartupFailure(
+    stage,
+    error
+  ) {
+    const record =
+      recordStartupHealth(
+        stage,
+        error
+      );
+
+    console.warn(
+      `[Torn Analytics] Startup stage ${record.stage} failed:`,
+      error
+    );
+
+    return record;
+  }
+
+  recordStartupHealth(
+    'script_loaded'
+  );
+
+  function attemptEarlyLauncherInstall() {
+    if (
+      typeof document ===
+        'undefined' ||
+      !document.body
+    ) {
+      return false;
+    }
+
+    installButton();
+
+    recordStartupHealth(
+      'launcher_installed_early'
+    );
+
+    return true;
+  }
+
+  try {
+    if (
+      !attemptEarlyLauncherInstall() &&
+      typeof document !==
+        'undefined' &&
+      typeof document.addEventListener ===
+        'function'
+    ) {
+      document.addEventListener(
+        'DOMContentLoaded',
+        () => {
+          try {
+            attemptEarlyLauncherInstall();
+          } catch (error) {
+            launcherStartupFailure(
+              'early_launcher_failed',
+              error
+            );
+          }
+        },
+        { once: true }
+      );
+    }
+  } catch (error) {
+    launcherStartupFailure(
+      'early_launcher_failed',
+      error
+    );
   }
   // ============================================================
   // BASIC HELPERS
@@ -621,18 +868,57 @@
       const rect =
         button.getBoundingClientRect();
 
+      const viewportWidth =
+        Number(window.innerWidth);
+
+      const viewportHeight =
+        Number(window.innerHeight);
+
+      if (
+        !Number.isFinite(
+          viewportWidth
+        ) ||
+        viewportWidth <= 0 ||
+        !Number.isFinite(
+          viewportHeight
+        ) ||
+        viewportHeight <= 0
+      ) {
+        return false;
+      }
+
+      const buttonWidth =
+        Number.isFinite(
+          Number(rect.width)
+        )
+          ? Math.max(
+              0,
+              Number(rect.width)
+            )
+          : 0;
+
+      const buttonHeight =
+        Number.isFinite(
+          Number(rect.height)
+        )
+          ? Math.max(
+              0,
+              Number(rect.height)
+            )
+          : 0;
+
       const maxLeft =
         Math.max(
           0,
-          window.innerWidth -
-          rect.width
+          viewportWidth -
+          buttonWidth
         );
 
       const maxTop =
         Math.max(
           0,
-          window.innerHeight -
-          rect.height
+          viewportHeight -
+          buttonHeight
         );
 
       const safeLeft =
@@ -660,6 +946,38 @@
 
       button.style.bottom =
         'auto';
+
+      return true;
+    }
+
+    function scheduleVisiblePosition(
+      left,
+      top,
+      persist = false
+    ) {
+      const apply =
+        () => {
+          if (
+            applyPosition(
+              left,
+              top
+            ) &&
+            persist
+          ) {
+            savePosition();
+          }
+        };
+
+      if (
+        typeof requestAnimationFrame ===
+          'function'
+      ) {
+        requestAnimationFrame(
+          apply
+        );
+      } else {
+        apply();
+      }
     }
 
     function savePosition() {
@@ -706,14 +1024,23 @@
           Number.isFinite(left) &&
           Number.isFinite(top)
         ) {
-          requestAnimationFrame(() => {
-            applyPosition(
-              left,
-              top
-            );
-          });
+          scheduleVisiblePosition(
+            left,
+            top,
+            true
+          );
+        } else {
+          localStorage.removeItem(
+            storageKey
+          );
         }
       } catch (error) {
+        try {
+          localStorage.removeItem(
+            storageKey
+          );
+        } catch (_) {}
+
         console.warn(
           '[Torn Analytics] Could not restore button position:',
           error
@@ -856,20 +1183,32 @@
       true
     );
 
-    window.addEventListener(
-      'resize',
+    const keepButtonVisible =
       () => {
         const rect =
           button.getBoundingClientRect();
 
-        applyPosition(
+        scheduleVisiblePosition(
           rect.left,
-          rect.top
+          rect.top,
+          true
         );
+      };
 
-        savePosition();
-      }
-    );
+    for (
+      const eventName
+      of [
+        'resize',
+        'orientationchange',
+        'pageshow'
+      ]
+    ) {
+      window.addEventListener(
+        eventName,
+        keepButtonVisible,
+        { passive: true }
+      );
+    }
 
     restorePosition();
   }
@@ -29399,15 +29738,16 @@
 
   function installButton() {
 
-    if (
+    const existingButton =
       document.getElementById(
         BUTTON_ID
-      )
-    ) {
-      return;
-    }
+      );
 
-    injectStyles();
+    if (
+      existingButton
+    ) {
+      return existingButton;
+    }
 
     const button =
       document.createElement(
@@ -29420,19 +29760,95 @@
     button.textContent =
       'Torn Analytics';
 
+    button.type =
+      'button';
+
+    button.dataset.version =
+      VERSION;
+
+    button.setAttribute?.(
+      'aria-label',
+      `Open Torn Analytics ${VERSION}`
+    );
+
+    // Critical launcher styles are inline so the recovery control stays
+    // visible even if the larger optional stylesheet cannot be installed.
+    Object.assign(
+      button.style,
+      {
+        position: 'fixed',
+        right: '12px',
+        bottom: '90px',
+        zIndex: '999999',
+        padding: '10px 13px',
+        border: '0',
+        borderRadius: '8px',
+        background: '#222',
+        color: '#fff',
+        fontWeight: '700'
+      }
+    );
+
     button.addEventListener(
       'click',
-      openModal
+      async event => {
+        try {
+          recordStartupHealth(
+            'modal_open_requested'
+          );
+
+          await openModal(
+            event
+          );
+
+          recordStartupHealth(
+            'ready'
+          );
+        } catch (error) {
+          launcherStartupFailure(
+            'modal_open_failed',
+            error
+          );
+
+          button.textContent =
+            'Torn Analytics ⚠';
+
+          button.title =
+            'Torn Analytics could not open. Reload this Torn tab and try again.';
+        }
+      }
     );
 
     document.body.appendChild(
       button
     );
 
-    makeFloatingButtonMovable(
-      button,
-      BUTTON_POSITION_KEY
+    try {
+      injectStyles();
+    } catch (error) {
+      launcherStartupFailure(
+        'launcher_styles_failed',
+        error
+      );
+    }
+
+    try {
+      makeFloatingButtonMovable(
+        button,
+        BUTTON_POSITION_KEY
+      );
+    } catch (error) {
+      launcherStartupFailure(
+        'launcher_position_failed',
+        error
+      );
+    }
+
+    recordStartupHealth(
+      'launcher_installed'
     );
+
+    return button;
   }
 
   const LAUNCHER_BOOT_RETRY_DELAY_MS =
@@ -29529,6 +29945,10 @@
 
     installButton();
 
+    recordStartupHealth(
+      'launcher_initialized'
+    );
+
     let restoreState =
       null;
 
@@ -29536,6 +29956,11 @@
       restoreState =
         consumeUiOrientationRestoreState();
     } catch (error) {
+      launcherStartupFailure(
+        'ui_session_restore_failed',
+        error
+      );
+
       console.warn(
         '[Torn Analytics] Could not restore the prior UI session:',
         error
@@ -29576,6 +30001,11 @@
     try {
       installPassiveTrainingSnapshotCapture();
     } catch (error) {
+      launcherStartupFailure(
+        'training_capture_failed',
+        error
+      );
+
       // Snapshot capture is optional and must never interfere with Torn.
       console.warn(
         '[Torn Analytics] Passive training snapshots could not be enabled:',
@@ -29586,6 +30016,11 @@
     try {
       installAutomaticLogSyncScheduler();
     } catch (error) {
+      launcherStartupFailure(
+        'automatic_sync_failed',
+        error
+      );
+
       // Automatic synchronization is optional. It must never interfere with
       // the launcher or the user's ability to run a manual verified update.
       console.warn(
@@ -29610,6 +30045,11 @@
             try {
               installButton();
             } catch (error) {
+              launcherStartupFailure(
+                'launcher_restore_failed',
+                error
+              );
+
               console.warn(
                 '[Torn Analytics] Could not restore the launcher after a page update:',
                 error
@@ -29652,6 +30092,10 @@
         }
       );
     }
+
+    recordStartupHealth(
+      'ready'
+    );
   }
 
   function initializeWhenDocumentReady(
@@ -29689,6 +30133,11 @@
     try {
       initialize();
     } catch (error) {
+      launcherStartupFailure(
+        'launcher_initialize_failed',
+        error
+      );
+
       console.warn(
         '[Torn Analytics] Launcher startup was delayed:',
         error
@@ -29715,18 +30164,22 @@
     }
   }
 
-  // Install the training listener before the heavier launcher initialization.
-  // Cross-page live checkpoints cover Gym visits that complete before this
-  // document-idle userscript is ready.
+  // Start the recovery launcher before optional capture work. This preserves
+  // access to Torn Analytics even when a non-critical feature fails.
+  initializeWhenDocumentReady();
+
   try {
     installPassiveTrainingSnapshotCapture();
   } catch (error) {
+    launcherStartupFailure(
+      'early_training_capture_failed',
+      error
+    );
+
     console.warn(
       '[Torn Analytics] Early passive training capture could not be enabled:',
       error
     );
   }
-
-  initializeWhenDocumentReady();
 
 })();
