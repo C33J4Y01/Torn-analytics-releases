@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.25
+// @version      2.18.26
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.25';
+  const VERSION = '2.18.26';
 
-  // v2.18.25 corrects Gym Trainer Xanax and Happy Jump sequencing from 0E.
+  // v2.18.26 passively captures exact pre-training Energy and Happiness when available.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13482,6 +13482,903 @@
     return restoreState;
   }
   // ============================================================
+  // PASSIVE TRAINING SNAPSHOTS
+  // ============================================================
+
+  const TRAINING_SNAPSHOT_STORAGE_KEY =
+    'tornAnalyticsTrainingSnapshotsV1';
+
+  const TRAINING_SNAPSHOT_LIMIT =
+    240;
+
+  const TRAINING_SNAPSHOT_MAX_AGE_SECONDS =
+    180 * 24 * 60 * 60;
+
+  const TRAINING_SNAPSHOT_MATCH_WINDOW_SECONDS =
+    30;
+
+  let passiveTrainingSnapshotCaptureInstalled =
+    false;
+
+  function trainingSnapshotFiniteNumber(
+    value
+  ) {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ''
+    ) {
+      return null;
+    }
+
+    const normalized =
+      String(value)
+        .replace(/,/g, '')
+        .trim();
+
+    if (
+      !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(
+        normalized
+      )
+    ) {
+      return null;
+    }
+
+    const number =
+      Number(normalized);
+
+    return Number.isFinite(
+      number
+    ) &&
+    number >= 0
+      ? number
+      : null;
+  }
+
+  function trainingSnapshotPositiveInteger(
+    value
+  ) {
+    const number =
+      trainingSnapshotFiniteNumber(
+        value
+      );
+
+    return Number.isSafeInteger(
+      number
+    ) &&
+    number > 0
+      ? number
+      : null;
+  }
+
+  function trainingSnapshotValuePair(
+    value
+  ) {
+    const matches =
+      String(value || '')
+        .match(
+          /\d[\d,]*(?:\.\d+)?/g
+        ) || [];
+
+    const numbers =
+      matches
+        .map(
+          trainingSnapshotFiniteNumber
+        )
+        .filter(
+          number =>
+            number !== null
+        );
+
+    return {
+      current:
+        numbers[0] ??
+        null,
+      maximum:
+        numbers[1] ??
+        null
+    };
+  }
+
+  function trainingSnapshotReadBar(
+    barId,
+    documentValue =
+      typeof document !== 'undefined'
+        ? document
+        : null
+  ) {
+    const root =
+      documentValue?.getElementById?.(
+        barId
+      );
+
+    if (
+      !root
+    ) {
+      return {
+        current: null,
+        maximum: null
+      };
+    }
+
+    const probes =
+      [
+        root.querySelector?.(
+          '[aria-valuenow], [data-current], [data-value]'
+        ),
+        root
+      ].filter(Boolean);
+
+    for (
+      const probe
+      of probes
+    ) {
+      const current =
+        trainingSnapshotFiniteNumber(
+          probe.getAttribute?.(
+            'aria-valuenow'
+          ) ??
+          probe.getAttribute?.(
+            'data-current'
+          ) ??
+          probe.getAttribute?.(
+            'data-value'
+          ) ??
+          probe.dataset?.current ??
+          probe.dataset?.value
+        );
+
+      const maximum =
+        trainingSnapshotFiniteNumber(
+          probe.getAttribute?.(
+            'aria-valuemax'
+          ) ??
+          probe.getAttribute?.(
+            'data-maximum'
+          ) ??
+          probe.getAttribute?.(
+            'data-max'
+          ) ??
+          probe.dataset?.maximum ??
+          probe.dataset?.max
+        );
+
+      if (
+        current !== null
+      ) {
+        return {
+          current,
+          maximum
+        };
+      }
+    }
+
+    for (
+      const probe
+      of probes
+    ) {
+      const pair =
+        trainingSnapshotValuePair(
+          probe.textContent
+        );
+
+      if (
+        pair.current !==
+        null
+      ) {
+        return pair;
+      }
+    }
+
+    return {
+      current: null,
+      maximum: null
+    };
+  }
+
+  function trainingSnapshotStatFromText(
+    value
+  ) {
+    const normalized =
+      String(value || '')
+        .toLowerCase();
+
+    const matches =
+      [
+        'strength',
+        'defense',
+        'speed',
+        'dexterity'
+      ].filter(
+        stat =>
+          new RegExp(
+            '(^|[^a-z])' +
+            stat +
+            '([^a-z]|$)'
+          ).test(
+            normalized
+          )
+      );
+
+    return matches.length ===
+      1
+        ? matches[0]
+        : null;
+  }
+
+  function trainingSnapshotTrainingIntent(
+    target
+  ) {
+    const button =
+      target?.closest?.(
+        'button, [role="button"]'
+      );
+
+    if (
+      !button ||
+      button.disabled ||
+      button.getAttribute?.(
+        'aria-disabled'
+      ) ===
+        'true'
+    ) {
+      return null;
+    }
+
+    const buttonText =
+      [
+        button.textContent,
+        button.getAttribute?.(
+          'aria-label'
+        ),
+        button.getAttribute?.(
+          'title'
+        ),
+        button.getAttribute?.(
+          'name'
+        ),
+        button.getAttribute?.(
+          'value'
+        )
+      ].filter(Boolean)
+        .join(' ');
+
+    if (
+      !/(^|\s)train(?:ing)?(\s|$)/i.test(
+        buttonText
+      )
+    ) {
+      return null;
+    }
+
+    let scope =
+      button;
+
+    let stat =
+      null;
+
+    for (
+      let depth = 0;
+      scope &&
+      depth < 7;
+      depth++
+    ) {
+      stat =
+        trainingSnapshotStatFromText(
+          [
+            scope.getAttribute?.(
+              'data-stat'
+            ),
+            scope.getAttribute?.(
+              'name'
+            ),
+            scope.getAttribute?.(
+              'id'
+            ),
+            scope.getAttribute?.(
+              'class'
+            ),
+            scope.textContent
+          ].filter(Boolean)
+            .join(' ')
+        );
+
+      if (
+        stat
+      ) {
+        break;
+      }
+
+      scope =
+        scope.parentElement;
+    }
+
+    if (
+      !stat
+    ) {
+      return null;
+    }
+
+    const trains =
+      trainingSnapshotPositiveInteger(
+        button.getAttribute?.(
+          'data-trains'
+        ) ??
+        button.getAttribute?.(
+          'data-amount'
+        ) ??
+        scope?.querySelector?.(
+          'input[type="number"], input[data-trains], input[name*="train"]'
+        )?.value
+      );
+
+    const gym =
+      trainingSnapshotPositiveInteger(
+        button.getAttribute?.(
+          'data-gym'
+        ) ??
+        scope?.getAttribute?.(
+          'data-gym'
+        )
+      );
+
+    return {
+      stat,
+      trains,
+      gym
+    };
+  }
+
+  function trainingSnapshotIsGymPage(
+    locationValue =
+      typeof location !== 'undefined'
+        ? location
+        : null
+  ) {
+    const pathname =
+      String(
+        locationValue?.pathname ||
+        ''
+      )
+        .toLowerCase();
+
+    return pathname ===
+      '/gym.php' ||
+      pathname.endsWith(
+        '/gym.php'
+      );
+  }
+
+  function trainingSnapshotSanitize(
+    snapshot
+  ) {
+    const capturedAt =
+      Number(
+        snapshot?.captured_at
+      );
+
+    if (
+      !Number.isSafeInteger(
+        capturedAt
+      ) ||
+      capturedAt <= 0
+    ) {
+      return null;
+    }
+
+    const rawStatus =
+      String(
+        snapshot?.status ||
+        ''
+      );
+
+    const energy =
+      trainingSnapshotFiniteNumber(
+        snapshot?.energy_before
+      );
+
+    const happiness =
+      trainingSnapshotFiniteNumber(
+        snapshot?.happiness_before
+      );
+
+    const happinessMaximum =
+      trainingSnapshotFiniteNumber(
+        snapshot?.happiness_maximum
+      );
+
+    const exact =
+      rawStatus ===
+        'exact_live_snapshot' &&
+      energy !== null &&
+      happiness !== null &&
+      happinessMaximum !== null &&
+      happiness <=
+        happinessMaximum * 100;
+
+    return {
+      id:
+        String(
+          snapshot?.id ||
+          capturedAt
+        )
+          .slice(0, 120),
+      captured_at:
+        capturedAt,
+      status:
+        exact
+          ? 'exact_live_snapshot'
+          : 'unavailable',
+      energy_before:
+        exact
+          ? energy
+          : null,
+      happiness_before:
+        exact
+          ? happiness
+          : null,
+      happiness_maximum:
+        exact
+          ? happinessMaximum
+          : null,
+      stat:
+        [
+          'strength',
+          'defense',
+          'speed',
+          'dexterity'
+        ].includes(
+          snapshot?.stat
+        )
+          ? snapshot.stat
+          : null,
+      trains:
+        trainingSnapshotPositiveInteger(
+          snapshot?.trains
+        ),
+      gym:
+        trainingSnapshotPositiveInteger(
+          snapshot?.gym
+        ),
+      reason:
+        exact
+          ? null
+          : String(
+              snapshot?.reason ||
+              'live_bars_unavailable'
+            )
+              .slice(0, 80)
+    };
+  }
+
+  function trainingSnapshotStorage() {
+    try {
+      return typeof localStorage !==
+        'undefined'
+        ? localStorage
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function readTrainingSnapshots(
+    nowSeconds =
+      Math.floor(
+        Date.now() /
+        1000
+      )
+  ) {
+    try {
+      const parsed =
+        JSON.parse(
+          trainingSnapshotStorage()?.getItem(
+            TRAINING_SNAPSHOT_STORAGE_KEY
+          ) ||
+          '[]'
+        );
+
+      if (
+        !Array.isArray(
+          parsed
+        )
+      ) {
+        return [];
+      }
+
+      const minimumTimestamp =
+        Number(nowSeconds) -
+        TRAINING_SNAPSHOT_MAX_AGE_SECONDS;
+
+      return parsed
+        .map(
+          trainingSnapshotSanitize
+        )
+        .filter(
+          snapshot =>
+            snapshot &&
+            snapshot.captured_at >=
+              minimumTimestamp
+        )
+        .slice(
+          -TRAINING_SNAPSHOT_LIMIT
+        );
+    } catch {
+      return [];
+    }
+  }
+
+  function writeTrainingSnapshots(
+    snapshots,
+    nowSeconds =
+      Math.floor(
+        Date.now() /
+        1000
+      )
+  ) {
+    const minimumTimestamp =
+      Number(nowSeconds) -
+      TRAINING_SNAPSHOT_MAX_AGE_SECONDS;
+
+    const safe =
+      (
+        Array.isArray(
+          snapshots
+        )
+          ? snapshots
+          : []
+      )
+        .map(
+          trainingSnapshotSanitize
+        )
+        .filter(
+          snapshot =>
+            snapshot &&
+            snapshot.captured_at >=
+              minimumTimestamp
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            left.captured_at -
+              right.captured_at ||
+            left.id.localeCompare(
+              right.id
+            )
+        )
+        .slice(
+          -TRAINING_SNAPSHOT_LIMIT
+        );
+
+    try {
+      trainingSnapshotStorage()?.setItem(
+        TRAINING_SNAPSHOT_STORAGE_KEY,
+        JSON.stringify(
+          safe
+        )
+      );
+    } catch {
+      // Snapshot capture is optional and must never interrupt Torn training.
+    }
+
+    return safe;
+  }
+
+  function trainingSnapshotBuildCapture(
+    event,
+    documentValue =
+      typeof document !== 'undefined'
+        ? document
+        : null,
+    locationValue =
+      typeof location !== 'undefined'
+        ? location
+        : null,
+    nowMilliseconds =
+      Date.now()
+  ) {
+    if (
+      !trainingSnapshotIsGymPage(
+        locationValue
+      )
+    ) {
+      return null;
+    }
+
+    const intent =
+      trainingSnapshotTrainingIntent(
+        event?.target
+      );
+
+    if (
+      !intent
+    ) {
+      return null;
+    }
+
+    const energy =
+      trainingSnapshotReadBar(
+        'barEnergy',
+        documentValue
+      );
+
+    const happiness =
+      trainingSnapshotReadBar(
+        'barHappy',
+        documentValue
+      );
+
+    const capturedAt =
+      Math.floor(
+        Number(nowMilliseconds) /
+        1000
+      );
+
+    const exact =
+      Number.isSafeInteger(
+        capturedAt
+      ) &&
+      capturedAt > 0 &&
+      energy.current !==
+        null &&
+      happiness.current !==
+        null &&
+      happiness.maximum !==
+        null;
+
+    return trainingSnapshotSanitize({
+      id:
+        capturedAt +
+        '-' +
+        intent.stat +
+        '-' +
+        String(
+          Math.random()
+        )
+          .slice(2, 12),
+      captured_at:
+        capturedAt,
+      status:
+        exact
+          ? 'exact_live_snapshot'
+          : 'unavailable',
+      energy_before:
+        energy.current,
+      happiness_before:
+        happiness.current,
+      happiness_maximum:
+        happiness.maximum,
+      stat:
+        intent.stat,
+      trains:
+        intent.trains,
+      gym:
+        intent.gym,
+      reason:
+        exact
+          ? null
+          : 'live_bars_unavailable'
+    });
+  }
+
+  function capturePassiveTrainingSnapshot(
+    event
+  ) {
+    const snapshot =
+      trainingSnapshotBuildCapture(
+        event
+      );
+
+    if (
+      !snapshot
+    ) {
+      return null;
+    }
+
+    writeTrainingSnapshots(
+      [
+        ...readTrainingSnapshots(
+          snapshot.captured_at
+        ),
+        snapshot
+      ],
+      snapshot.captured_at
+    );
+
+    return snapshot;
+  }
+
+  function installPassiveTrainingSnapshotCapture() {
+    if (
+      passiveTrainingSnapshotCaptureInstalled ||
+      typeof document ===
+        'undefined' ||
+      !document.addEventListener
+    ) {
+      return false;
+    }
+
+    document.addEventListener(
+      'click',
+      capturePassiveTrainingSnapshot,
+      true
+    );
+
+    passiveTrainingSnapshotCaptureInstalled =
+      true;
+
+    return true;
+  }
+
+  function trainingSnapshotAttachToActions(
+    actions,
+    snapshots =
+      readTrainingSnapshots()
+  ) {
+    const safeSnapshots =
+      (
+        Array.isArray(
+          snapshots
+        )
+          ? snapshots
+          : []
+      )
+        .map(
+          trainingSnapshotSanitize
+        )
+        .filter(
+          snapshot =>
+            snapshot?.status ===
+              'exact_live_snapshot'
+        );
+
+    const used =
+      new Set();
+
+    for (
+      const action
+      of Array.isArray(
+        actions
+      )
+        ? actions
+        : []
+    ) {
+      const actionTimestamp =
+        Number(
+          action?.timestamp
+        );
+
+      if (
+        !Number.isSafeInteger(
+          actionTimestamp
+        ) ||
+        actionTimestamp <= 0
+      ) {
+        continue;
+      }
+
+      const candidates =
+        safeSnapshots
+          .filter(
+            snapshot => {
+              if (
+                used.has(
+                  snapshot.id
+                )
+              ) {
+                return false;
+              }
+
+              const secondsAfterCapture =
+                actionTimestamp -
+                snapshot.captured_at;
+
+              if (
+                secondsAfterCapture <
+                  -2 ||
+                secondsAfterCapture >
+                  TRAINING_SNAPSHOT_MATCH_WINDOW_SECONDS
+              ) {
+                return false;
+              }
+
+              if (
+                snapshot.stat &&
+                snapshot.stat !==
+                  action?.stat
+              ) {
+                return false;
+              }
+
+              if (
+                snapshot.trains &&
+                snapshot.trains !==
+                  Number(
+                    action?.trains
+                  )
+              ) {
+                return false;
+              }
+
+              if (
+                snapshot.gym &&
+                snapshot.gym !==
+                  Number(
+                    action?.gym
+                  )
+              ) {
+                return false;
+              }
+
+              return Number(
+                snapshot.energy_before
+              ) >=
+                Number(
+                  action?.energy_used ||
+                  0
+                );
+            }
+          )
+          .sort(
+            (
+              left,
+              right
+            ) =>
+              Math.abs(
+                actionTimestamp -
+                left.captured_at
+              ) -
+              Math.abs(
+                actionTimestamp -
+                right.captured_at
+              ) ||
+              right.captured_at -
+                left.captured_at
+          );
+
+      const match =
+        candidates[0];
+
+      if (
+        !match
+      ) {
+        action.live_snapshot = {
+          status:
+            'unavailable'
+        };
+
+        continue;
+      }
+
+      used.add(
+        match.id
+      );
+
+      action.live_snapshot = {
+        status:
+          'exact_live_snapshot',
+        captured_at:
+          match.captured_at,
+        seconds_before_log:
+          Math.max(
+            0,
+            actionTimestamp -
+              match.captured_at
+          ),
+        energy_before:
+          match.energy_before,
+        happiness_before:
+          match.happiness_before,
+        happiness_maximum:
+          match.happiness_maximum
+      };
+    }
+
+    return actions;
+  }
+  // ============================================================
   // STAT GROWTH ANALYTICS
   // ============================================================
 
@@ -15061,6 +15958,28 @@
         )
     );
 
+    if (
+      typeof trainingSnapshotAttachToActions ===
+        'function' &&
+      typeof readTrainingSnapshots ===
+        'function'
+    ) {
+      trainingSnapshotAttachToActions(
+        actions,
+        readTrainingSnapshots()
+      );
+    } else {
+      for (
+        const action
+        of actions
+      ) {
+        action.live_snapshot = {
+          status:
+            'unavailable'
+        };
+      }
+    }
+
     let previousTrainingTimestamp =
       null;
 
@@ -16305,6 +17224,10 @@
             </div>
           </div>
 
+          <div class="ta-section-intro">
+            Future sessions can improve prediction accuracy. Live Happiness and Energy are recorded automatically during supported Gym training actions when available.
+          </div>
+
           <div class="ta-metric-grid">
             ${energyMetric}
             ${activityDashboardMetric('Live Happiness', readiness.happiness === null ? '—' : Number(readiness.happiness).toLocaleString(), readiness.happiness === null ? 'Live Happiness unavailable' : readiness.happiness_maximum === null ? 'Live from Torn' : `${Number(readiness.happiness_maximum).toLocaleString()} maximum`)}
@@ -17438,6 +18361,68 @@
     };
   }
 
+  function statGrowthSessionLiveSnapshot(
+    snapshot
+  ) {
+    const exact =
+      snapshot?.status ===
+        'exact_live_snapshot' &&
+      Number.isFinite(
+        Number(
+          snapshot?.energy_before
+        )
+      ) &&
+      Number.isFinite(
+        Number(
+          snapshot?.happiness_before
+        )
+      ) &&
+      Number.isFinite(
+        Number(
+          snapshot?.happiness_maximum
+        )
+      );
+
+    if (
+      !exact
+    ) {
+      return {
+        status:
+          'unavailable',
+        confidence:
+          'Unavailable',
+        energy:
+          'Unavailable',
+        happiness:
+          'Unavailable',
+        note:
+          'No exact live snapshot was matched to this session.'
+      };
+    }
+
+    return {
+      status:
+        'exact_live_snapshot',
+      confidence:
+        'Exact live snapshot',
+      energy:
+        Number(
+          snapshot.energy_before
+        ).toLocaleString() +
+        'E',
+      happiness:
+        Number(
+          snapshot.happiness_before
+        ).toLocaleString() +
+        ' / ' +
+        Number(
+          snapshot.happiness_maximum
+        ).toLocaleString(),
+      note:
+        'Live Happiness and Energy were captured immediately before this training action.'
+    };
+  }
+
   function statGrowthSessionInspectorModel(
     action
   ) {
@@ -17465,6 +18450,68 @@
       statGrowthSessionEnergyEvidence(
         action?.energy_source_evidence
       );
+    const liveSnapshot =
+      (() => {
+        const snapshot =
+          action?.live_snapshot;
+        const exact =
+          snapshot?.status ===
+            'exact_live_snapshot' &&
+          Number.isFinite(
+            Number(
+              snapshot?.energy_before
+            )
+          ) &&
+          Number.isFinite(
+            Number(
+              snapshot?.happiness_before
+            )
+          ) &&
+          Number.isFinite(
+            Number(
+              snapshot?.happiness_maximum
+            )
+          );
+
+        if (
+          !exact
+        ) {
+          return {
+            status:
+              'unavailable',
+            confidence:
+              'Unavailable',
+            energy:
+              'Unavailable',
+            happiness:
+              'Unavailable',
+            note:
+              'No exact live snapshot was matched to this session.'
+          };
+        }
+
+        return {
+          status:
+            'exact_live_snapshot',
+          confidence:
+            'Exact live snapshot',
+          energy:
+            Number(
+              snapshot.energy_before
+            ).toLocaleString() +
+            'E',
+          happiness:
+            Number(
+              snapshot.happiness_before
+            ).toLocaleString() +
+            ' / ' +
+            Number(
+              snapshot.happiness_maximum
+            ).toLocaleString(),
+          note:
+            'Live Happiness and Energy were captured immediately before this training action.'
+        };
+      })();
     const rawEnergySourceStatus =
       String(
         action?.energy_source_evidence?.status ||
@@ -17521,6 +18568,12 @@
         happyKnown
           ? Number(action.happy_used).toLocaleString()
           : 'Not recorded',
+      snapshot_confidence:
+        liveSnapshot.confidence,
+      snapshot_energy:
+        liveSnapshot.energy,
+      snapshot_happiness:
+        liveSnapshot.happiness,
       context_label:
         context.label,
       jump_label:
@@ -17534,7 +18587,9 @@
       context_detail:
         context.detail,
       context_note:
-        context.note,
+        liveSnapshot.status === 'exact_live_snapshot'
+          ? liveSnapshot.note
+          : context.note,
       energy_source_label:
         energyEvidence.label,
       energy_source_status:
@@ -17619,6 +18674,18 @@
               <span>
                 <i>Happiness used</i>
                 <b data-ta-stat-session-field="happiness_used">${escapeActivityHtml(model.happiness_used)}</b>
+              </span>
+              <span>
+                <i>Happiness before</i>
+                <b data-ta-stat-session-field="snapshot_happiness">${escapeActivityHtml(model.snapshot_happiness)}</b>
+              </span>
+              <span>
+                <i>Energy before</i>
+                <b data-ta-stat-session-field="snapshot_energy">${escapeActivityHtml(model.snapshot_energy)}</b>
+              </span>
+              <span>
+                <i>Snapshot confidence</i>
+                <b data-ta-stat-session-field="snapshot_confidence">${escapeActivityHtml(model.snapshot_confidence)}</b>
               </span>
             </div>
             <div class="ta-stat-session-context">
@@ -27697,6 +28764,16 @@
     ) {
       void restoreOpenModalAfterDomReplacement(
         restoreState
+      );
+    }
+
+    try {
+      installPassiveTrainingSnapshotCapture();
+    } catch (error) {
+      // Snapshot capture is optional and must never interfere with Torn.
+      console.warn(
+        '[Torn Analytics] Passive training snapshots could not be enabled:',
+        error
       );
     }
 
