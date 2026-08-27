@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.27
+// @version      2.18.28
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.27';
+  const VERSION = '2.18.28';
 
-  // v2.18.27 makes passive training snapshots reliable during fast Gym visits.
+  // v2.18.28 proves TornPDA snapshot access without spending Energy.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -14116,6 +14116,201 @@
     });
   }
 
+  function trainingSnapshotDetectableControls(
+    documentValue =
+      typeof document !== 'undefined'
+        ? document
+        : null
+  ) {
+    if (
+      !documentValue?.querySelectorAll
+    ) {
+      return [];
+    }
+
+    const controls =
+      Array.from(
+        documentValue.querySelectorAll(
+          'button, [role="button"], input[type="button"], input[type="submit"], a[href], [data-action]'
+        ) ||
+        []
+      )
+        .slice(
+          0,
+          750
+        );
+
+    return controls
+      .map(
+        control => ({
+          control,
+          intent:
+            trainingSnapshotTrainingIntent(
+              control
+            )
+        })
+      )
+      .filter(
+        candidate =>
+          Boolean(
+            candidate.intent
+          )
+      );
+  }
+
+  function trainingSnapshotCapabilityProbe(
+    documentValue =
+      typeof document !== 'undefined'
+        ? document
+        : null,
+    locationValue =
+      typeof location !== 'undefined'
+        ? location
+        : null,
+    nowMilliseconds =
+      Date.now(),
+    listenerInstalled =
+      typeof passiveTrainingSnapshotCaptureInstalled !==
+        'undefined' &&
+      passiveTrainingSnapshotCaptureInstalled ===
+        true
+  ) {
+    const energyRootFound =
+      Boolean(
+        documentValue?.getElementById?.(
+          'barEnergy'
+        )
+      );
+    const happinessRootFound =
+      Boolean(
+        documentValue?.getElementById?.(
+          'barHappy'
+        )
+      );
+    const visibleBars =
+      trainingSnapshotReadVisibleLiveBars(
+        documentValue,
+        nowMilliseconds
+      );
+    const gymPage =
+      trainingSnapshotIsGymPage(
+        locationValue
+      );
+    const controls =
+      gymPage
+        ? trainingSnapshotDetectableControls(
+            documentValue
+          )
+        : [];
+    const barsReady =
+      Boolean(
+        visibleBars
+      );
+    const controlsReady =
+      gymPage &&
+      controls.length > 0;
+
+    return {
+      checked_at:
+        Math.floor(
+          Number(
+            nowMilliseconds
+          ) /
+          1000
+        ),
+      listener:
+        listenerInstalled
+          ? 'ready'
+          : 'not_active',
+      page:
+        gymPage
+          ? 'gym'
+          : 'other',
+      resource_bars:
+        barsReady
+          ? 'ready'
+          : 'not_readable',
+      energy_root:
+        energyRootFound
+          ? 'found'
+          : 'not_found',
+      happiness_root:
+        happinessRootFound
+          ? 'found'
+          : 'not_found',
+      energy:
+        barsReady
+          ? visibleBars.energy
+          : null,
+      happiness:
+        barsReady
+          ? visibleBars.happiness
+          : null,
+      happiness_maximum:
+        barsReady
+          ? visibleBars.happiness_maximum
+          : null,
+      gym_controls:
+        gymPage
+          ? controlsReady
+            ? 'ready'
+            : 'not_detected'
+          : 'open_gym_to_check',
+      gym_control_count:
+        controls.length,
+      result:
+        !listenerInstalled
+          ? 'listener_not_active'
+          : !barsReady
+            ? 'resource_bars_blocked'
+            : !gymPage
+              ? 'resource_access_confirmed'
+              : controlsReady
+                ? 'capture_access_confirmed'
+                : 'gym_controls_blocked'
+    };
+  }
+
+  function trainingSnapshotCapabilityText(
+    probe
+  ) {
+    const listenerText =
+      probe?.listener ===
+        'ready'
+        ? 'Ready'
+        : 'Not active';
+    const barsText =
+      probe?.resource_bars ===
+        'ready'
+        ? `Ready — Energy ${Number(probe.energy).toLocaleString()} · Happiness ${Number(probe.happiness).toLocaleString()} / ${Number(probe.happiness_maximum).toLocaleString()}`
+        : `Not readable — #barEnergy ${probe?.energy_root === 'found' ? 'found' : 'missing'} · #barHappy ${probe?.happiness_root === 'found' ? 'found' : 'missing'}`;
+    const gymText =
+      probe?.gym_controls ===
+        'ready'
+        ? `Ready — ${Number(probe.gym_control_count).toLocaleString()} supported training control${Number(probe.gym_control_count) === 1 ? '' : 's'} detected`
+        : probe?.gym_controls ===
+            'open_gym_to_check'
+          ? 'Open the Gym and run this check again; no training is required.'
+          : 'Not detected on the Gym page.';
+    const resultText =
+      probe?.result ===
+        'capture_access_confirmed'
+        ? 'CONFIRMED — the required page access is available.'
+        : probe?.result ===
+            'resource_access_confirmed'
+          ? 'PARTIAL — resource access works; check once more on the Gym page.'
+          : 'BLOCKED — the result identifies which page access is missing.';
+
+    return [
+      `Capture listener: ${listenerText}`,
+      `Displayed resource bars: ${barsText}`,
+      `Gym controls: ${gymText}`,
+      `Result: ${resultText}`
+    ].join(
+      '\n'
+    );
+  }
+
   function writeTrainingSnapshotLiveBars(
     snapshot
   ) {
@@ -25248,6 +25443,17 @@
         opacity: .75;
       }
 
+      #${MODAL_ID} .ta-training-snapshot-check-output {
+        margin-top: 8px;
+        padding: 9px;
+        border: 1px solid #3b4650;
+        border-radius: 7px;
+        background: #11171b;
+        color: #d7e2e8;
+        line-height: 1.5;
+        white-space: pre-line;
+      }
+
       #${MODAL_ID} .ta-section-intro {
         margin: 0 0 12px;
         font-size: 12px;
@@ -27322,6 +27528,32 @@
               ${renderActivityTimeBasisControl()}
             </div>
 
+            <div class="ta-settings-group">
+              <b>
+                Training snapshot access
+              </b>
+
+              <div class="small">
+                Read-only capability check. It does not train, spend Energy,
+                use an item, or make an API request.
+              </div>
+
+              <button
+                id="ta-training-snapshot-check"
+                type="button"
+              >
+                Check Snapshot Access
+              </button>
+
+              <div
+                id="ta-training-snapshot-check-output"
+                class="small ta-training-snapshot-check-output"
+                aria-live="polite"
+              >
+                Not checked on this page yet.
+              </div>
+            </div>
+
             <div
               id="ta-main-actions"
               class="actions ta-settings-group"
@@ -27513,6 +27745,41 @@
 
     const analysisHost =
       $('#ta-status');
+
+    const trainingSnapshotCheckButton =
+      $('#ta-training-snapshot-check');
+
+    const trainingSnapshotCheckOutput =
+      $('#ta-training-snapshot-check-output');
+
+    function refreshTrainingSnapshotCapabilityCheck() {
+      if (
+        !trainingSnapshotCheckOutput
+      ) {
+        return null;
+      }
+
+      const probe =
+        trainingSnapshotCapabilityProbe();
+
+      trainingSnapshotCheckOutput.textContent =
+        trainingSnapshotCapabilityText(
+          probe
+        );
+
+      return probe;
+    }
+
+    if (
+      trainingSnapshotCheckButton
+    ) {
+      trainingSnapshotCheckButton.addEventListener(
+        'click',
+        refreshTrainingSnapshotCapabilityCheck
+      );
+    }
+
+    refreshTrainingSnapshotCapabilityCheck();
 
     for (
       const button
