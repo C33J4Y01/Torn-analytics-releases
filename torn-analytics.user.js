@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.32
+// @version      2.18.33
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.32';
+  const VERSION = '2.18.33';
 
-  // v2.18.32 adds an isolated, manual Happiness API capture canary.
+  // v2.18.33 records bounded checkpoint-canary evidence without changing training attribution.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -24383,6 +24383,1027 @@
     writeUiSessionState(patch);
   }
   // ============================================================
+  // AUTOMATIC TRAINING CHECKPOINT CANARY
+  // ============================================================
+
+  const TRAINING_CHECKPOINT_CANARY_STORAGE_KEY =
+    'tornAnalyticsTrainingCheckpointCanaryV1';
+
+  const TRAINING_CHECKPOINT_ROUTINE_INTERVAL_MS =
+    30 * 1000;
+
+  const TRAINING_CHECKPOINT_TICK_INTERVAL_MS =
+    5 * 1000;
+
+  const TRAINING_CHECKPOINT_PRE_TAP_MAX_AGE_MS =
+    60 * 1000;
+
+  const TRAINING_CHECKPOINT_LIMIT =
+    24;
+
+  const TRAINING_CHECKPOINT_INTENT_LIMIT =
+    24;
+
+  const TRAINING_CHECKPOINT_INTENT_MAX_AGE_MS =
+    30 * 24 * 60 * 60 * 1000;
+
+  let trainingCheckpointCanaryInstalled =
+    false;
+
+  let trainingCheckpointCanaryTimer =
+    null;
+
+  let trainingCheckpointCanaryInFlight =
+    null;
+
+  let trainingCheckpointCanaryLastPageWasGym =
+    false;
+
+  function trainingCheckpointCanaryStorage() {
+    try {
+      return localStorage;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function trainingCheckpointCanaryInteger(
+    value
+  ) {
+    if (
+      typeof value !==
+        'number'
+    ) {
+      return null;
+    }
+
+    const number =
+      value;
+
+    return Number.isSafeInteger(
+      number
+    ) &&
+    number >= 0
+      ? number
+      : null;
+  }
+
+  function trainingCheckpointCanarySanitizeCheckpoint(
+    checkpoint
+  ) {
+    const requestedAt =
+      trainingCheckpointCanaryInteger(
+        checkpoint?.requested_at
+      );
+
+    const receivedAt =
+      trainingCheckpointCanaryInteger(
+        checkpoint?.received_at
+      );
+
+    const energy =
+      trainingCheckpointCanaryInteger(
+        checkpoint?.energy?.current
+      );
+
+    const energyMaximum =
+      trainingCheckpointCanaryInteger(
+        checkpoint?.energy?.maximum
+      );
+
+    const happiness =
+      trainingCheckpointCanaryInteger(
+        checkpoint?.happiness?.current
+      );
+
+    const happinessMaximum =
+      trainingCheckpointCanaryInteger(
+        checkpoint?.happiness?.maximum
+      );
+
+    if (
+      requestedAt === null ||
+      requestedAt <= 0 ||
+      receivedAt === null ||
+      receivedAt < requestedAt ||
+      energy === null ||
+      energyMaximum === null ||
+      energyMaximum < 1 ||
+      happiness === null ||
+      happinessMaximum === null ||
+      happinessMaximum < 1
+    ) {
+      return null;
+    }
+
+    const reason =
+      [
+        'initial',
+        'routine',
+        'gym_entry',
+        'visible',
+        'pageshow'
+      ].includes(
+        checkpoint?.reason
+      )
+        ? checkpoint.reason
+        : 'routine';
+
+    return {
+      id:
+        String(
+          checkpoint?.id ||
+          `${requestedAt}-${receivedAt}`
+        )
+          .slice(
+            0,
+            120
+          ),
+      reason,
+      requested_at:
+        requestedAt,
+      received_at:
+        receivedAt,
+      latency_ms:
+        Math.max(
+          0,
+          receivedAt -
+            requestedAt
+        ),
+      source:
+        'Official Torn API v2 /user/bars',
+      page:
+        String(
+          checkpoint?.page ||
+          '/'
+        )
+          .slice(
+            0,
+            160
+          ),
+      page_is_gym:
+        checkpoint?.page_is_gym ===
+          true,
+      energy: {
+        current:
+          energy,
+        maximum:
+          energyMaximum
+      },
+      happiness: {
+        current:
+          happiness,
+        maximum:
+          happinessMaximum
+      }
+    };
+  }
+
+  function trainingCheckpointCanarySanitizeIntent(
+    intent
+  ) {
+    const tappedAt =
+      trainingCheckpointCanaryInteger(
+        intent?.tapped_at
+      );
+
+    if (
+      tappedAt === null ||
+      tappedAt <= 0
+    ) {
+      return null;
+    }
+
+    const checkpoint =
+      trainingCheckpointCanarySanitizeCheckpoint(
+        intent?.checkpoint
+      );
+
+    const completedBeforeTap =
+      Boolean(
+        checkpoint &&
+        checkpoint.received_at <=
+          tappedAt &&
+        tappedAt -
+          checkpoint.received_at <=
+            TRAINING_CHECKPOINT_PRE_TAP_MAX_AGE_MS
+      );
+
+    return {
+      id:
+        String(
+          intent?.id ||
+          tappedAt
+        )
+          .slice(
+            0,
+            120
+          ),
+      tapped_at:
+        tappedAt,
+      stat:
+        [
+          'strength',
+          'defense',
+          'speed',
+          'dexterity'
+        ].includes(
+          intent?.stat
+        )
+          ? intent.stat
+          : null,
+      trains:
+        trainingSnapshotPositiveInteger(
+          intent?.trains
+        ),
+      gym:
+        trainingSnapshotPositiveInteger(
+          intent?.gym
+        ),
+      checkpoint_status:
+        completedBeforeTap
+          ? 'completed_before_tap'
+          : 'unavailable',
+      checkpoint_age_ms:
+        completedBeforeTap
+          ? tappedAt -
+            checkpoint.received_at
+          : null,
+      checkpoint:
+        completedBeforeTap
+          ? checkpoint
+          : null
+    };
+  }
+
+  function trainingCheckpointCanarySanitizeState(
+    state,
+    nowMilliseconds =
+      Date.now()
+  ) {
+    const minimumIntentTime =
+      Math.max(
+        0,
+        Number(
+          nowMilliseconds
+        ) -
+          TRAINING_CHECKPOINT_INTENT_MAX_AGE_MS
+      );
+
+    const checkpoints =
+      (
+        Array.isArray(
+          state?.checkpoints
+        )
+          ? state.checkpoints
+          : []
+      )
+        .map(
+          trainingCheckpointCanarySanitizeCheckpoint
+        )
+        .filter(
+          Boolean
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            left.received_at -
+              right.received_at
+        )
+        .slice(
+          -TRAINING_CHECKPOINT_LIMIT
+        );
+
+    const intents =
+      (
+        Array.isArray(
+          state?.train_intents
+        )
+          ? state.train_intents
+          : []
+      )
+        .map(
+          trainingCheckpointCanarySanitizeIntent
+        )
+        .filter(
+          intent =>
+            intent &&
+            intent.tapped_at >=
+              minimumIntentTime
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            left.tapped_at -
+              right.tapped_at
+        )
+        .slice(
+          -TRAINING_CHECKPOINT_INTENT_LIMIT
+        );
+
+    return {
+      schema_version: 1,
+      version:
+        VERSION,
+      installed_at:
+        trainingCheckpointCanaryInteger(
+          state?.installed_at
+        ) ||
+        Number(
+          nowMilliseconds
+        ),
+      last_attempt_at:
+        trainingCheckpointCanaryInteger(
+          state?.last_attempt_at
+        ),
+      last_status:
+        [
+          'idle',
+          'requesting',
+          'available',
+          'no_api_key',
+          'failed'
+        ].includes(
+          state?.last_status
+        )
+          ? state.last_status
+          : 'idle',
+      last_error:
+        typeof state?.last_error ===
+          'string'
+          ? happinessCaptureCanaryErrorText(
+              state.last_error
+            )
+          : null,
+      checkpoints,
+      train_intents:
+        intents
+    };
+  }
+
+  function readTrainingCheckpointCanaryState() {
+    try {
+      return trainingCheckpointCanarySanitizeState(
+        JSON.parse(
+          trainingCheckpointCanaryStorage()?.getItem(
+            TRAINING_CHECKPOINT_CANARY_STORAGE_KEY
+          ) ||
+          'null'
+        )
+      );
+    } catch (_) {
+      return trainingCheckpointCanarySanitizeState(
+        null
+      );
+    }
+  }
+
+  function writeTrainingCheckpointCanaryState(
+    state
+  ) {
+    const safe =
+      trainingCheckpointCanarySanitizeState(
+        state
+      );
+
+    try {
+      trainingCheckpointCanaryStorage()?.setItem(
+        TRAINING_CHECKPOINT_CANARY_STORAGE_KEY,
+        JSON.stringify(
+          safe
+        )
+      );
+    } catch (_) {
+      // Canary evidence is optional and must never interrupt Torn.
+    }
+
+    return safe;
+  }
+
+  function trainingCheckpointCanaryPage(
+    locationValue =
+      typeof location !== 'undefined'
+        ? location
+        : null
+  ) {
+    return String(
+      locationValue?.pathname ||
+      '/'
+    )
+      .slice(
+        0,
+        160
+      );
+  }
+
+  function trainingCheckpointCanaryDocumentActive(
+    documentValue =
+      typeof document !== 'undefined'
+        ? document
+        : null
+  ) {
+    return Boolean(
+      documentValue &&
+      documentValue.visibilityState !==
+        'hidden'
+    );
+  }
+
+  function trainingCheckpointCanaryLatestBeforeTap(
+    checkpoints,
+    tappedAt
+  ) {
+    const safeTap =
+      trainingCheckpointCanaryInteger(
+        tappedAt
+      );
+
+    if (
+      safeTap === null ||
+      safeTap <= 0
+    ) {
+      return null;
+    }
+
+    return (
+      (
+        Array.isArray(
+          checkpoints
+        )
+          ? checkpoints
+          : []
+      )
+        .map(
+          trainingCheckpointCanarySanitizeCheckpoint
+        )
+        .filter(
+          checkpoint =>
+            checkpoint &&
+            checkpoint.received_at <=
+              safeTap &&
+            safeTap -
+              checkpoint.received_at <=
+                TRAINING_CHECKPOINT_PRE_TAP_MAX_AGE_MS
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            right.received_at -
+              left.received_at
+        )[0] ||
+      null
+    );
+  }
+
+  async function captureTrainingCheckpointCanary(
+    reason = 'routine',
+    force = false
+  ) {
+    if (
+      !trainingCheckpointCanaryDocumentActive()
+    ) {
+      return {
+        status:
+          'inactive'
+      };
+    }
+
+    if (
+      trainingCheckpointCanaryInFlight
+    ) {
+      return await trainingCheckpointCanaryInFlight;
+    }
+
+    const operation =
+      (async () => {
+        let state =
+          readTrainingCheckpointCanaryState();
+
+        const startedAt =
+          Date.now();
+
+        if (
+          !force &&
+          state.last_attempt_at !==
+            null &&
+          startedAt -
+            state.last_attempt_at <
+              TRAINING_CHECKPOINT_ROUTINE_INTERVAL_MS
+        ) {
+          return {
+            status:
+              'throttled'
+          };
+        }
+
+        if (
+          running ||
+          automaticLogSyncRunning
+        ) {
+          return {
+            status:
+              'busy'
+          };
+        }
+
+        state =
+          writeTrainingCheckpointCanaryState({
+            ...state,
+            last_attempt_at:
+              startedAt,
+            last_status:
+              'requesting',
+            last_error:
+              null
+          });
+
+        const apiKey =
+          await loadSecureApiKey();
+
+        if (
+          !apiKey
+        ) {
+          const currentState =
+            readTrainingCheckpointCanaryState();
+
+          writeTrainingCheckpointCanaryState({
+            ...currentState,
+            last_status:
+              'no_api_key'
+          });
+
+          return {
+            status:
+              'no_api_key'
+          };
+        }
+
+        const page =
+          trainingCheckpointCanaryPage();
+
+        const pageIsGym =
+          trainingSnapshotIsGymPage();
+
+        try {
+          const result =
+            await runHappinessCaptureCanary(
+              apiKey
+            );
+
+          const checkpoint =
+            trainingCheckpointCanarySanitizeCheckpoint({
+              id:
+                `${result.requested_at}-${result.received_at}-${reason}`,
+              reason,
+              requested_at:
+                result.requested_at,
+              received_at:
+                result.received_at,
+              source:
+                result.source,
+              page,
+              page_is_gym:
+                pageIsGym,
+              energy:
+                result.energy,
+              happiness:
+                result.happiness
+            });
+
+          if (
+            !checkpoint
+          ) {
+            throw new Error(
+              'The automatic checkpoint response was invalid.'
+            );
+          }
+
+          const currentState =
+            readTrainingCheckpointCanaryState();
+
+          const duplicate =
+            currentState.checkpoints
+              .some(
+                existing =>
+                  existing.id ===
+                    checkpoint.id
+              );
+
+          const checkpoints =
+            duplicate
+              ? currentState.checkpoints
+              : [
+                  ...currentState.checkpoints,
+                  checkpoint
+                ];
+
+          writeTrainingCheckpointCanaryState({
+            ...currentState,
+            last_status:
+              'available',
+            last_error:
+              null,
+            checkpoints
+          });
+
+          return {
+            status:
+              'available',
+            checkpoint
+          };
+        } catch (
+          error
+        ) {
+          const safeError =
+            happinessCaptureCanaryErrorText(
+              error,
+              apiKey
+            );
+
+          const currentState =
+            readTrainingCheckpointCanaryState();
+
+          writeTrainingCheckpointCanaryState({
+            ...currentState,
+            last_status:
+              'failed',
+            last_error:
+              safeError
+          });
+
+          return {
+            status:
+              'failed',
+            reason:
+              safeError
+          };
+        }
+      })();
+
+    trainingCheckpointCanaryInFlight =
+      operation;
+
+    try {
+      return await operation;
+    } finally {
+      if (
+        trainingCheckpointCanaryInFlight ===
+        operation
+      ) {
+        trainingCheckpointCanaryInFlight =
+          null;
+      }
+    }
+  }
+
+  function recordTrainingCheckpointCanaryIntent(
+    event,
+    nowMilliseconds =
+      Date.now()
+  ) {
+    if (
+      !trainingSnapshotIsGymPage()
+    ) {
+      return null;
+    }
+
+    const intent =
+      trainingSnapshotTrainingIntent(
+        event?.target
+      );
+
+    if (
+      !intent
+    ) {
+      return null;
+    }
+
+    const state =
+      readTrainingCheckpointCanaryState();
+
+    const checkpoint =
+      trainingCheckpointCanaryLatestBeforeTap(
+        state.checkpoints,
+        nowMilliseconds
+      );
+
+    const record =
+      trainingCheckpointCanarySanitizeIntent({
+        id:
+          `${nowMilliseconds}-${intent.stat}-${String(Math.random()).slice(2, 10)}`,
+        tapped_at:
+          nowMilliseconds,
+        stat:
+          intent.stat,
+        trains:
+          intent.trains,
+        gym:
+          intent.gym,
+        checkpoint
+      });
+
+    if (
+      !record
+    ) {
+      return null;
+    }
+
+    writeTrainingCheckpointCanaryState({
+      ...state,
+      train_intents: [
+        ...state.train_intents,
+        record
+      ]
+    });
+
+    return record;
+  }
+
+  function trainingCheckpointCanaryFormatAge(
+    milliseconds
+  ) {
+    const safe =
+      Math.max(
+        0,
+        Number(
+          milliseconds
+        ) ||
+        0
+      );
+
+    if (
+      safe < 1000
+    ) {
+      return `${Math.round(safe)} ms`;
+    }
+
+    return `${(safe / 1000).toFixed(1)}s`;
+  }
+
+  function trainingCheckpointCanaryStatusText(
+    state =
+      readTrainingCheckpointCanaryState(),
+    nowMilliseconds =
+      Date.now()
+  ) {
+    const safe =
+      trainingCheckpointCanarySanitizeState(
+        state,
+        nowMilliseconds
+      );
+
+    const latest =
+      safe.checkpoints[
+        safe.checkpoints.length -
+          1
+      ];
+
+    const intent =
+      safe.train_intents[
+        safe.train_intents.length -
+          1
+      ];
+
+    const lines =
+      [
+        'Capture engine: Ready — visible Torn pages only; routine limit 1 request / 30s.'
+      ];
+
+    if (
+      latest
+    ) {
+      lines.push(
+        `Latest checkpoint: Happiness ${latest.happiness.current.toLocaleString()} / ${latest.happiness.maximum.toLocaleString()} · Energy ${latest.energy.current.toLocaleString()} / ${latest.energy.maximum.toLocaleString()}`,
+        `Received: ${new Date(latest.received_at).toLocaleString()} · ${trainingCheckpointCanaryFormatAge(nowMilliseconds - latest.received_at)} ago`,
+        `Page: ${latest.page} · Reason: ${latest.reason.replace(/_/g, ' ')}`
+      );
+    } else if (
+      safe.last_status ===
+        'no_api_key'
+    ) {
+      lines.push(
+        'Latest checkpoint: Not available — save a Torn API key in Settings first.'
+      );
+    } else if (
+      safe.last_status ===
+        'failed'
+    ) {
+      lines.push(
+        `Latest checkpoint: Failed safely — ${safe.last_error || 'unknown error'}`
+      );
+    } else {
+      lines.push(
+        'Latest checkpoint: Waiting for the first eligible capture.'
+      );
+    }
+
+    if (
+      intent
+    ) {
+      lines.push(
+        intent.checkpoint_status ===
+          'completed_before_tap'
+          ? `Last train tap: Checkpoint completed ${trainingCheckpointCanaryFormatAge(intent.checkpoint_age_ms)} before the tap.`
+          : 'Last train tap: No qualifying checkpoint completed before the tap.'
+      );
+    } else {
+      lines.push(
+        'Last train tap: None recorded by this canary.'
+      );
+    }
+
+    lines.push(
+      'Stage: Diagnostic evidence only — not attached to training analytics.'
+    );
+
+    return lines.join(
+      '\n'
+    );
+  }
+
+  function installTrainingCheckpointCanary() {
+    if (
+      trainingCheckpointCanaryInstalled ||
+      typeof document ===
+        'undefined' ||
+      !document.addEventListener
+    ) {
+      return false;
+    }
+
+    writeTrainingCheckpointCanaryState({
+      ...readTrainingCheckpointCanaryState(),
+      installed_at:
+        Date.now()
+    });
+
+    document.addEventListener(
+      'click',
+      event => {
+        recordTrainingCheckpointCanaryIntent(
+          event
+        );
+
+        if (
+          trainingSnapshotIsGymNavigation(
+            event?.target
+          ) &&
+          typeof setTimeout ===
+            'function'
+        ) {
+          setTimeout(
+            () => {
+              trainingCheckpointCanaryLastPageWasGym =
+                false;
+
+              if (
+                trainingSnapshotIsGymPage()
+              ) {
+                trainingCheckpointCanaryLastPageWasGym =
+                  true;
+
+                void captureTrainingCheckpointCanary(
+                  'gym_entry',
+                  true
+                );
+              }
+            },
+            250
+          );
+        }
+      },
+      true
+    );
+
+    const tick =
+      reason => {
+        if (
+          !trainingCheckpointCanaryDocumentActive()
+        ) {
+          return;
+        }
+
+        const gymPage =
+          trainingSnapshotIsGymPage();
+
+        if (
+          gymPage &&
+          !trainingCheckpointCanaryLastPageWasGym
+        ) {
+          trainingCheckpointCanaryLastPageWasGym =
+            true;
+
+          void captureTrainingCheckpointCanary(
+            'gym_entry',
+            true
+          );
+
+          return;
+        }
+
+        trainingCheckpointCanaryLastPageWasGym =
+          gymPage;
+
+        void captureTrainingCheckpointCanary(
+          reason,
+          false
+        );
+      };
+
+    document.addEventListener(
+      'visibilitychange',
+      () => {
+        if (
+          trainingCheckpointCanaryDocumentActive()
+        ) {
+          tick(
+            'visible'
+          );
+        }
+      },
+      { passive: true }
+    );
+
+    if (
+      typeof window !==
+        'undefined'
+    ) {
+      window.addEventListener(
+        'pageshow',
+        () => {
+          tick(
+            'pageshow'
+          );
+        },
+        { passive: true }
+      );
+
+      window.addEventListener(
+        'popstate',
+        () => {
+          trainingCheckpointCanaryLastPageWasGym =
+            false;
+
+          tick(
+            'routine'
+          );
+        },
+        { passive: true }
+      );
+
+      window.addEventListener(
+        'hashchange',
+        () => {
+          trainingCheckpointCanaryLastPageWasGym =
+            false;
+
+          tick(
+            'routine'
+          );
+        },
+        { passive: true }
+      );
+    }
+
+    trainingCheckpointCanaryInstalled =
+      true;
+
+    trainingCheckpointCanaryLastPageWasGym =
+      trainingSnapshotIsGymPage();
+
+    void captureTrainingCheckpointCanary(
+      trainingCheckpointCanaryLastPageWasGym
+        ? 'gym_entry'
+        : 'initial',
+      trainingCheckpointCanaryLastPageWasGym
+    );
+
+    if (
+      trainingCheckpointCanaryTimer ===
+        null &&
+      typeof setInterval ===
+        'function'
+    ) {
+      trainingCheckpointCanaryTimer =
+        setInterval(
+          () => {
+            tick(
+              'routine'
+            );
+          },
+          TRAINING_CHECKPOINT_TICK_INTERVAL_MS
+        );
+    }
+
+    return true;
+  }
+  // ============================================================
   // LIVE RESOURCE FAILURE DIAGNOSTICS
   // ============================================================
 
@@ -26005,7 +27026,9 @@
         opacity: .75;
       }
 
-      #${MODAL_ID} .ta-training-snapshot-check-output {
+      #${MODAL_ID} .ta-training-snapshot-check-output,
+      #${MODAL_ID} .ta-happiness-capture-output,
+      #${MODAL_ID} .ta-training-checkpoint-canary-output {
         margin-top: 8px;
         padding: 9px;
         border: 1px solid #3b4650;
@@ -28143,6 +29166,33 @@
               </div>
             </div>
 
+            <div class="ta-settings-group">
+              <b>
+                Automatic checkpoint canary
+              </b>
+
+              <div class="small">
+                Capture-only diagnostic. It records bounded, timestamped
+                Energy and Happiness evidence but does not attach anything
+                to training analytics yet.
+              </div>
+
+              <button
+                id="ta-training-checkpoint-refresh"
+                type="button"
+              >
+                Refresh Checkpoint Status
+              </button>
+
+              <div
+                id="ta-training-checkpoint-output"
+                class="small ta-training-checkpoint-canary-output"
+                aria-live="polite"
+              >
+                Loading checkpoint status…
+              </div>
+            </div>
+
             <div
               id="ta-main-actions"
               class="actions ta-settings-group"
@@ -28347,6 +29397,12 @@
     const happinessCaptureOutput =
       $('#ta-happiness-capture-output');
 
+    const trainingCheckpointRefreshButton =
+      $('#ta-training-checkpoint-refresh');
+
+    const trainingCheckpointOutput =
+      $('#ta-training-checkpoint-output');
+
     function refreshTrainingSnapshotCapabilityCheck() {
       if (
         !trainingSnapshotCheckOutput
@@ -28435,6 +29491,35 @@
         }
       );
     }
+
+    function refreshTrainingCheckpointCanaryStatus() {
+      if (
+        !trainingCheckpointOutput
+      ) {
+        return null;
+      }
+
+      const state =
+        readTrainingCheckpointCanaryState();
+
+      trainingCheckpointOutput.textContent =
+        trainingCheckpointCanaryStatusText(
+          state
+        );
+
+      return state;
+    }
+
+    if (
+      trainingCheckpointRefreshButton
+    ) {
+      trainingCheckpointRefreshButton.addEventListener(
+        'click',
+        refreshTrainingCheckpointCanaryStatus
+      );
+    }
+
+    refreshTrainingCheckpointCanaryStatus();
 
     for (
       const button
@@ -30325,6 +31410,22 @@
       // Snapshot capture is optional and must never interfere with Torn.
       console.warn(
         '[Torn Analytics] Passive training snapshots could not be enabled:',
+        error
+      );
+    }
+
+    try {
+      installTrainingCheckpointCanary();
+    } catch (error) {
+      launcherStartupFailure(
+        'training_checkpoint_canary_failed',
+        error
+      );
+
+      // The checkpoint canary is optional and cannot block the launcher,
+      // training, or existing analytics.
+      console.warn(
+        '[Torn Analytics] Automatic checkpoint canary could not be enabled:',
         error
       );
     }
