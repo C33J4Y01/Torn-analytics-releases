@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.26
+// @version      2.18.27
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.26';
+  const VERSION = '2.18.27';
 
-  // v2.18.26 passively captures exact pre-training Energy and Happiness when available.
+  // v2.18.27 makes passive training snapshots reliable during fast Gym visits.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13488,6 +13488,9 @@
   const TRAINING_SNAPSHOT_STORAGE_KEY =
     'tornAnalyticsTrainingSnapshotsV1';
 
+  const TRAINING_LIVE_BARS_STORAGE_KEY =
+    'tornAnalyticsRecentLiveBarsV1';
+
   const TRAINING_SNAPSHOT_LIMIT =
     240;
 
@@ -13495,10 +13498,22 @@
     180 * 24 * 60 * 60;
 
   const TRAINING_SNAPSHOT_MATCH_WINDOW_SECONDS =
-    30;
+    60;
+
+  const TRAINING_LIVE_BARS_MAX_AGE_SECONDS =
+    60;
+
+  const TRAINING_LIVE_BARS_REFRESH_INTERVAL_MS =
+    15 * 1000;
+
+  const TRAINING_HAPPINESS_WINDOW_SECONDS =
+    15 * 60;
 
   let passiveTrainingSnapshotCaptureInstalled =
     false;
+
+  let passiveTrainingLiveBarsTimer =
+    null;
 
   function trainingSnapshotFiniteNumber(
     value
@@ -13711,7 +13726,7 @@
   ) {
     const button =
       target?.closest?.(
-        'button, [role="button"]'
+        'button, [role="button"], input[type="button"], input[type="submit"], a[href], [data-action]'
       );
 
     if (
@@ -13849,6 +13864,24 @@
       );
   }
 
+  function trainingSnapshotIsGymNavigation(
+    target
+  ) {
+    const href =
+      target?.closest?.(
+        'a[href]'
+      )?.getAttribute?.(
+        'href'
+      );
+
+    return /(?:^|\/)gym\.php(?:[?#]|$)/i.test(
+      String(
+        href ||
+        ''
+      )
+    );
+  }
+
   function trainingSnapshotSanitize(
     snapshot
   ) {
@@ -13887,9 +13920,13 @@
         snapshot?.happiness_maximum
       );
 
-    const exact =
-      rawStatus ===
-        'exact_live_snapshot' &&
+    const available =
+      [
+        'exact_live_snapshot',
+        'recent_live_snapshot'
+      ].includes(
+        rawStatus
+      ) &&
       energy !== null &&
       happiness !== null &&
       happinessMaximum !== null &&
@@ -13906,21 +13943,32 @@
       captured_at:
         capturedAt,
       status:
-        exact
-          ? 'exact_live_snapshot'
+        available
+          ? rawStatus
           : 'unavailable',
       energy_before:
-        exact
+        available
           ? energy
           : null,
       happiness_before:
-        exact
+        available
           ? happiness
           : null,
       happiness_maximum:
-        exact
+        available
           ? happinessMaximum
           : null,
+      observed_at:
+        available &&
+        Number.isSafeInteger(
+          Number(
+            snapshot?.observed_at
+          )
+        )
+          ? Number(
+              snapshot.observed_at
+            )
+          : capturedAt,
       stat:
         [
           'strength',
@@ -13941,7 +13989,7 @@
           snapshot?.gym
         ),
       reason:
-        exact
+        available
           ? null
           : String(
               snapshot?.reason ||
@@ -13960,6 +14008,208 @@
     } catch {
       return null;
     }
+  }
+
+  function trainingSnapshotHappinessWindow(
+    timestamp
+  ) {
+    const normalized =
+      Number(
+        timestamp
+      );
+
+    return Number.isSafeInteger(
+      normalized
+    ) &&
+    normalized > 0
+      ? Math.floor(
+          normalized /
+          TRAINING_HAPPINESS_WINDOW_SECONDS
+        )
+      : null;
+  }
+
+  function trainingSnapshotSanitizeLiveBars(
+    snapshot
+  ) {
+    const capturedAt =
+      Number(
+        snapshot?.captured_at
+      );
+    const energy =
+      trainingSnapshotFiniteNumber(
+        snapshot?.energy
+      );
+    const happiness =
+      trainingSnapshotFiniteNumber(
+        snapshot?.happiness
+      );
+    const happinessMaximum =
+      trainingSnapshotFiniteNumber(
+        snapshot?.happiness_maximum
+      );
+
+    if (
+      !Number.isSafeInteger(
+        capturedAt
+      ) ||
+      capturedAt <= 0 ||
+      energy === null ||
+      happiness === null ||
+      happinessMaximum === null ||
+      happinessMaximum <= 0 ||
+      happiness >
+        happinessMaximum * 100
+    ) {
+      return null;
+    }
+
+    return {
+      captured_at:
+        capturedAt,
+      energy,
+      energy_maximum:
+        trainingSnapshotFiniteNumber(
+          snapshot?.energy_maximum
+        ),
+      happiness,
+      happiness_maximum:
+        happinessMaximum
+    };
+  }
+
+  function trainingSnapshotReadVisibleLiveBars(
+    documentValue =
+      typeof document !== 'undefined'
+        ? document
+        : null,
+    nowMilliseconds =
+      Date.now()
+  ) {
+    const energy =
+      trainingSnapshotReadBar(
+        'barEnergy',
+        documentValue
+      );
+    const happiness =
+      trainingSnapshotReadBar(
+        'barHappy',
+        documentValue
+      );
+
+    return trainingSnapshotSanitizeLiveBars({
+      captured_at:
+        Math.floor(
+          Number(
+            nowMilliseconds
+          ) /
+          1000
+        ),
+      energy:
+        energy.current,
+      energy_maximum:
+        energy.maximum,
+      happiness:
+        happiness.current,
+      happiness_maximum:
+        happiness.maximum
+    });
+  }
+
+  function writeTrainingSnapshotLiveBars(
+    snapshot
+  ) {
+    const safe =
+      trainingSnapshotSanitizeLiveBars(
+        snapshot
+      );
+
+    if (
+      !safe
+    ) {
+      return null;
+    }
+
+    try {
+      trainingSnapshotStorage()?.setItem(
+        TRAINING_LIVE_BARS_STORAGE_KEY,
+        JSON.stringify(
+          safe
+        )
+      );
+    } catch {
+      // Live checkpoints are optional and must never interrupt Torn.
+    }
+
+    return safe;
+  }
+
+  function readTrainingSnapshotLiveBars(
+    nowSeconds =
+      Math.floor(
+        Date.now() /
+        1000
+      )
+  ) {
+    try {
+      const safe =
+        trainingSnapshotSanitizeLiveBars(
+          JSON.parse(
+            trainingSnapshotStorage()?.getItem(
+              TRAINING_LIVE_BARS_STORAGE_KEY
+            ) ||
+            'null'
+          )
+        );
+
+      if (
+        !safe
+      ) {
+        return null;
+      }
+
+      const age =
+        Number(
+          nowSeconds
+        ) -
+        safe.captured_at;
+
+      if (
+        age < 0 ||
+        age >
+          TRAINING_LIVE_BARS_MAX_AGE_SECONDS ||
+        trainingSnapshotHappinessWindow(
+          safe.captured_at
+        ) !==
+          trainingSnapshotHappinessWindow(
+            Number(
+              nowSeconds
+            )
+          )
+      ) {
+        return null;
+      }
+
+      return safe;
+    } catch {
+      return null;
+    }
+  }
+
+  function refreshPassiveTrainingLiveBars(
+    documentValue =
+      typeof document !== 'undefined'
+        ? document
+        : null,
+    nowMilliseconds =
+      Date.now()
+  ) {
+    return writeTrainingSnapshotLiveBars(
+      trainingSnapshotReadVisibleLiveBars(
+        documentValue,
+        nowMilliseconds
+      )
+    );
   }
 
   function readTrainingSnapshots(
@@ -14077,7 +14327,16 @@
         ? location
         : null,
     nowMilliseconds =
-      Date.now()
+      Date.now(),
+    recentLiveBars =
+      readTrainingSnapshotLiveBars(
+        Math.floor(
+          Number(
+            nowMilliseconds
+          ) /
+          1000
+        )
+      )
   ) {
     if (
       !trainingSnapshotIsGymPage(
@@ -14098,16 +14357,10 @@
       return null;
     }
 
-    const energy =
-      trainingSnapshotReadBar(
-        'barEnergy',
-        documentValue
-      );
-
-    const happiness =
-      trainingSnapshotReadBar(
-        'barHappy',
-        documentValue
+    const visible =
+      trainingSnapshotReadVisibleLiveBars(
+        documentValue,
+        nowMilliseconds
       );
 
     const capturedAt =
@@ -14121,12 +14374,40 @@
         capturedAt
       ) &&
       capturedAt > 0 &&
-      energy.current !==
-        null &&
-      happiness.current !==
-        null &&
-      happiness.maximum !==
-        null;
+      Boolean(
+        visible
+      );
+
+    const recentCandidate =
+      exact
+        ? null
+        : trainingSnapshotSanitizeLiveBars(
+            recentLiveBars
+          );
+
+    const recentAge =
+      recentCandidate
+        ? capturedAt -
+          recentCandidate.captured_at
+        : null;
+
+    const recent =
+      recentCandidate &&
+      recentAge >= 0 &&
+      recentAge <=
+        TRAINING_LIVE_BARS_MAX_AGE_SECONDS &&
+      trainingSnapshotHappinessWindow(
+        recentCandidate.captured_at
+      ) ===
+        trainingSnapshotHappinessWindow(
+          capturedAt
+        )
+        ? recentCandidate
+        : null;
+
+    const available =
+      visible ||
+      recent;
 
     return trainingSnapshotSanitize({
       id:
@@ -14143,13 +14424,17 @@
       status:
         exact
           ? 'exact_live_snapshot'
+          : recent
+            ? 'recent_live_snapshot'
           : 'unavailable',
       energy_before:
-        energy.current,
+        available?.energy,
       happiness_before:
-        happiness.current,
+        available?.happiness,
       happiness_maximum:
-        happiness.maximum,
+        available?.happiness_maximum,
+      observed_at:
+        available?.captured_at,
       stat:
         intent.stat,
       trains:
@@ -14166,14 +14451,40 @@
   function capturePassiveTrainingSnapshot(
     event
   ) {
+    const currentLiveBars =
+      refreshPassiveTrainingLiveBars();
+
     const snapshot =
       trainingSnapshotBuildCapture(
-        event
+        event,
+        typeof document !==
+          'undefined'
+          ? document
+          : null,
+        typeof location !==
+          'undefined'
+          ? location
+          : null,
+        Date.now(),
+        currentLiveBars ||
+          readTrainingSnapshotLiveBars()
       );
 
     if (
       !snapshot
     ) {
+      if (
+        trainingSnapshotIsGymNavigation(
+          event?.target
+        )
+      ) {
+        return capturePassiveTrainingFallbackCheckpoint(
+          Date.now(),
+          currentLiveBars ||
+            readTrainingSnapshotLiveBars()
+        );
+      }
+
       return null;
     }
 
@@ -14188,6 +14499,132 @@
     );
 
     return snapshot;
+  }
+
+  function trainingSnapshotBuildFallbackCheckpoint(
+    nowMilliseconds =
+      Date.now(),
+    liveBars =
+      readTrainingSnapshotLiveBars(
+        Math.floor(
+          Number(
+            nowMilliseconds
+          ) /
+          1000
+        )
+      )
+  ) {
+    const safeBars =
+      trainingSnapshotSanitizeLiveBars(
+        liveBars
+      );
+    const capturedAt =
+      Math.floor(
+        Number(
+          nowMilliseconds
+        ) /
+        1000
+      );
+
+    if (
+      !safeBars ||
+      !Number.isSafeInteger(
+        capturedAt
+      ) ||
+      capturedAt <= 0 ||
+      capturedAt -
+        safeBars.captured_at < 0 ||
+      capturedAt -
+        safeBars.captured_at >
+          TRAINING_LIVE_BARS_MAX_AGE_SECONDS ||
+      trainingSnapshotHappinessWindow(
+        safeBars.captured_at
+      ) !==
+        trainingSnapshotHappinessWindow(
+          capturedAt
+        )
+    ) {
+      return null;
+    }
+
+    return trainingSnapshotSanitize({
+      id:
+        'checkpoint-' +
+        capturedAt +
+        '-' +
+        String(
+          Math.random()
+        )
+          .slice(2, 12),
+      captured_at:
+        capturedAt,
+      observed_at:
+        safeBars.captured_at,
+      status:
+        'recent_live_snapshot',
+      energy_before:
+        safeBars.energy,
+      happiness_before:
+        safeBars.happiness,
+      happiness_maximum:
+        safeBars.happiness_maximum
+    });
+  }
+
+  function capturePassiveTrainingFallbackCheckpoint(
+    nowMilliseconds =
+      Date.now(),
+    liveBars =
+      refreshPassiveTrainingLiveBars() ||
+      readTrainingSnapshotLiveBars()
+  ) {
+    const checkpoint =
+      trainingSnapshotBuildFallbackCheckpoint(
+        nowMilliseconds,
+        liveBars
+      );
+
+    if (
+      !checkpoint
+    ) {
+      return null;
+    }
+
+    const existing =
+      readTrainingSnapshots(
+        checkpoint.captured_at
+      );
+
+    const duplicate =
+      existing.find(
+        snapshot =>
+          snapshot.status ===
+            'recent_live_snapshot' &&
+          Math.abs(
+            snapshot.captured_at -
+            checkpoint.captured_at
+          ) <= 2 &&
+          snapshot.energy_before ===
+            checkpoint.energy_before &&
+          snapshot.happiness_before ===
+            checkpoint.happiness_before
+      );
+
+    if (
+      duplicate
+    ) {
+      return duplicate;
+    }
+
+    writeTrainingSnapshots(
+      [
+        ...existing,
+        checkpoint
+      ],
+      checkpoint.captured_at
+    );
+
+    return checkpoint;
   }
 
   function installPassiveTrainingSnapshotCapture() {
@@ -14205,6 +14642,58 @@
       capturePassiveTrainingSnapshot,
       true
     );
+
+    const refresh =
+      () => {
+        if (
+          typeof document !==
+            'undefined' &&
+          document.visibilityState !==
+            'hidden'
+        ) {
+          refreshPassiveTrainingLiveBars();
+        }
+      };
+
+    document.addEventListener(
+      'visibilitychange',
+      refresh,
+      { passive: true }
+    );
+
+    if (
+      typeof window !==
+        'undefined'
+    ) {
+      window.addEventListener(
+        'pageshow',
+        refresh,
+        { passive: true }
+      );
+
+      window.addEventListener(
+        'pagehide',
+        () => {
+          capturePassiveTrainingFallbackCheckpoint();
+        },
+        { passive: true }
+      );
+    }
+
+    refresh();
+
+    if (
+      passiveTrainingLiveBarsTimer ===
+        null &&
+      typeof setInterval ===
+        'function'
+    ) {
+      passiveTrainingLiveBarsTimer =
+        setInterval(
+          refresh,
+          TRAINING_LIVE_BARS_REFRESH_INTERVAL_MS
+        );
+    }
 
     passiveTrainingSnapshotCaptureInstalled =
       true;
@@ -14230,8 +14719,12 @@
         )
         .filter(
           snapshot =>
-            snapshot?.status ===
-              'exact_live_snapshot'
+            [
+              'exact_live_snapshot',
+              'recent_live_snapshot'
+            ].includes(
+              snapshot?.status
+            )
         );
 
     const used =
@@ -14334,6 +14827,18 @@
                 actionTimestamp -
                 right.captured_at
               ) ||
+              (
+                left.status ===
+                  'exact_live_snapshot'
+                  ? 0
+                  : 1
+              ) -
+              (
+                right.status ===
+                  'exact_live_snapshot'
+                  ? 0
+                  : 1
+              ) ||
               right.captured_at -
                 left.captured_at
           );
@@ -14358,9 +14863,11 @@
 
       action.live_snapshot = {
         status:
-          'exact_live_snapshot',
+          match.status,
         captured_at:
           match.captured_at,
+        observed_at:
+          match.observed_at,
         seconds_before_log:
           Math.max(
             0,
@@ -18364,9 +18871,18 @@
   function statGrowthSessionLiveSnapshot(
     snapshot
   ) {
-    const exact =
-      snapshot?.status ===
-        'exact_live_snapshot' &&
+    const status =
+      String(
+        snapshot?.status ||
+        ''
+      );
+    const available =
+      [
+        'exact_live_snapshot',
+        'recent_live_snapshot'
+      ].includes(
+        status
+      ) &&
       Number.isFinite(
         Number(
           snapshot?.energy_before
@@ -18384,7 +18900,7 @@
       );
 
     if (
-      !exact
+      !available
     ) {
       return {
         status:
@@ -18400,11 +18916,16 @@
       };
     }
 
+    const exact =
+      status ===
+        'exact_live_snapshot';
+
     return {
-      status:
-        'exact_live_snapshot',
+      status,
       confidence:
-        'Exact live snapshot',
+        exact
+          ? 'Exact live snapshot'
+          : 'Recent live snapshot',
       energy:
         Number(
           snapshot.energy_before
@@ -18419,7 +18940,9 @@
           snapshot.happiness_maximum
         ).toLocaleString(),
       note:
-        'Live Happiness and Energy were captured immediately before this training action.'
+        exact
+          ? 'Live Happiness and Energy were captured immediately before this training action.'
+          : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
     };
   }
 
@@ -18454,9 +18977,18 @@
       (() => {
         const snapshot =
           action?.live_snapshot;
-        const exact =
-          snapshot?.status ===
-            'exact_live_snapshot' &&
+        const status =
+          String(
+            snapshot?.status ||
+            ''
+          );
+        const available =
+          [
+            'exact_live_snapshot',
+            'recent_live_snapshot'
+          ].includes(
+            status
+          ) &&
           Number.isFinite(
             Number(
               snapshot?.energy_before
@@ -18474,7 +19006,7 @@
           );
 
         if (
-          !exact
+          !available
         ) {
           return {
             status:
@@ -18490,11 +19022,16 @@
           };
         }
 
+        const exact =
+          status ===
+            'exact_live_snapshot';
+
         return {
-          status:
-            'exact_live_snapshot',
+          status,
           confidence:
-            'Exact live snapshot',
+            exact
+              ? 'Exact live snapshot'
+              : 'Recent live snapshot',
           energy:
             Number(
               snapshot.energy_before
@@ -18509,7 +19046,9 @@
               snapshot.happiness_maximum
             ).toLocaleString(),
           note:
-            'Live Happiness and Energy were captured immediately before this training action.'
+            exact
+              ? 'Live Happiness and Energy were captured immediately before this training action.'
+              : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
         };
       })();
     const rawEnergySourceStatus =
@@ -28907,6 +29446,18 @@
         );
       }
     }
+  }
+
+  // Install the training listener before the heavier launcher initialization.
+  // Cross-page live checkpoints cover Gym visits that complete before this
+  // document-idle userscript is ready.
+  try {
+    installPassiveTrainingSnapshotCapture();
+  } catch (error) {
+    console.warn(
+      '[Torn Analytics] Early passive training capture could not be enabled:',
+      error
+    );
   }
 
   initializeWhenDocumentReady();
