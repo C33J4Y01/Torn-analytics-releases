@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.31
+// @version      2.18.32
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.31';
+  const VERSION = '2.18.32';
 
-  // v2.18.31 hardens launcher startup, diagnostics, and viewport recovery.
+  // v2.18.32 adds an isolated, manual Happiness API capture canary.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -6082,6 +6082,86 @@
         });
       }
     );
+  }
+
+  async function apiFetchJsonOnce(
+    url,
+    apiKey,
+    tracker = null
+  ) {
+    const safeUrl =
+      validateTornApiUrl(
+        url
+      );
+
+    const normalizedKey =
+      String(
+        apiKey ||
+        ''
+      ).trim();
+
+    if (
+      !normalizedKey
+    ) {
+      throw new Error(
+        'A Torn API key is required.'
+      );
+    }
+
+    await waitForRequestSlot();
+
+    tracker?.incrementRequest();
+
+    const response =
+      await secureUserscriptRequest(
+        safeUrl,
+        normalizedKey
+      );
+
+    const status =
+      Number(
+        response?.status ||
+        0
+      );
+
+    if (
+      status &&
+      (
+        status < 200 ||
+        status >= 300
+      )
+    ) {
+      throw new Error(
+        `HTTP ${status} ${response?.statusText || ''}`.trim()
+      );
+    }
+
+    const raw =
+      response?.responseText ??
+      response?.response ??
+      '';
+
+    const json =
+      typeof raw === 'string'
+        ? JSON.parse(
+            raw
+          )
+        : raw;
+
+    const apiError =
+      extractApiError(
+        json
+      );
+
+    if (
+      apiError
+    ) {
+      throw new Error(
+        apiError
+      );
+    }
+
+    return json;
   }
 
   async function apiFetchJson(
@@ -22978,6 +23058,9 @@
   // BEGINNER-FIRST ENERGY / NERVE / HAPPINESS DASHBOARD
   // ============================================================
 
+  let happinessCaptureCanaryPromise =
+    null;
+
   function escapeResourceDashboardHtml(
     value
   ) {
@@ -23127,6 +23210,146 @@
       json,
       Date.now()
     );
+  }
+
+  function happinessCaptureCanaryErrorText(
+    error,
+    apiKey = ''
+  ) {
+    const normalizedKey =
+      String(
+        apiKey ||
+        ''
+      ).trim();
+
+    let message =
+      error &&
+      typeof error === 'object' &&
+      typeof error.message === 'string'
+        ? error.message
+        : String(
+            error ||
+            'The Happiness API check failed.'
+          );
+
+    if (
+      normalizedKey
+    ) {
+      message =
+        message
+          .split(
+            normalizedKey
+          )
+          .join(
+            '[redacted]'
+          );
+    }
+
+    return message
+      .replace(
+        /[\r\n\t]+/g,
+        ' '
+      )
+      .replace(
+        /ApiKey\s+[^\s<>&]+/gi,
+        'ApiKey [redacted]'
+      )
+      .replace(
+        /\b(authorization|api[_\s-]?key)\s*[:=]\s*[^\s,;]+/gi,
+        '$1=[redacted]'
+      )
+      .trim()
+      .slice(
+        0,
+        200
+      ) ||
+      'The Happiness API check failed safely.';
+  }
+
+  async function runHappinessCaptureCanary(
+    apiKey
+  ) {
+    const normalizedKey =
+      String(
+        apiKey ||
+        ''
+      ).trim();
+
+    if (
+      !normalizedKey
+    ) {
+      throw new Error(
+        'Save a Torn API key in Settings first.'
+      );
+    }
+
+    if (
+      happinessCaptureCanaryPromise
+    ) {
+      return await happinessCaptureCanaryPromise;
+    }
+
+    const operation =
+      (async () => {
+        const requestedAt =
+          Date.now();
+
+        const json =
+          await apiFetchJsonOnce(
+            `${API_BASE}/user/bars`,
+            normalizedKey,
+            null
+          );
+
+        const receivedAt =
+          Date.now();
+
+        const snapshot =
+          normalizeResourceBarsResponse(
+            json,
+            receivedAt
+          );
+
+        return {
+          status: 'available',
+          source: 'Official Torn API v2 /user/bars',
+          requested_at: requestedAt,
+          received_at: receivedAt,
+          latency_ms:
+            Math.max(
+              0,
+              receivedAt -
+                requestedAt
+            ),
+          energy: {
+            current:
+              snapshot.energy.current,
+            maximum:
+              snapshot.energy.maximum
+          },
+          happiness: {
+            current:
+              snapshot.happiness.current,
+            maximum:
+              snapshot.happiness.maximum
+          }
+        };
+      })();
+
+    happinessCaptureCanaryPromise =
+      operation;
+
+    try {
+      return await operation;
+    } finally {
+      if (
+        happinessCaptureCanaryPromise ===
+        operation
+      ) {
+        happinessCaptureCanaryPromise =
+          null;
+      }
+    }
   }
 
   async function loadResourceBarsSnapshot(
@@ -27893,6 +28116,33 @@
               </div>
             </div>
 
+            <div class="ta-settings-group">
+              <b>
+                Happiness capture canary
+              </b>
+
+              <div class="small">
+                Manual read-only check using one official Torn API bars
+                request. It does not poll, train, spend Energy, use an item,
+                or save the observed bars.
+              </div>
+
+              <button
+                id="ta-happiness-capture-check"
+                type="button"
+              >
+                Check Happiness API Access
+              </button>
+
+              <div
+                id="ta-happiness-capture-output"
+                class="small ta-happiness-capture-output"
+                aria-live="polite"
+              >
+                Not checked in this modal session.
+              </div>
+            </div>
+
             <div
               id="ta-main-actions"
               class="actions ta-settings-group"
@@ -28091,6 +28341,12 @@
     const trainingSnapshotCheckOutput =
       $('#ta-training-snapshot-check-output');
 
+    const happinessCaptureCheckButton =
+      $('#ta-happiness-capture-check');
+
+    const happinessCaptureOutput =
+      $('#ta-happiness-capture-output');
+
     function refreshTrainingSnapshotCapabilityCheck() {
       if (
         !trainingSnapshotCheckOutput
@@ -28119,6 +28375,66 @@
     }
 
     refreshTrainingSnapshotCapabilityCheck();
+
+    if (
+      happinessCaptureCheckButton
+    ) {
+      happinessCaptureCheckButton.addEventListener(
+        'click',
+        async () => {
+          if (
+            !happinessCaptureOutput ||
+            happinessCaptureCheckButton.disabled
+          ) {
+            return;
+          }
+
+          happinessCaptureCheckButton.disabled =
+            true;
+
+          happinessCaptureOutput.textContent =
+            'Checking the official Torn API once…';
+
+          let apiKey =
+            '';
+
+          try {
+            apiKey =
+              await getOptionalApiKey();
+
+            if (
+              !apiKey
+            ) {
+              happinessCaptureOutput.textContent =
+                'Not run — save a Torn API key in Settings first.';
+
+              return;
+            }
+
+            const result =
+              await runHappinessCaptureCanary(
+                apiKey
+              );
+
+            happinessCaptureOutput.textContent =
+              `Happiness: ${result.happiness.current.toLocaleString()} / ${result.happiness.maximum.toLocaleString()}\n` +
+              `Energy: ${result.energy.current.toLocaleString()} / ${result.energy.maximum.toLocaleString()}\n` +
+              `Source: ${result.source}\n` +
+              `Requested: ${new Date(result.requested_at).toLocaleString()}\n` +
+              `Received: ${new Date(result.received_at).toLocaleString()}\n` +
+              `Response time: ${result.latency_ms.toLocaleString()} ms`;
+          } catch (
+            error
+          ) {
+            happinessCaptureOutput.textContent =
+              `Capture failed safely — ${happinessCaptureCanaryErrorText(error, apiKey)}`;
+          } finally {
+            happinessCaptureCheckButton.disabled =
+              false;
+          }
+        }
+      );
+    }
 
     for (
       const button
