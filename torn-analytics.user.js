@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.24
+// @version      2.18.25
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.24';
+  const VERSION = '2.18.25';
 
-  // v2.18.24 unifies Natural-E and Xanax guidance into one Efficient training plan.
+  // v2.18.25 corrects Gym Trainer Xanax and Happy Jump sequencing from 0E.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -15412,7 +15412,7 @@
     };
   }
   // ============================================================
-  // TRAINING READINESS
+  // GYM TRAINER
   // ============================================================
 
   function normalizeTrainingCooldownsResponse(
@@ -15606,38 +15606,117 @@
         };
       }
 
-      if (energy < 750) {
+      const stackMilestones = {
+        250: 2,
+        500: 3,
+        750: 4
+      };
+      const nextXanaxNumber = stackMilestones[energy] || null;
+
+      if (energy === 0) {
+        if (drugState === 'unavailable') {
+          return {
+            plan,
+            title: 'Drug cooldown unavailable',
+            detail: 'Refresh live cooldowns before starting a four-Xanax stack.',
+            tone: 'info'
+          };
+        }
+
+        if (drugState === 'waiting') {
+          return {
+            plan,
+            title: 'Wait for drug cooldown',
+            detail: 'Start the four-Xanax stack from 0E when the cooldown clears.',
+            tone: 'wait'
+          };
+        }
+
         return {
           plan,
-          title: 'Build your Energy stack',
-          detail: 'Hold Happiness boosters until your planned stack is ready.',
-          tone: 'wait'
+          title: 'Start your four-Xanax stack',
+          detail: 'Take Xanax 1 of 4. Wait for each drug cooldown before taking the next.',
+          tone: 'ready'
         };
       }
 
-      if (boosterState === 'unavailable') {
+      if (nextXanaxNumber !== null) {
+        if (drugState === 'unavailable') {
+          return {
+            plan,
+            title: 'Drug cooldown unavailable',
+            detail: `Your stack is at ${energy}E. Refresh live cooldowns before the next Xanax.`,
+            tone: 'info'
+          };
+        }
+
+        if (drugState === 'waiting') {
+          return {
+            plan,
+            title: 'Wait for drug cooldown',
+            detail: `Your stack is at ${energy}E. Take Xanax ${nextXanaxNumber} of 4 when it clears.`,
+            tone: 'wait'
+          };
+        }
+
         return {
           plan,
-          title: 'Booster cooldown unavailable',
-          detail: 'Refresh live cooldowns before planning a Happy Jump.',
-          tone: 'info'
+          title: `Take Xanax ${nextXanaxNumber} of 4`,
+          detail: `Your stack is at ${energy}E. Then wait for the next drug cooldown.`,
+          tone: 'ready'
         };
       }
 
-      if (boosterState === 'waiting') {
+      if (energy >= 1000) {
+        if (drugState === 'unavailable') {
+          return {
+            plan,
+            title: 'Stack complete — cooldown unavailable',
+            detail: 'Refresh live cooldowns before planning Ecstasy and Happiness boosters.',
+            tone: 'info'
+          };
+        }
+
+        if (drugState === 'waiting') {
+          return {
+            plan,
+            title: 'Stack complete — wait for final drug cooldown',
+            detail: 'Keep booster cooldown clear. When both are ready, begin just after a TCT Happiness reset.',
+            tone: 'wait'
+          };
+        }
+
+        if (boosterState === 'unavailable') {
+          return {
+            plan,
+            title: 'Booster cooldown unavailable',
+            detail: 'Refresh live cooldowns before using Happiness boosters.',
+            tone: 'info'
+          };
+        }
+
+        if (boosterState === 'waiting') {
+          return {
+            plan,
+            title: 'Wait for booster cooldown',
+            detail: 'Your Energy stack is complete. Do not begin the Happiness boost until boosters are ready.',
+            tone: 'wait'
+          };
+        }
+
         return {
           plan,
-          title: 'Wait for booster cooldown',
-          detail: 'Happiness boosters are not ready yet.',
-          tone: 'wait'
+          title: 'Stack complete — prepare your Happy Jump',
+          detail: 'Just after a TCT Happiness reset: use your Happiness boosters, take Ecstasy, then train before the next reset.',
+          tone: 'ready'
         };
       }
 
       return {
         plan,
-        title: 'Prepare your Happiness boost',
-        detail: 'Use Happiness boosters shortly after the next TCT quarter-hour reset, then train.',
-        tone: 'ready'
+        title: 'Train to 0E before starting',
+        detail: 'A clean 0E start lets four Xanax provide the full 1,000E stack without wasting Energy.',
+        tone: 'wait'
       };
     }
 
@@ -15651,11 +15730,11 @@
     }
 
     if (drugState === 'ready') {
-      if (energy > 750) {
+      if (energy > 0) {
         return {
           plan,
-          title: 'Train some Energy first',
-          detail: 'Make room so a full 250E Xanax gain is not wasted.',
+          title: 'Train to 0E first',
+          detail: 'Starting at 0E avoids risking saved Energy to an overdose and prevents wasting any natural Energy.',
           tone: 'wait'
         };
       }
@@ -15847,6 +15926,27 @@
     const energy = bars?.status === 'available'
       ? Number(bars?.energy?.current)
       : null;
+    const energyMaximum = bars?.status === 'available'
+      ? Number(bars?.energy?.maximum)
+      : null;
+    const energyIncrement = bars?.status === 'available'
+      ? Number(bars?.energy?.increment)
+      : null;
+    const energyInterval = bars?.status === 'available'
+      ? Number(bars?.energy?.interval)
+      : null;
+    const energyFullTime = bars?.status === 'available'
+      ? Number(bars?.energy?.full_time)
+      : null;
+    const barsFetchedAt = bars?.status === 'available'
+      ? Number(bars?.fetched_at)
+      : null;
+    const energyFullAt =
+      Number.isFinite(barsFetchedAt) &&
+      Number.isFinite(energyFullTime) &&
+      energyFullTime >= 0
+        ? barsFetchedAt + energyFullTime * 1000
+        : null;
     const happiness = bars?.status === 'available'
       ? Number(bars?.happiness?.current)
       : null;
@@ -15865,6 +15965,18 @@
       gym_id: gymId,
       last_training_timestamp: latest?.timestamp || null,
       energy: Number.isFinite(energy) ? energy : null,
+      energy_maximum: Number.isFinite(energyMaximum)
+        ? energyMaximum
+        : null,
+      energy_increment: Number.isFinite(energyIncrement)
+        ? energyIncrement
+        : null,
+      energy_interval: Number.isFinite(energyInterval)
+        ? energyInterval
+        : null,
+      energy_full_at: Number.isFinite(energyFullAt)
+        ? energyFullAt
+        : null,
       happiness: Number.isFinite(happiness) ? happiness : null,
       happiness_maximum: Number.isFinite(happinessMaximum)
         ? happinessMaximum
@@ -16120,10 +16232,56 @@
       `;
     };
 
+    const energySnapshotAvailable =
+      readiness.energy !== null &&
+      readiness.energy !== undefined &&
+      Number.isFinite(Number(readiness.energy));
+    const energyRefillAvailable =
+      energySnapshotAvailable &&
+      Number.isFinite(Number(readiness.energy_maximum)) &&
+      Number.isFinite(Number(readiness.energy_full_at));
+    const energyRateAvailable =
+      energySnapshotAvailable &&
+      Number.isFinite(Number(readiness.energy_increment)) &&
+      Number(readiness.energy_increment) > 0 &&
+      Number.isFinite(Number(readiness.energy_interval)) &&
+      Number(readiness.energy_interval) > 0;
+    const energyStatusText = energyRefillAvailable
+      ? resourceDashboardLiveStatusText(
+          Number(readiness.energy),
+          Number(readiness.energy_maximum),
+          Number(readiness.energy_full_at)
+        )
+      : energySnapshotAvailable
+        ? 'Live refill time unavailable'
+        : 'Live Energy unavailable';
+    const energyRateText = energyRateAvailable
+      ? `+${resourceDashboardFormatNumber(readiness.energy_increment)} every ${resourceDashboardFormatDuration(readiness.energy_interval)} · Live from Torn`
+      : energySnapshotAvailable
+        ? 'Natural refill rate unavailable'
+        : 'Live Energy unavailable';
+    const energyMetric = `
+      <div class="ta-metric-card">
+        <div class="ta-metric-label">Live Energy</div>
+        <div class="ta-metric-value">
+          ${energySnapshotAvailable
+            ? `${Number(readiness.energy).toLocaleString()}${Number.isFinite(Number(readiness.energy_maximum)) ? ` / ${Number(readiness.energy_maximum).toLocaleString()}` : ''}`
+            : '—'}
+        </div>
+        <div
+          class="ta-metric-note"
+          ${energyRefillAvailable
+            ? `data-ta-training-energy-full-at="${Number(readiness.energy_full_at)}" data-ta-training-energy-current="${Number(readiness.energy)}" data-ta-training-energy-maximum="${Number(readiness.energy_maximum)}"`
+            : ''}
+        >${escapeActivityHtml(energyStatusText)}</div>
+        <div class="ta-metric-note">${escapeActivityHtml(energyRateText)}</div>
+      </div>
+    `;
+
     return `
       <details class="ta-section ta-training-readiness-section" ${sectionOpen ? 'open' : ''} data-ta-live-energy="${readiness.energy === null ? '' : Number(readiness.energy)}" data-ta-live-happiness="${readiness.happiness === null ? '' : Number(readiness.happiness)}" data-ta-live-happiness-maximum="${readiness.happiness_maximum === null ? '' : Number(readiness.happiness_maximum)}" data-ta-over-happiness="${readiness.over_happiness ? 'true' : 'false'}" data-ta-drug-ready-at="${readiness.drug_ready_at === null ? '' : Number(readiness.drug_ready_at)}" data-ta-booster-ready-at="${readiness.booster_ready_at === null ? '' : Number(readiness.booster_ready_at)}">
         <summary class="ta-section-summary-row">
-          <span class="ta-section-title">Training Readiness</span>
+          <span class="ta-section-title">Gym Trainer</span>
           <span class="ta-section-meta">${readiness.energy === null ? 'Historical only' : `${Number(readiness.energy).toLocaleString()} E`}</span>
         </summary>
 
@@ -16148,7 +16306,7 @@
           </div>
 
           <div class="ta-metric-grid">
-            ${activityDashboardMetric('Live Energy', readiness.energy === null ? '—' : Number(readiness.energy).toLocaleString(), readiness.energy === null ? 'Live Energy unavailable' : 'Live from Torn')}
+            ${energyMetric}
             ${activityDashboardMetric('Live Happiness', readiness.happiness === null ? '—' : Number(readiness.happiness).toLocaleString(), readiness.happiness === null ? 'Live Happiness unavailable' : readiness.happiness_maximum === null ? 'Live from Torn' : `${Number(readiness.happiness_maximum).toLocaleString()} maximum`)}
             ${activityDashboardMetric('Last observed gym', statGrowthGymName(readiness.gym_id), readiness.last_training_timestamp ? 'From your latest valid gym log' : 'No valid gym log yet')}
             ${quarterHourMetric}
@@ -16276,6 +16434,14 @@
         cooldown.textContent = remaining <= 0
           ? 'Ready'
           : trainingReadinessFormatDuration(remaining);
+      }
+
+      for (const output of section.querySelectorAll('[data-ta-training-energy-full-at]')) {
+        output.textContent = resourceDashboardLiveStatusText(
+          Number(output.getAttribute('data-ta-training-energy-current')),
+          Number(output.getAttribute('data-ta-training-energy-maximum')),
+          Number(output.getAttribute('data-ta-training-energy-full-at'))
+        );
       }
 
       setTimeout(
@@ -19366,7 +19532,7 @@
     return `
       <details class="ta-section ta-training-workspace-section" ${workspaceOpen ? 'open' : ''}>
         <summary class="ta-section-summary-row">
-          <span class="ta-section-title">Training</span>
+          <span class="ta-section-title">Stats</span>
           <span class="ta-section-meta">${escapeActivityHtml(meta)}</span>
         </summary>
 
