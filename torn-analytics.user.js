@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.34
+// @version      2.18.35
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.34';
+  const VERSION = '2.18.35';
 
-  // v2.18.34 conservatively attaches qualifying API checkpoints to matched training bursts.
+  // v2.18.35 makes checkpoint attribution independent of the quarantined native bridge.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -24505,6 +24505,9 @@
   const TRAINING_CHECKPOINT_LOG_MATCH_TOLERANCE_MS =
     15 * 1000;
 
+  const TRAINING_CHECKPOINT_API_SOURCE =
+    'torn_api_v2_user_bars';
+
   let trainingCheckpointCanaryInstalled =
     false;
 
@@ -25567,7 +25570,7 @@
           happiness_maximum:
             burst.checkpoint.happiness.maximum,
           source:
-            TRAINING_API_ARM_SOURCE
+            TRAINING_CHECKPOINT_API_SOURCE
         };
       }
     }
