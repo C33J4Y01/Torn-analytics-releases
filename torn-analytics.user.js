@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.39
+// @version      2.18.40
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.39';
+  const VERSION = '2.18.40';
 
-  // v2.18.39 unifies Growth focus and presents dense details plus all-time comparison.
+  // v2.18.40 unifies Growth focus and presents dense details plus all-time comparison.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -20645,7 +20645,8 @@
     growth,
     focus = 'recent',
     context = 'all',
-    sessionLimit = 12
+    sessionLimit = 12,
+    scope = 'selected'
   ) {
     const stat =
       statGrowthFocusStat(
@@ -20692,7 +20693,10 @@
             <span>No selected-stat observations</span>
           </div>
 
-          ${renderStatGrowthFocusControl(focus, selectedContext, selectedLimit)}
+          <div class="ta-stat-post-chart-controls">
+            ${renderStatGrowthFocusControl(focus, selectedContext, selectedLimit)}
+            ${renderStatGrowthScopedGainSummary(growth, focus, scope)}
+          </div>
         </div>
       `;
     }
@@ -21028,8 +21032,6 @@
           <span>${escapeActivityHtml(label)} · last ${samples.length} observations</span>
         </div>
 
-        ${renderStatGrowthFocusControl(focus, selectedContext, selectedLimit)}
-
         <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars classified by observed Energy-source evidence" class="ta-stat-total-svg" data-ta-stat-total-svg>
           <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
           <line x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
@@ -21060,6 +21062,11 @@
         </div>
         <div class="ta-stat-total-scale">
           Session gain scale: 0–${escapeActivityHtml(statGrowthFormatCompactGain(maximumGain))} · tap a bar or point for exact values
+        </div>
+
+        <div class="ta-stat-post-chart-controls">
+          ${renderStatGrowthFocusControl(focus, selectedContext, selectedLimit)}
+          ${renderStatGrowthScopedGainSummary(growth, focus, scope)}
         </div>
 
         <div class="ta-chart-detail" data-ta-stat-total-detail-output>
@@ -21712,6 +21719,15 @@
         scope
       );
 
+    const detailsView =
+      summary.scope ===
+      'all'
+        ? 'all'
+        : statGrowthFocusView(
+            growth,
+            summary.focus
+          );
+
     return `
       <div class="ta-stat-gain-scope" data-ta-stat-gain-scope>
         <div class="ta-stat-gain-scope-controls" role="group" aria-label="Observed gain summary scope">
@@ -21749,6 +21765,8 @@
             </div>
           </div>
         </div>
+
+        ${renderStatGrowthDetailsScope(growth, detailsView)}
       </div>
     `;
   }
@@ -21833,19 +21851,8 @@
             ${escapeActivityHtml(timeBasis)}; all-time totals do not.
           </div>
 
-          ${renderStatGrowthCumulativeChart(growth, focus, context, sessionLimit)}
-
-          ${renderStatGrowthScopedGainSummary(growth, focus, scope)}
-
-          <details class="ta-stat-subsection ta-stat-more-details">
-            <summary>
-              More growth details
-              <span>Metrics, breakdowns &amp; diagnostics</span>
-            </summary>
-            <div class="ta-stat-subsection-body">
-              ${renderStatGrowthDetailsScope(growth, focusView)}
-
-              <details class="ta-stat-subsection ta-stat-recent-growth">
+          ${renderStatGrowthCumulativeChart(growth, focus, context, sessionLimit, scope)}
+          <details class="ta-stat-subsection ta-stat-recent-growth">
                 <summary>
                   Recent growth
                   <span>7d, 14d, 30d &amp; all time</span>
@@ -21867,9 +21874,7 @@
                 </div>
               </details>
 
-              ${renderStatGrowthDataQuality(growth)}
-            </div>
-          </details>
+          ${renderStatGrowthDataQuality(growth)}
         </div>
       </details>
     `;
@@ -22373,7 +22378,8 @@
                 {},
                 root.__taStatGrowthFocus,
                 root.__taStatGrowthContext,
-                root.__taStatGrowthSessionLimit
+                root.__taStatGrowthSessionLimit,
+                root.__taStatGrowthScope
               );
 
             refreshGrowthFocusPanels();
@@ -22408,7 +22414,8 @@
                 {},
                 root.__taStatGrowthFocus,
                 root.__taStatGrowthContext,
-                root.__taStatGrowthSessionLimit
+                root.__taStatGrowthSessionLimit,
+                root.__taStatGrowthScope
               );
 
             bindCumulativeInteractions(
@@ -22441,7 +22448,8 @@
                 {},
                 root.__taStatGrowthFocus,
                 root.__taStatGrowthContext,
-                root.__taStatGrowthSessionLimit
+                root.__taStatGrowthSessionLimit,
+                root.__taStatGrowthScope
               );
 
             bindCumulativeInteractions(
@@ -22578,7 +22586,8 @@
                 {},
                 next,
                 root.__taStatGrowthContext,
-                root.__taStatGrowthSessionLimit
+                root.__taStatGrowthSessionLimit,
+                root.__taStatGrowthScope
               );
           }
 
@@ -28873,6 +28882,17 @@
         opacity: .78;
       }
 
+      #${MODAL_ID} .ta-stat-post-chart-controls {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      #${MODAL_ID} .ta-stat-post-chart-controls .ta-stat-total-controls,
+      #${MODAL_ID} .ta-stat-post-chart-controls .ta-stat-gain-scope {
+        margin: 0;
+      }
+
       #${MODAL_ID} .ta-stat-total-controls {
         margin: 0 0 8px;
       }
@@ -29274,6 +29294,7 @@
 
       #${MODAL_ID} .ta-stat-window-table tbody th,
       #${MODAL_ID} .ta-stat-window-table tbody td {
+        color: #e7e7e7 !important;
         font-weight: 750;
       }
 
@@ -30297,7 +30318,7 @@
         line-height: 1.4;
       }
 
-      /* v2.18.39: one dense surface for shared-focus Stat Growth detail. */
+      /* v2.18.40: one dense surface for shared-focus Stat Growth detail. */
       #${MODAL_ID} .ta-stat-details-scope,
       #${MODAL_ID} .ta-stat-recent-panel {
         display: grid;
