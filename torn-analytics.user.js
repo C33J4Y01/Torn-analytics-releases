@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.37
+// @version      2.18.38
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.37';
+  const VERSION = '2.18.38';
 
-  // v2.18.37 compacts everyday Settings and collapses diagnostics by default.
+  // v2.18.38 adds independent compact stat views for growth details and recent trends.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13311,6 +13311,9 @@
   const UI_RESOURCE_PREFERENCES_STORAGE_KEY =
     'tornAnalyticsResourcePreferencesV1';
 
+  const UI_STAT_GROWTH_PREFERENCES_STORAGE_KEY =
+    'tornAnalyticsStatGrowthPreferencesV1';
+
   function uiSessionOrientation() {
     const width =
       Number(
@@ -13398,6 +13401,113 @@
         JSON.stringify(next)
       );
     } catch (_) {}
+  }
+
+  function uiSessionStatView(
+    value
+  ) {
+    return [
+      'all',
+      'strength',
+      'defense',
+      'speed',
+      'dexterity'
+    ].includes(
+      value
+    )
+      ? value
+      : 'all';
+  }
+
+  function readStatGrowthPreferences() {
+    try {
+      const raw =
+        uiOrientationHandoffStorage()?.getItem(
+          UI_STAT_GROWTH_PREFERENCES_STORAGE_KEY
+        );
+      const parsed =
+        raw
+          ? JSON.parse(
+              raw
+            )
+          : null;
+
+      return {
+        stat_growth_details_stat:
+          uiSessionStatView(
+            parsed?.stat_growth_details_stat
+          ),
+        stat_growth_recent_stat:
+          uiSessionStatView(
+            parsed?.stat_growth_recent_stat
+          )
+      };
+    } catch (_) {
+      return {
+        stat_growth_details_stat:
+          'all',
+        stat_growth_recent_stat:
+          'all'
+      };
+    }
+  }
+
+  function writeStatGrowthPreferences(
+    patch
+  ) {
+    const safePatch =
+      patch &&
+      typeof patch ===
+        'object' &&
+      !Array.isArray(
+        patch
+      )
+        ? patch
+        : {};
+    const supportedKeys = [
+      'stat_growth_details_stat',
+      'stat_growth_recent_stat'
+    ];
+    const current =
+      readStatGrowthPreferences();
+    const next = {
+      ...current
+    };
+
+    for (
+      const key
+      of supportedKeys
+    ) {
+      if (
+        Object.prototype.hasOwnProperty.call(
+          safePatch,
+          key
+        )
+      ) {
+        next[key] =
+          uiSessionStatView(
+            safePatch[key]
+          );
+      }
+    }
+
+    if (
+      JSON.stringify(next) ===
+      JSON.stringify(current)
+    ) {
+      return next;
+    }
+
+    try {
+      uiOrientationHandoffStorage()?.setItem(
+        UI_STAT_GROWTH_PREFERENCES_STORAGE_KEY,
+        JSON.stringify(
+          next
+        )
+      );
+    } catch (_) {}
+
+    return next;
   }
 
   function clearUiOrientationHandoff() {
@@ -18993,12 +19103,29 @@
   function statGrowthDayDetail(
     day,
     growth,
-    windowDays
+    windowDays,
+    view = 'all'
   ) {
     const timezone =
       statGrowthTimeBasisLabel(
         growth
       );
+
+    const normalizedView =
+      uiSessionStatView(
+        view
+      );
+    const scoped =
+      normalizedView ===
+      'all'
+        ? day
+        : day?.stats?.[normalizedView] ||
+          statGrowthBlankStat(
+            normalizedView,
+            statGrowthViewLabel(
+              normalizedView
+            )
+          );
 
     const statParts =
       [
@@ -19024,12 +19151,17 @@
         .filter(Boolean)
         .join(' · ');
 
+    const scopeLabel =
+      statGrowthViewLabel(
+        normalizedView
+      );
+
     return `${activityDashboardLongDate(day.date)} · ` +
-      `${statGrowthFormatGain(day.gain)} observed gain · ` +
-      `${Number(day.energy_used || 0).toLocaleString()} energy · ` +
-      `${Number(day.trains || 0).toLocaleString()} trains · ` +
-      `${Number(day.actions || 0).toLocaleString()} actions` +
-      `${statParts ? ` · ${statParts}` : ''} · ` +
+      `${statGrowthFormatGain(scoped?.gain || 0)} ${scopeLabel.toLowerCase()} observed gain · ` +
+      `${Number(scoped?.energy_used || 0).toLocaleString()} energy · ` +
+      `${Number(scoped?.trains || 0).toLocaleString()} trains · ` +
+      `${Number(scoped?.actions || 0).toLocaleString()} actions` +
+      `${normalizedView === 'all' && statParts ? ` · ${statParts}` : ''} · ` +
       `${timezone} · displayed ${windowDays}-day window`;
   }
 
@@ -19067,6 +19199,176 @@
       default:
         return 'All contexts';
     }
+  }
+
+  function statGrowthViewLabel(
+    view
+  ) {
+    return {
+      all:
+        'All stats',
+      strength:
+        'Strength',
+      defense:
+        'Defense',
+      speed:
+        'Speed',
+      dexterity:
+        'Dexterity'
+    }[
+      uiSessionStatView(
+        view
+      )
+    ];
+  }
+
+  function statGrowthScopedRow(
+    source,
+    view
+  ) {
+    const normalizedView =
+      uiSessionStatView(
+        view
+      );
+
+    if (
+      normalizedView ===
+      'all'
+    ) {
+      return source ||
+        {};
+    }
+
+    return source?.stats?.[normalizedView] ||
+      statGrowthBlankStat(
+        normalizedView,
+        statGrowthViewLabel(
+          normalizedView
+        )
+      );
+  }
+
+  function statGrowthScopedTrainingDays(
+    growth,
+    view
+  ) {
+    const normalizedView =
+      uiSessionStatView(
+        view
+      );
+
+    if (
+      normalizedView ===
+      'all'
+    ) {
+      return Number(
+        growth?.training_days ||
+        0
+      );
+    }
+
+    return (growth?.days || [])
+      .filter(
+        day =>
+          Number(
+            day?.stats?.[normalizedView]?.actions ||
+            0
+          ) > 0
+      )
+      .length;
+  }
+
+  function statGrowthScopedBestDay(
+    growth,
+    view
+  ) {
+    const normalizedView =
+      uiSessionStatView(
+        view
+      );
+
+    if (
+      normalizedView ===
+      'all'
+    ) {
+      return growth?.best_day_by_gain ||
+        null;
+    }
+
+    return (growth?.days || [])
+      .reduce(
+        (
+          best,
+          day
+        ) => {
+          const actions =
+            Number(
+              day?.stats?.[normalizedView]?.actions ||
+              0
+            );
+          const gain =
+            Number(
+              day?.stats?.[normalizedView]?.gain ||
+              0
+            );
+
+          if (
+            actions <= 0
+          ) {
+            return best;
+          }
+
+          if (
+            !best ||
+            gain >
+              best.gain
+          ) {
+            return {
+              date:
+                day?.date ||
+                null,
+              gain
+            };
+          }
+
+          return best;
+        },
+        null
+      );
+  }
+
+  function renderStatGrowthViewControl(
+    selected,
+    target,
+    label
+  ) {
+    const normalized =
+      uiSessionStatView(
+        selected
+      );
+
+    return `
+      <label class="ta-stat-view-control">
+        <span>${escapeActivityHtml(label)}</span>
+        <select data-ta-stat-view="${escapeActivityHtml(target)}" aria-label="${escapeActivityHtml(label)}">
+          ${
+            [
+              ['all', 'All stats'],
+              ['strength', 'Strength'],
+              ['defense', 'Defense'],
+              ['speed', 'Speed'],
+              ['dexterity', 'Dexterity']
+            ].map(
+              ([value, text]) => `
+                <option value="${value}" ${value === normalized ? 'selected' : ''}>
+                  ${text}
+                </option>
+              `
+            ).join('')
+          }
+        </select>
+      </label>
+    `;
   }
 
   function renderStatGrowthFocusControl(
@@ -20651,10 +20953,16 @@
   }
 
   function renderStatGrowthRecentChart(
-    growth
+    growth,
+    view = 'all'
   ) {
     const layout =
       activityDashboardLayout();
+
+    const normalizedView =
+      uiSessionStatView(
+        view
+      );
 
     const rows =
       statGrowthRecentDays(
@@ -20666,11 +20974,18 @@
       Math.max(
         0,
         ...rows.map(
-          row =>
-            Number(
-              row.gain ||
+          row => {
+            const scoped =
+              statGrowthScopedRow(
+                row,
+                normalizedView
+              );
+
+            return Number(
+              scoped?.gain ||
               0
-            )
+            );
+          }
         )
       );
 
@@ -20692,9 +21007,14 @@
       rows
         .map(
           row => {
+            const scoped =
+              statGrowthScopedRow(
+                row,
+                normalizedView
+              );
             const gain =
               Number(
-                row.gain ||
+                scoped?.gain ||
                 0
               );
 
@@ -20713,7 +21033,8 @@
               statGrowthDayDetail(
                 row,
                 growth,
-                layout.recent_days
+                layout.recent_days,
+                normalizedView
               );
 
             return `
@@ -20763,7 +21084,7 @@
     return `
       <div class="ta-chart-card ta-stat-growth-chart">
         <div class="ta-chart-heading">
-          <span>Recent stat growth</span>
+          <span>${escapeActivityHtml(statGrowthViewLabel(normalizedView))} growth</span>
           <span>Last ${layout.recent_days} calendar days · ${escapeActivityHtml(dateWindow)}</span>
         </div>
 
@@ -20786,63 +21107,14 @@
     `;
   }
 
-  function renderStatGrowthStatCards(
-    growth
-  ) {
-    const order = [
-      'strength',
-      'defense',
-      'speed',
-      'dexterity'
-    ];
-
-    const cards =
-      order
-        .map(
-          stat => {
-            const row =
-              growth?.stats?.[stat] ||
-              statGrowthBlankStat(
-                stat,
-                stat
-              );
-
-            const lastObserved =
-              row.last_after === null
-                ? '—'
-                : statGrowthFormatNumber(
-                    row.last_after,
-                    2
-                  );
-
-            return `
-              <div class="ta-stat-compact-row">
-                <div class="ta-stat-compact-main">
-                  <strong>${escapeActivityHtml(row.label)}</strong>
-                  <b>${escapeActivityHtml(statGrowthFormatGain(row.gain))}</b>
-                </div>
-                <div class="ta-stat-compact-facts">
-                  <span><i>Energy</i><b>${Number(row.energy_used || 0).toLocaleString()}</b></span>
-                  <span><i>Gain / E</i><b>${escapeActivityHtml(statGrowthFormatRate(row.gain_per_energy))}</b></span>
-                  <span><i>Trains</i><b>${Number(row.trains || 0).toLocaleString()}</b></span>
-                  <span><i>After</i><b>${escapeActivityHtml(lastObserved)}</b></span>
-                </div>
-              </div>
-            `;
-          }
-        )
-        .join('');
-
-    return `
-      <div class="ta-stat-compact-list">
-        ${cards}
-      </div>
-    `;
-  }
-
   function renderStatGrowthWindows(
-    growth
+    growth,
+    view = 'all'
   ) {
+    const normalizedView =
+      uiSessionStatView(
+        view
+      );
     const windows = [
       ['7 days', growth?.recent_7_days],
       ['14 days', growth?.recent_14_days],
@@ -20857,24 +21129,126 @@
               ([
                 label,
                 row
-              ]) => `
+              ]) => {
+                const scoped =
+                  statGrowthScopedRow(
+                    row,
+                    normalizedView
+                  );
+
+                return `
                 <div class="ta-stat-window-card">
                   <div class="ta-stat-window-title">
                     ${escapeActivityHtml(label)}
                   </div>
                   <div class="ta-stat-window-gain">
-                    ${escapeActivityHtml(statGrowthFormatGain(row?.gain || 0))}
+                    ${escapeActivityHtml(statGrowthFormatGain(scoped?.gain || 0))}
                   </div>
                   <div class="ta-stat-window-note">
-                    ${Number(row?.energy_used || 0).toLocaleString()} E ·
-                    ${Number(row?.trains || 0).toLocaleString()} trains ·
-                    ${escapeActivityHtml(statGrowthFormatRate(row?.gain_per_energy || 0))} gain/E
+                    ${Number(scoped?.energy_used || 0).toLocaleString()} E ·
+                    ${Number(scoped?.trains || 0).toLocaleString()} trains ·
+                    ${escapeActivityHtml(statGrowthFormatRate(scoped?.gain_per_energy || 0))} gain/E
                   </div>
                 </div>
-              `
+              `;
+              }
             )
             .join('')
         }
+      </div>
+    `;
+  }
+
+  function renderStatGrowthDetailsScope(
+    growth,
+    view = 'all'
+  ) {
+    const normalizedView =
+      uiSessionStatView(
+        view
+      );
+    const row =
+      statGrowthScopedRow(
+        growth,
+        normalizedView
+      );
+    const label =
+      statGrowthViewLabel(
+        normalizedView
+      );
+    const trainingDays =
+      statGrowthScopedTrainingDays(
+        growth,
+        normalizedView
+      );
+    const bestDay =
+      statGrowthScopedBestDay(
+        growth,
+        normalizedView
+      );
+    const metrics = [
+      activityDashboardMetric(
+        'Energy trained',
+        Number(row?.energy_used || 0).toLocaleString(),
+        `${Number(row?.trains || 0).toLocaleString()} individual trains · ${label}`
+      ),
+      activityDashboardMetric(
+        'Gain / energy',
+        statGrowthFormatRate(
+          row?.gain_per_energy ||
+          0
+        ),
+        `Observed ${label.toLowerCase()} gym logs`
+      ),
+      activityDashboardMetric(
+        'Training days',
+        trainingDays.toLocaleString(),
+        `${label} · calendar days with observed training`
+      ),
+      activityDashboardMetric(
+        'Best growth day',
+        bestDay
+          ? statGrowthFormatGain(
+              bestDay.gain
+            )
+          : '—',
+        bestDay?.date ||
+          '—'
+      ),
+      activityDashboardMetric(
+        'Happiness consumed',
+        Number(row?.happy_used || 0).toLocaleString(),
+        `${Number(row?.happy_known_actions || 0).toLocaleString()} / ${Number(row?.actions ?? growth?.valid_logs ?? 0).toLocaleString()} ${label.toLowerCase()} actions with valid data`
+      )
+    ].join('');
+
+    return `
+      <div class="ta-stat-details-scope" data-ta-stat-details-scope>
+        ${renderStatGrowthViewControl(normalizedView, 'details', 'Growth details stat')}
+
+        <div class="ta-stat-growth-compact-metrics">
+          ${metrics}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderStatGrowthRecentPanel(
+    growth,
+    view = 'all'
+  ) {
+    const normalizedView =
+      uiSessionStatView(
+        view
+      );
+
+    return `
+      <div class="ta-stat-recent-panel" data-ta-stat-recent-panel>
+        ${renderStatGrowthViewControl(normalizedView, 'recent', 'Recent growth stat')}
+
+        ${renderStatGrowthWindows(growth, normalizedView)}
+
+        ${renderStatGrowthRecentChart(growth, normalizedView)}
       </div>
     `;
   }
@@ -21256,6 +21630,14 @@
       uiSessionStatGrowthContext(
         safeOptions.context
       );
+    const detailsStat =
+      uiSessionStatView(
+        safeOptions.details_stat
+      );
+    const recentStat =
+      uiSessionStatView(
+        safeOptions.recent_stat
+      );
 
     if (
       !growth?.valid_logs
@@ -21285,44 +21667,6 @@
         growth
       );
 
-    const bestDay =
-      growth.best_day_by_gain;
-
-    const metrics = [
-      activityDashboardMetric(
-        'Energy trained',
-        Number(growth.energy_used).toLocaleString(),
-        `${Number(growth.trains).toLocaleString()} individual trains · all stats`
-      ),
-      activityDashboardMetric(
-        'Gain / energy',
-        statGrowthFormatRate(
-          growth.gain_per_energy
-        ),
-        'Observed across all gym logs · all stats'
-      ),
-      activityDashboardMetric(
-        'Training days',
-        Number(growth.training_days).toLocaleString(),
-        `${growth.first_date || '—'} → ${growth.last_date || '—'}`
-      ),
-      activityDashboardMetric(
-        'Best growth day',
-        bestDay
-          ? statGrowthFormatGain(
-              bestDay.gain
-            )
-          : '—',
-        bestDay?.date ||
-          '—'
-      ),
-      activityDashboardMetric(
-        'Happiness consumed',
-        Number(growth.happy_used).toLocaleString(),
-        `${Number(growth.happy_known_actions).toLocaleString()} / ${Number(growth.valid_logs).toLocaleString()} actions with valid data`
-      )
-    ].join('');
-
     return `
       <details class="ta-section ta-stat-growth-section" ${sectionOpen ? 'open' : ''}>
         <summary class="ta-section-summary-row">
@@ -21348,19 +21692,7 @@
               <span>Metrics, breakdowns &amp; diagnostics</span>
             </summary>
             <div class="ta-stat-subsection-body">
-              <div class="ta-stat-growth-compact-metrics">
-                ${metrics}
-              </div>
-
-              <details class="ta-stat-subsection ta-stat-breakdown">
-                <summary>
-                  Stat breakdown
-                  <span>Strength, Defense, Speed &amp; Dexterity</span>
-                </summary>
-                <div class="ta-stat-subsection-body">
-                  ${renderStatGrowthStatCards(growth)}
-                </div>
-              </details>
+              ${renderStatGrowthDetailsScope(growth, detailsStat)}
 
               <details class="ta-stat-subsection ta-stat-recent-growth">
                 <summary>
@@ -21368,9 +21700,7 @@
                   <span>7, 14 &amp; 30-day trends</span>
                 </summary>
                 <div class="ta-stat-subsection-body">
-                  ${renderStatGrowthWindows(growth)}
-
-                  ${renderStatGrowthRecentChart(growth)}
+                  ${renderStatGrowthRecentPanel(growth, recentStat)}
                 </div>
               </details>
 
@@ -21471,6 +21801,8 @@
 
     const uiState =
       readUiSessionState();
+    const statViewPreferences =
+      readStatGrowthPreferences();
 
     root.__taStatGrowth =
       growth ||
@@ -21498,15 +21830,27 @@
         uiState.stat_growth_session_limit
       );
 
-    const columns =
-      Array.from(
-        root.querySelectorAll(
-          '.ta-chart-column[data-ta-stat-detail]'
-        )
+    root.__taStatGrowthDetailsStat =
+      uiSessionStatView(
+        statViewPreferences.stat_growth_details_stat
       );
 
-    const activate =
-      column => {
+    root.__taStatGrowthRecentStat =
+      uiSessionStatView(
+        statViewPreferences.stat_growth_recent_stat
+      );
+
+    const bindRecentChartInteractions =
+      scope => {
+        const columns =
+          Array.from(
+            scope.querySelectorAll(
+              '.ta-chart-column[data-ta-stat-detail]'
+            )
+          );
+
+        const activate =
+          column => {
         const card =
           column?.closest?.(
             '.ta-chart-card'
@@ -21544,37 +21888,38 @@
             candidate === column
           );
         }
-      };
+          };
 
-    for (
-      const column
-      of columns
-    ) {
-      column.addEventListener(
-        'click',
-        () =>
-          activate(
-            column
-          )
-      );
+        for (
+          const column
+          of columns
+        ) {
+          column.addEventListener(
+            'click',
+            () =>
+              activate(
+                column
+              )
+          );
 
-      column.addEventListener(
-        'keydown',
-        event => {
-          if (
-            event.key !== 'Enter' &&
-            event.key !== ' '
-          ) {
-            return;
-          }
+          column.addEventListener(
+            'keydown',
+            event => {
+              if (
+                event.key !== 'Enter' &&
+                event.key !== ' '
+              ) {
+                return;
+              }
 
-          event.preventDefault();
-          activate(
-            column
+              event.preventDefault();
+              activate(
+                column
+              );
+            }
           );
         }
-      );
-    }
+      };
 
     const bindCumulativeInteractions =
       scope => {
@@ -21921,11 +22266,142 @@
         }
       };
 
+    const bindStatViewControl =
+      select => {
+        if (
+          !select ||
+          select.__taStatViewBound ===
+          true
+        ) {
+          return;
+        }
+
+        select.__taStatViewBound =
+          true;
+
+        select.addEventListener(
+          'change',
+          () => {
+            const next =
+              uiSessionStatView(
+                select.value
+              );
+            const target =
+              select.getAttribute(
+                'data-ta-stat-view'
+              );
+
+            if (
+              target ===
+              'details'
+            ) {
+              root.__taStatGrowthDetailsStat =
+                next;
+
+              writeStatGrowthPreferences({
+                stat_growth_details_stat:
+                  next
+              });
+
+              const panel =
+                select.closest(
+                  '[data-ta-stat-details-scope]'
+                );
+
+              if (
+                panel
+              ) {
+                panel.outerHTML =
+                  renderStatGrowthDetailsScope(
+                    root.__taStatGrowth ||
+                    {},
+                    next
+                  );
+
+                bindStatViewControls(
+                  root
+                );
+              }
+
+              return;
+            }
+
+            if (
+              target ===
+              'recent'
+            ) {
+              root.__taStatGrowthRecentStat =
+                next;
+
+              writeStatGrowthPreferences({
+                stat_growth_recent_stat:
+                  next
+              });
+
+              const panel =
+                select.closest(
+                  '[data-ta-stat-recent-panel]'
+                );
+
+              if (
+                panel
+              ) {
+                panel.outerHTML =
+                  renderStatGrowthRecentPanel(
+                    root.__taStatGrowth ||
+                    {},
+                    next
+                  );
+
+                const replacement =
+                  root.querySelector(
+                    '[data-ta-stat-recent-panel]'
+                  );
+
+                if (
+                  replacement
+                ) {
+                  bindRecentChartInteractions(
+                    replacement
+                  );
+                }
+
+                bindStatViewControls(
+                  root
+                );
+              }
+            }
+          }
+        );
+      };
+
+    const bindStatViewControls =
+      scope => {
+        for (
+          const select
+          of scope.querySelectorAll(
+            '[data-ta-stat-view]'
+          )
+        ) {
+          bindStatViewControl(
+            select
+          );
+        }
+      };
+
     bindCumulativeInteractions(
       root
     );
 
     bindScopedGainInteractions();
+
+    bindRecentChartInteractions(
+      root
+    );
+
+    bindStatViewControls(
+      root
+    );
   }
 
   function renderTrainingWorkspace(
@@ -21942,7 +22418,8 @@
     const state =
       {
         ...readUiSessionState(),
-        ...readResourceDashboardPreferences()
+        ...readResourceDashboardPreferences(),
+        ...readStatGrowthPreferences()
       };
 
     const defaultOpen =
@@ -21983,6 +22460,14 @@
       uiSessionStatGrowthSessionLimit(
         state.stat_growth_session_limit
       );
+    const detailsStat =
+      uiSessionStatView(
+        state.stat_growth_details_stat
+      );
+    const recentStat =
+      uiSessionStatView(
+        state.stat_growth_recent_stat
+      );
 
     const meta = [
       readiness?.energy === null ||
@@ -22008,6 +22493,10 @@
             focus,
             scope,
             context,
+            details_stat:
+              detailsStat,
+            recent_stat:
+              recentStat,
             session_limit:
               sessionLimit
           })}
@@ -29589,6 +30078,46 @@
       }
 
       /* v2.18.5: compact, scan-friendly advanced Stat Growth detail. */
+      #${MODAL_ID} .ta-stat-details-scope,
+      #${MODAL_ID} .ta-stat-recent-panel {
+        display: grid;
+        gap: 9px;
+      }
+
+      #${MODAL_ID} .ta-stat-view-control {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(146px, 210px);
+        gap: 10px;
+        align-items: center;
+        margin: 0;
+        padding: 8px 9px;
+        border: 1px solid #30333a;
+        border-radius: 8px;
+        background: #17181c;
+      }
+
+      #${MODAL_ID} .ta-stat-view-control > span {
+        color: #b7b7b7;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: .035em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-stat-view-control select {
+        width: 100%;
+        min-height: 40px;
+        margin: 0;
+        padding: 7px 30px 7px 10px;
+        border: 1px solid #565a64;
+        border-radius: 7px;
+        background: #292a2f;
+        color: #f2f2f2;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
       #${MODAL_ID} .ta-stat-growth-compact-metrics {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -29619,70 +30148,6 @@
         line-height: 1.25;
       }
 
-      #${MODAL_ID} .ta-stat-compact-list {
-        display: grid;
-        gap: 7px;
-        margin-top: 9px;
-      }
-
-      #${MODAL_ID} .ta-stat-compact-row {
-        display: grid;
-        grid-template-columns: minmax(112px, .78fr) minmax(0, 1.22fr);
-        gap: 9px;
-        align-items: center;
-        padding: 9px;
-        border: 1px solid #303030;
-        border-radius: 8px;
-        background: #171717;
-      }
-
-      #${MODAL_ID} .ta-stat-compact-main {
-        display: grid;
-        gap: 3px;
-        min-width: 0;
-      }
-
-      #${MODAL_ID} .ta-stat-compact-main strong {
-        color: #f0f0f0;
-        font-size: 15px;
-        line-height: 1.2;
-      }
-
-      #${MODAL_ID} .ta-stat-compact-main b {
-        overflow-wrap: anywhere;
-        color: #f3f3f3;
-        font-size: 21px;
-        line-height: 1.1;
-      }
-
-      #${MODAL_ID} .ta-stat-compact-facts {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 6px 8px;
-      }
-
-      #${MODAL_ID} .ta-stat-compact-facts span {
-        display: grid;
-        gap: 1px;
-        min-width: 0;
-      }
-
-      #${MODAL_ID} .ta-stat-compact-facts i {
-        color: #9b9b9b;
-        font-size: 9px;
-        font-style: normal;
-        font-weight: 700;
-        letter-spacing: .035em;
-        text-transform: uppercase;
-      }
-
-      #${MODAL_ID} .ta-stat-compact-facts b {
-        overflow-wrap: anywhere;
-        color: #dedede;
-        font-size: 12px;
-        line-height: 1.2;
-      }
-
       @media(max-width:520px) {
         #${MODAL_ID} .ta-stat-session-inspector {
           padding: 9px;
@@ -29697,19 +30162,15 @@
           font-size: 12px;
         }
 
-        #${MODAL_ID} .ta-stat-compact-row {
-          grid-template-columns: 1fr;
-          gap: 7px;
+        #${MODAL_ID} .ta-stat-view-control {
+          grid-template-columns: minmax(0, .9fr) minmax(140px, 1.1fr);
+          gap: 8px;
+          padding: 7px 8px;
         }
 
-        #${MODAL_ID} .ta-stat-compact-main {
-          grid-template-columns: 1fr auto;
-          align-items: baseline;
-        }
-
-        #${MODAL_ID} .ta-stat-compact-main b {
-          font-size: 22px;
-          text-align: right;
+        #${MODAL_ID} .ta-stat-view-control select {
+          min-height: 42px;
+          font-size: 14px;
         }
       }
 
