@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.36
+// @version      2.18.37
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.36';
+  const VERSION = '2.18.37';
 
-  // v2.18.36 hardens module contracts, evidence schemas, and startup diagnostics.
+  // v2.18.37 compacts everyday Settings and collapses diagnostics by default.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -27678,6 +27678,166 @@
         opacity: .75;
       }
 
+      #${MODAL_ID} .ta-settings-status-strip {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 9px 10px;
+        border: 1px solid #30303a;
+        border-radius: 8px;
+        background: #15151b;
+      }
+
+      #${MODAL_ID} .ta-settings-status-strip > b {
+        flex: 0 0 auto;
+        font-size: 12px;
+      }
+
+      #${MODAL_ID} .ta-settings-status-strip > .small {
+        margin: 0;
+        text-align: right;
+      }
+
+      #${MODAL_ID} .actions.ta-settings-primary-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 7px;
+        margin-top: 5px;
+      }
+
+      #${MODAL_ID} .ta-settings-primary-actions > button {
+        min-height: 40px;
+        margin: 0;
+      }
+
+      #${MODAL_ID} .ta-settings-action-wide {
+        grid-column: 1 / -1;
+      }
+
+      #${MODAL_ID} .ta-settings-advanced {
+        margin-top: 12px;
+        overflow: hidden;
+        border: 1px solid #34343e;
+        border-radius: 9px;
+        background: #121218;
+      }
+
+      #${MODAL_ID} .ta-settings-advanced-summary {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 48px;
+        padding: 9px 10px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      #${MODAL_ID} .ta-settings-advanced-summary::-webkit-details-marker,
+      #${MODAL_ID} .ta-settings-tool > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-settings-advanced-summary > span {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-settings-advanced-summary small {
+        overflow: hidden;
+        font-size: 10px;
+        font-weight: 500;
+        opacity: .62;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #${MODAL_ID} .ta-settings-advanced-summary > strong {
+        margin-left: auto;
+        padding: 4px 7px;
+        border: 1px solid #3e5947;
+        border-radius: 999px;
+        background: #152019;
+        color: #b9d8c1;
+        font-size: 10px;
+        white-space: nowrap;
+      }
+
+      #${MODAL_ID} .ta-settings-advanced-summary::after {
+        content: '⌄';
+        color: #aaa;
+        font-size: 16px;
+      }
+
+      #${MODAL_ID} .ta-settings-advanced[open] > .ta-settings-advanced-summary::after {
+        transform: rotate(180deg);
+      }
+
+      #${MODAL_ID} .ta-settings-advanced[open] > .ta-settings-advanced-summary {
+        border-bottom: 1px solid #30303a;
+      }
+
+      #${MODAL_ID} .ta-settings-advanced-body {
+        display: grid;
+        gap: 8px;
+        padding: 9px;
+      }
+
+      #${MODAL_ID} .ta-diagnostics-overview {
+        padding: 9px;
+        border: 1px solid #34433a;
+        border-radius: 8px;
+        background: #111914;
+      }
+
+      #${MODAL_ID} .ta-diagnostics-overview > button {
+        min-height: 38px;
+        margin: 7px 0 0;
+      }
+
+      #${MODAL_ID} .ta-settings-tool {
+        overflow: hidden;
+        border: 1px solid #303038;
+        border-radius: 8px;
+        background: #15151a;
+      }
+
+      #${MODAL_ID} .ta-settings-tool > summary {
+        display: flex;
+        align-items: center;
+        min-height: 42px;
+        padding: 0 9px;
+        cursor: pointer;
+        list-style: none;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-settings-tool > summary::after {
+        content: '⌄';
+        margin-left: auto;
+        color: #999;
+        font-size: 15px;
+      }
+
+      #${MODAL_ID} .ta-settings-tool[open] > summary::after {
+        transform: rotate(180deg);
+      }
+
+      #${MODAL_ID} .ta-settings-tool-body {
+        padding: 9px;
+        border-top: 1px solid #2d2d35;
+      }
+
+      #${MODAL_ID} .ta-settings-tool-body > button {
+        min-height: 40px;
+      }
+
+      #${MODAL_ID} .ta-settings-tool-divider {
+        margin: 11px 0;
+        border-top: 1px solid #303038;
+      }
+
       #${MODAL_ID} .ta-training-snapshot-check-output,
       #${MODAL_ID} .ta-happiness-capture-output,
       #${MODAL_ID} .ta-training-checkpoint-canary-output {
@@ -29734,226 +29894,238 @@
           </summary>
 
           <div class="ta-section-body">
-            <div class="ta-settings-group">
-              <b>
-                Automatic log updates
-              </b>
-
-              <div
-                id="ta-automatic-sync-status"
-                class="small"
-              >
-                ${automaticLogSyncStatusText(cached)}
-              </div>
-            </div>
-
-            <div class="ta-settings-group">
-              <label class="ta-settings-label" for="ta-key">
-                API key
-              </label>
-
-              <input
-                id="ta-key"
-                type="password"
-                autocomplete="off"
-                value=""
-                placeholder="${savedKey ? 'Saved securely — leave blank to reuse' : 'Enter Torn API key'}"
-              >
-            </div>
-
-            <div class="ta-settings-group">
-              ${renderActivityTimeBasisControl()}
-            </div>
-
-            <div class="ta-settings-group">
-              <b>
-                Training snapshot access
-              </b>
-
-              <div class="small">
-                Read-only capability check. It does not train, spend Energy,
-                use an item, or make an API request.
-              </div>
-
-              <button
-                id="ta-training-snapshot-check"
-                type="button"
-              >
-                Check Snapshot Access
-              </button>
-
-              <div
-                id="ta-training-snapshot-check-output"
-                class="small ta-training-snapshot-check-output"
-                aria-live="polite"
-              >
-                Not checked on this page yet.
-              </div>
-            </div>
-
-            <div class="ta-settings-group">
-              <b>
-                Happiness capture canary
-              </b>
-
-              <div class="small">
-                Manual read-only check using one official Torn API bars
-                request. It does not poll, train, spend Energy, use an item,
-                or save the observed bars.
-              </div>
-
-              <button
-                id="ta-happiness-capture-check"
-                type="button"
-              >
-                Check Happiness API Access
-              </button>
-
-              <div
-                id="ta-happiness-capture-output"
-                class="small ta-happiness-capture-output"
-                aria-live="polite"
-              >
-                Not checked in this modal session.
-              </div>
-            </div>
-
-            <div class="ta-settings-group">
-              <b>
-                Automatic pre-training checkpoints
-              </b>
-
-              <div class="small">
-                Records bounded, timestamped Energy and Happiness evidence.
-                A checkpoint appears in training analytics only after its
-                Train tap and Torn training log match conservatively.
-              </div>
-
-              <button
-                id="ta-training-checkpoint-refresh"
-                type="button"
-              >
-                Refresh Checkpoint Status
-              </button>
-
-              <div
-                id="ta-training-checkpoint-output"
-                class="small ta-training-checkpoint-canary-output"
-                aria-live="polite"
-              >
-                Loading checkpoint status…
-              </div>
-            </div>
-
-            <div class="ta-settings-group">
-              <b>
-                Reliability health
-              </b>
-
-              <div class="small">
-                Shows bounded startup and checkpoint-module status. This
-                report never includes API keys, history keys, or log data.
-              </div>
-
-              <button
-                id="ta-reliability-health-refresh"
-                type="button"
-              >
-                Refresh Health Report
-              </button>
-
-              <div
-                id="ta-reliability-health-output"
-                class="small ta-training-checkpoint-canary-output"
-                aria-live="polite"
-              >
-                Loading reliability status…
-              </div>
-            </div>
-
-            <div
-              id="ta-main-actions"
-              class="actions ta-settings-group"
-            >
-
-          ${
-            cached?.account_id
-              ? `
-                <button id="ta-analyze">
-                  Analyze Stored Logs
-                </button>
-
-                <button id="ta-update">
-                  Update Logs
-                </button>
-
-                <button
-                  id="ta-export-history"
-                  style="grid-column:1/-1"
+            <div class="ta-settings-primary">
+              <div class="ta-settings-status-strip">
+                <b>Automatic updates</b>
+                <span
+                  id="ta-automatic-sync-status"
+                  class="small"
                 >
-                  Export History JSON
-                </button>
+                  ${automaticLogSyncStatusText(cached)}
+                </span>
+              </div>
 
-                <button
-                  id="ta-save-export"
-                  style="grid-column:1/-1;display:none"
-                >
-                  Save Export File
-                </button>
+              <div class="ta-settings-group">
+                <label class="ta-settings-label" for="ta-key">
+                  API key
+                </label>
 
-                <button
-                  id="ta-forensic-history"
-                  style="grid-column:1/-1"
+                <input
+                  id="ta-key"
+                  type="password"
+                  autocomplete="off"
+                  value=""
+                  placeholder="${savedKey ? 'Saved securely — leave blank to reuse' : 'Enter Torn API key'}"
                 >
-                  Run History Diagnostic
-                </button>
+              </div>
 
-                <button
-                  id="ta-trace-history"
-                  style="grid-column:1/-1"
-                >
-                  Trace Rebuild Collector
-                </button>
+              <div class="ta-settings-group">
+                ${renderActivityTimeBasisControl()}
+              </div>
+
+              <div class="ta-settings-group">
+                <b>Data &amp; analysis</b>
 
                 <div
-                  class="small"
-                  style="grid-column:1/-1"
+                  id="ta-main-actions"
+                  class="actions ta-settings-primary-actions"
                 >
-                  Export creates a readable decrypted JSON copy of
-                  your Torn history. Keep the file private. The export
-                  does not include your API key or Torn Analytics
-                  encryption/recovery keys.
-                </div>
-              `
-              : `
-                <button
-                  id="ta-build"
-                  style="grid-column:1/-1"
-                >
-                  Build My History
-                </button>
-              `
-          }
+                  ${
+                    cached?.account_id
+                      ? `
+                        <button id="ta-update">
+                          Update Logs
+                        </button>
 
+                        <button id="ta-analyze">
+                          Reanalyze
+                        </button>
+
+                        <button
+                          id="ta-export-history"
+                          class="ta-settings-action-wide"
+                        >
+                          Export History
+                        </button>
+
+                        <button
+                          id="ta-save-export"
+                          class="ta-settings-action-wide"
+                          style="display:none"
+                        >
+                          Save Export File
+                        </button>
+
+                        <div class="small ta-settings-action-wide">
+                          Export creates a readable private copy without API
+                          or encryption keys.
+                        </div>
+                      `
+                      : `
+                        <button
+                          id="ta-build"
+                          class="ta-settings-action-wide"
+                        >
+                          Build My History
+                        </button>
+                      `
+                  }
+                </div>
+              </div>
             </div>
 
-            ${
-              cached?.account_id
-                ? `
-                  <div class="ta-settings-group">
+            <details
+              id="ta-diagnostics-recovery"
+              class="ta-settings-advanced"
+            >
+              <summary class="ta-settings-advanced-summary">
+                <span>
+                  <b>Diagnostics &amp; Recovery</b>
+                  <small id="ta-diagnostics-summary-meta">
+                    Checks and advanced tools
+                  </small>
+                </span>
+
+                <strong id="ta-diagnostics-status">
+                  Checking…
+                </strong>
+              </summary>
+
+              <div
+                id="ta-diagnostics-recovery-body"
+                class="ta-settings-advanced-body"
+              >
+                <div class="ta-diagnostics-overview">
+                  <b id="ta-diagnostics-overview-title">
+                    System status: Checking…
+                  </b>
+
+                  <div
+                    id="ta-diagnostics-overview-meta"
+                    class="small"
+                  >
+                    Reading local diagnostic status.
+                  </div>
+
+                  <button
+                    id="ta-refresh-diagnostics"
+                    type="button"
+                  >
+                    Refresh Diagnostics
+                  </button>
+                </div>
+
+                <details class="ta-settings-tool">
+                  <summary>Training capture checks</summary>
+                  <div class="ta-settings-tool-body">
+                    <b>Snapshot access</b>
+
                     <div class="small">
-                      Advanced: Rebuild Full History safely recollects the complete
-                      history from account creation, verifies it against the current
-                      stored generation, then atomically promotes the replacement.
+                      Read-only page capability check. It does not train,
+                      spend Energy, use an item, or make an API request.
                     </div>
 
-                    <button id="ta-rebuild">
-                      Rebuild Full History
+                    <div
+                      id="ta-training-snapshot-check-output"
+                      class="small ta-training-snapshot-check-output"
+                      aria-live="polite"
+                    >
+                      Not checked on this page yet.
+                    </div>
+
+                    <div class="ta-settings-tool-divider"></div>
+
+                    <b>Happiness API check</b>
+
+                    <div class="small">
+                      Makes one official read-only Torn API bars request. It
+                      does not poll, train, spend Energy, use an item, or save
+                      the observed bars.
+                    </div>
+
+                    <button
+                      id="ta-happiness-capture-check"
+                      type="button"
+                    >
+                      Check Happiness API Access
                     </button>
+
+                    <div
+                      id="ta-happiness-capture-output"
+                      class="small ta-happiness-capture-output"
+                      aria-live="polite"
+                    >
+                      Not checked in this modal session.
+                    </div>
                   </div>
-                `
-                : ''
-            }
+                </details>
+
+                <details class="ta-settings-tool">
+                  <summary>Detailed health reports</summary>
+                  <div class="ta-settings-tool-body">
+                    <b>Pre-training checkpoints</b>
+
+                    <div
+                      id="ta-training-checkpoint-output"
+                      class="small ta-training-checkpoint-canary-output"
+                      aria-live="polite"
+                    >
+                      Loading checkpoint status…
+                    </div>
+
+                    <div class="ta-settings-tool-divider"></div>
+
+                    <b>Reliability health</b>
+
+                    <div class="small">
+                      Bounded status only—never API keys, history keys, or
+                      log data.
+                    </div>
+
+                    <div
+                      id="ta-reliability-health-output"
+                      class="small ta-training-checkpoint-canary-output"
+                      aria-live="polite"
+                    >
+                      Loading reliability status…
+                    </div>
+                  </div>
+                </details>
+
+                <details class="ta-settings-tool">
+                  <summary>History diagnostics &amp; recovery</summary>
+                  <div class="ta-settings-tool-body ta-history-tools">
+                    ${
+                      cached?.account_id
+                        ? `
+                          <button id="ta-forensic-history">
+                            Run History Diagnostic
+                          </button>
+
+                          <button id="ta-trace-history">
+                            Trace Rebuild Collector
+                          </button>
+
+                          <button id="ta-rebuild">
+                            Rebuild Full History
+                          </button>
+
+                          <div class="small">
+                            Full Rebuild recollects and verifies a replacement
+                            before atomically promoting it.
+                          </div>
+                        `
+                        : `
+                          <div class="small">
+                            History tools become available after the initial
+                            history build.
+                          </div>
+                        `
+                    }
+                  </div>
+                </details>
+              </div>
+            </details>
           </div>
         </details>
 
@@ -30063,9 +30235,6 @@
     const analysisHost =
       $('#ta-status');
 
-    const trainingSnapshotCheckButton =
-      $('#ta-training-snapshot-check');
-
     const trainingSnapshotCheckOutput =
       $('#ta-training-snapshot-check-output');
 
@@ -30075,17 +30244,29 @@
     const happinessCaptureOutput =
       $('#ta-happiness-capture-output');
 
-    const trainingCheckpointRefreshButton =
-      $('#ta-training-checkpoint-refresh');
-
     const trainingCheckpointOutput =
       $('#ta-training-checkpoint-output');
 
-    const reliabilityHealthRefreshButton =
-      $('#ta-reliability-health-refresh');
-
     const reliabilityHealthOutput =
       $('#ta-reliability-health-output');
+
+    const diagnosticsSection =
+      $('#ta-diagnostics-recovery');
+
+    const diagnosticsRefreshButton =
+      $('#ta-refresh-diagnostics');
+
+    const diagnosticsStatus =
+      $('#ta-diagnostics-status');
+
+    const diagnosticsSummaryMeta =
+      $('#ta-diagnostics-summary-meta');
+
+    const diagnosticsOverviewTitle =
+      $('#ta-diagnostics-overview-title');
+
+    const diagnosticsOverviewMeta =
+      $('#ta-diagnostics-overview-meta');
 
     function refreshTrainingSnapshotCapabilityCheck() {
       if (
@@ -30103,15 +30284,6 @@
         );
 
       return probe;
-    }
-
-    if (
-      trainingSnapshotCheckButton
-    ) {
-      trainingSnapshotCheckButton.addEventListener(
-        'click',
-        refreshTrainingSnapshotCapabilityCheck
-      );
     }
 
     refreshTrainingSnapshotCapabilityCheck();
@@ -30194,15 +30366,6 @@
       return state;
     }
 
-    if (
-      trainingCheckpointRefreshButton
-    ) {
-      trainingCheckpointRefreshButton.addEventListener(
-        'click',
-        refreshTrainingCheckpointCanaryStatus
-      );
-    }
-
     refreshTrainingCheckpointCanaryStatus();
 
     function refreshReliabilityHealthReport() {
@@ -30230,16 +30393,140 @@
       }
     }
 
+    refreshReliabilityHealthReport();
+
+    function refreshDiagnosticsOverview() {
+      const probe =
+        refreshTrainingSnapshotCapabilityCheck();
+
+      const checkpoint =
+        refreshTrainingCheckpointCanaryStatus();
+
+      const report =
+        refreshReliabilityHealthReport();
+
+      const checkpointStatus =
+        checkpoint?.last_status ||
+        'unavailable';
+
+      const launcherReady =
+        [
+          'ready',
+          'modal_open_requested'
+        ].includes(
+          report?.launcher?.stage
+        );
+
+      const checkpointHealthy =
+        checkpoint?.storage_compatible !==
+          false &&
+        ![
+          'failed',
+          'unsupported_schema'
+        ].includes(
+          checkpointStatus
+        );
+
+      const needsApiKey =
+        checkpointStatus ===
+          'no_api_key';
+
+      const healthy =
+        launcherReady &&
+        checkpointHealthy &&
+        !needsApiKey;
+
+      const statusLabel =
+        healthy
+          ? 'Healthy'
+          : needsApiKey
+            ? 'Setup needed'
+            : 'Review';
+
+      const statusTitle =
+        healthy
+          ? 'System status: Healthy'
+          : needsApiKey
+            ? 'System status: API key needed'
+            : 'System status: Review diagnostics';
+
+      const checkpointCount =
+        Array.isArray(
+          checkpoint?.checkpoints
+        )
+          ? checkpoint.checkpoints.length
+          : 0;
+
+      const intentCount =
+        Array.isArray(
+          checkpoint?.train_intents
+        )
+          ? checkpoint.train_intents.length
+          : 0;
+
+      const snapshotAccess =
+        probe?.resource_bars ===
+          'ready'
+          ? 'page snapshot available'
+          : 'API checkpoint fallback active';
+
+      if (
+        diagnosticsStatus
+      ) {
+        diagnosticsStatus.textContent =
+          statusLabel;
+      }
+
+      if (
+        diagnosticsSummaryMeta
+      ) {
+        diagnosticsSummaryMeta.textContent =
+          `${checkpointCount.toLocaleString()} checkpoints · ${intentCount.toLocaleString()} train taps`;
+      }
+
+      if (
+        diagnosticsOverviewTitle
+      ) {
+        diagnosticsOverviewTitle.textContent =
+          statusTitle;
+      }
+
+      if (
+        diagnosticsOverviewMeta
+      ) {
+        diagnosticsOverviewMeta.textContent =
+          `Launcher ${report?.launcher?.stage || 'unavailable'} · Checkpoint engine ${checkpointStatus.replace(/_/g, ' ')} · ${snapshotAccess}.`;
+      }
+
+      return {
+        healthy,
+        checkpoint,
+        report,
+        probe
+      };
+    }
+
     if (
-      reliabilityHealthRefreshButton
+      diagnosticsRefreshButton
     ) {
-      reliabilityHealthRefreshButton.addEventListener(
+      diagnosticsRefreshButton.addEventListener(
         'click',
-        refreshReliabilityHealthReport
+        refreshDiagnosticsOverview
       );
     }
 
-    refreshReliabilityHealthReport();
+    diagnosticsSection?.addEventListener(
+      'toggle',
+      () => {
+        if (
+          diagnosticsSection.open
+        ) {
+          refreshDiagnosticsOverview();
+        }
+      }
+    );
+
+    refreshDiagnosticsOverview();
 
     for (
       const button
@@ -31466,7 +31753,7 @@
 
       const settingsBody =
         modal.querySelector(
-          '.ta-settings-section .ta-section-body'
+          '#ta-diagnostics-recovery .ta-history-tools'
         );
 
       if (
