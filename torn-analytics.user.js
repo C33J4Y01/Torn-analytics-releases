@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.38
+// @version      2.18.39
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.38';
+  const VERSION = '2.18.39';
 
-  // v2.18.38 adds independent compact stat views for growth details and recent trends.
+  // v2.18.39 unifies Growth focus and presents dense details plus all-time comparison.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13432,22 +13432,33 @@
             )
           : null;
 
+      const legacyFocus =
+        [
+          parsed?.stat_growth_recent_stat,
+          parsed?.stat_growth_details_stat
+        ].find(
+          value =>
+            [
+              'strength',
+              'defense',
+              'speed',
+              'dexterity'
+            ].includes(
+              value
+            )
+        );
+
       return {
-        stat_growth_details_stat:
-          uiSessionStatView(
-            parsed?.stat_growth_details_stat
-          ),
-        stat_growth_recent_stat:
-          uiSessionStatView(
-            parsed?.stat_growth_recent_stat
+        stat_growth_focus:
+          uiSessionTrainingFocus(
+            parsed?.stat_growth_focus ||
+            legacyFocus
           )
       };
     } catch (_) {
       return {
-        stat_growth_details_stat:
-          'all',
-        stat_growth_recent_stat:
-          'all'
+        stat_growth_focus:
+          'recent'
       };
     }
   }
@@ -13464,31 +13475,22 @@
       )
         ? patch
         : {};
-    const supportedKeys = [
-      'stat_growth_details_stat',
-      'stat_growth_recent_stat'
-    ];
     const current =
       readStatGrowthPreferences();
     const next = {
       ...current
     };
 
-    for (
-      const key
-      of supportedKeys
+    if (
+      Object.prototype.hasOwnProperty.call(
+        safePatch,
+        'stat_growth_focus'
+      )
     ) {
-      if (
-        Object.prototype.hasOwnProperty.call(
-          safePatch,
-          key
-        )
-      ) {
-        next[key] =
-          uiSessionStatView(
-            safePatch[key]
-          );
-      }
+      next.stat_growth_focus =
+        uiSessionTrainingFocus(
+          safePatch.stat_growth_focus
+        );
     }
 
     if (
@@ -18816,7 +18818,61 @@
       }
     };
 
-    select?.addEventListener('change', refresh);
+    section.addEventListener(
+      'ta-growth-focus-stat',
+      event => {
+        const stat =
+          event?.detail?.stat;
+
+        if (
+          !select ||
+          ![
+            'strength',
+            'defense',
+            'speed',
+            'dexterity'
+          ].includes(
+            stat
+          )
+        ) {
+          return;
+        }
+
+        if (
+          select.value !==
+          stat
+        ) {
+          select.value =
+            stat;
+          refresh();
+        }
+      }
+    );
+    select?.addEventListener(
+      'change',
+      () => {
+        refresh();
+
+        if (
+          typeof CustomEvent ===
+            'function'
+        ) {
+          section.dispatchEvent(
+            new CustomEvent(
+              'ta-training-stat-change',
+              {
+                bubbles:
+                  true,
+                detail: {
+                  stat:
+                    select.value
+                }
+              }
+            )
+          );
+        }
+      }
+    );
     input?.addEventListener('input', refresh);
     planSelect?.addEventListener('change', () => {
       writeTrainingReadinessPlan(planSelect.value);
@@ -19169,7 +19225,7 @@
     focus
   ) {
     return {
-      recent: 'Most recent',
+      recent: 'Recently trained',
       most_trained: 'Most trained',
       strength: 'Strength',
       defense: 'Defense',
@@ -19220,6 +19276,113 @@
         view
       )
     ];
+  }
+
+  function statGrowthFocusView(
+    growth,
+    focus = 'recent'
+  ) {
+    const stat =
+      statGrowthFocusStat(
+        growth,
+        uiSessionTrainingFocus(
+          focus
+        )
+      );
+
+    return [
+      'strength',
+      'defense',
+      'speed',
+      'dexterity'
+    ].includes(
+      stat
+    )
+      ? stat
+      : 'strength';
+  }
+
+  function statGrowthScopedCoverage(
+    growth,
+    view
+  ) {
+    const row =
+      statGrowthScopedRow(
+        growth,
+        view
+      );
+    const firstTimestamp =
+      Number(
+        row?.first_timestamp
+      );
+    const lastTimestamp =
+      Number(
+        row?.last_timestamp
+      );
+
+    if (
+      !Number.isSafeInteger(
+        firstTimestamp
+      ) ||
+      firstTimestamp <= 0 ||
+      !Number.isSafeInteger(
+        lastTimestamp
+      ) ||
+      lastTimestamp <
+        firstTimestamp
+    ) {
+      return null;
+    }
+
+    const timeBasis =
+      growth?.time_basis ||
+      'local';
+    const firstDate =
+      activityDateKeyForBasis(
+        new Date(
+          firstTimestamp *
+          1000
+        ),
+        timeBasis
+      );
+    const lastDate =
+      activityDateKeyForBasis(
+        new Date(
+          lastTimestamp *
+          1000
+        ),
+        timeBasis
+      );
+
+    return {
+      first_date:
+        firstDate,
+      last_date:
+        lastDate,
+      label:
+        firstDate ===
+        lastDate
+          ? activityDashboardMonthDay(
+              firstDate
+            )
+          : `${activityDashboardMonthDay(firstDate)}–${activityDashboardMonthDay(lastDate)}`
+    };
+  }
+
+  function renderStatGrowthDenseMetric(
+    label,
+    value,
+    explanation
+  ) {
+    return `
+      <details class="ta-stat-dense-metric">
+        <summary>
+          <span>${escapeActivityHtml(label)}</span>
+          <strong>${escapeActivityHtml(value)}</strong>
+        </summary>
+        <small>${escapeActivityHtml(explanation)}</small>
+      </details>
+    `;
   }
 
   function statGrowthScopedRow(
@@ -19337,40 +19500,6 @@
       );
   }
 
-  function renderStatGrowthViewControl(
-    selected,
-    target,
-    label
-  ) {
-    const normalized =
-      uiSessionStatView(
-        selected
-      );
-
-    return `
-      <label class="ta-stat-view-control">
-        <span>${escapeActivityHtml(label)}</span>
-        <select data-ta-stat-view="${escapeActivityHtml(target)}" aria-label="${escapeActivityHtml(label)}">
-          ${
-            [
-              ['all', 'All stats'],
-              ['strength', 'Strength'],
-              ['defense', 'Defense'],
-              ['speed', 'Speed'],
-              ['dexterity', 'Dexterity']
-            ].map(
-              ([value, text]) => `
-                <option value="${value}" ${value === normalized ? 'selected' : ''}>
-                  ${text}
-                </option>
-              `
-            ).join('')
-          }
-        </select>
-      </label>
-    `;
-  }
-
   function renderStatGrowthFocusControl(
     focus,
     context = 'all',
@@ -19392,11 +19521,11 @@
     return `
       <div class="ta-stat-total-controls">
         <label>
-          <span>Stat</span>
-          <select data-ta-stat-total-focus>
+          <span>Growth focus</span>
+          <select data-ta-stat-total-focus aria-label="Growth focus">
             ${[
-              'recent',
               'most_trained',
+              'recent',
               'strength',
               'defense',
               'speed',
@@ -21115,46 +21244,63 @@
       uiSessionStatView(
         view
       );
+    const coverage =
+      statGrowthScopedCoverage(
+        growth,
+        normalizedView
+      );
     const windows = [
-      ['7 days', growth?.recent_7_days],
-      ['14 days', growth?.recent_14_days],
-      ['30 days', growth?.recent_30_days]
+      ['7d', '7 days', growth?.recent_7_days, null],
+      ['14d', '14 days', growth?.recent_14_days, null],
+      ['30d', '30 days', growth?.recent_30_days, null],
+      ['All time', 'All locally retained history', growth, coverage?.label || 'No recorded training']
     ];
 
     return `
-      <div class="ta-stat-window-grid">
-        ${
-          windows
-            .map(
-              ([
-                label,
-                row
-              ]) => {
-                const scoped =
-                  statGrowthScopedRow(
+      <div class="ta-stat-window-table-wrap">
+        <table class="ta-stat-window-table">
+          <caption>${escapeActivityHtml(statGrowthViewLabel(normalizedView))} observed growth comparison</caption>
+          <thead>
+            <tr>
+              <th scope="col">Period</th>
+              <th scope="col">Gain</th>
+              <th scope="col">Energy</th>
+              <th scope="col">Gain/E</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              windows
+                .map(
+                  ([
+                    label,
+                    accessibleLabel,
                     row,
-                    normalizedView
-                  );
+                    coverageLabel
+                  ]) => {
+                    const scoped =
+                      statGrowthScopedRow(
+                        row,
+                        normalizedView
+                      );
 
-                return `
-                <div class="ta-stat-window-card">
-                  <div class="ta-stat-window-title">
-                    ${escapeActivityHtml(label)}
-                  </div>
-                  <div class="ta-stat-window-gain">
-                    ${escapeActivityHtml(statGrowthFormatGain(scoped?.gain || 0))}
-                  </div>
-                  <div class="ta-stat-window-note">
-                    ${Number(scoped?.energy_used || 0).toLocaleString()} E ·
-                    ${Number(scoped?.trains || 0).toLocaleString()} trains ·
-                    ${escapeActivityHtml(statGrowthFormatRate(scoped?.gain_per_energy || 0))} gain/E
-                  </div>
-                </div>
-              `;
-              }
-            )
-            .join('')
-        }
+                    return `
+                      <tr aria-label="${escapeActivityHtml(accessibleLabel)}">
+                        <th scope="row">
+                          <span>${escapeActivityHtml(label)}</span>
+                          ${coverageLabel ? `<small>${escapeActivityHtml(coverageLabel)}</small>` : ''}
+                        </th>
+                        <td title="${escapeActivityHtml(statGrowthFormatGain(scoped?.gain || 0))}">${escapeActivityHtml(statGrowthFormatCompactGain(scoped?.gain || 0))}</td>
+                        <td title="${Number(scoped?.energy_used || 0).toLocaleString()}">${escapeActivityHtml(statGrowthFormatCompactNumber(scoped?.energy_used || 0, 1))}</td>
+                        <td>${escapeActivityHtml(statGrowthFormatRate(scoped?.gain_per_energy || 0))}</td>
+                      </tr>
+                    `;
+                  }
+                )
+                .join('')
+            }
+          </tbody>
+        </table>
       </div>
     `;
   }
@@ -21186,46 +21332,56 @@
         growth,
         normalizedView
       );
+    const actionCount =
+      Number(
+        row?.actions ??
+        growth?.valid_logs ??
+        0
+      );
     const metrics = [
-      activityDashboardMetric(
+      renderStatGrowthDenseMetric(
         'Energy trained',
         Number(row?.energy_used || 0).toLocaleString(),
-        `${Number(row?.trains || 0).toLocaleString()} individual trains · ${label}`
+        `${Number(row?.trains || 0).toLocaleString()} individual trains in the selected ${label} history.`
       ),
-      activityDashboardMetric(
+      renderStatGrowthDenseMetric(
         'Gain / energy',
         statGrowthFormatRate(
           row?.gain_per_energy ||
           0
         ),
-        `Observed ${label.toLowerCase()} gym logs`
+        `Observed ${label.toLowerCase()} gain divided by exact Energy used.`
       ),
-      activityDashboardMetric(
+      renderStatGrowthDenseMetric(
         'Training days',
         trainingDays.toLocaleString(),
-        `${label} · calendar days with observed training`
+        `Calendar days containing observed ${label.toLowerCase()} training.`
       ),
-      activityDashboardMetric(
+      renderStatGrowthDenseMetric(
         'Best growth day',
         bestDay
           ? statGrowthFormatGain(
               bestDay.gain
             )
           : '—',
-        bestDay?.date ||
-          '—'
+        bestDay?.date
+          ? `${activityDashboardLongDate(bestDay.date)} in the selected time basis.`
+          : `No observed ${label.toLowerCase()} training day.`
       ),
-      activityDashboardMetric(
+      renderStatGrowthDenseMetric(
         'Happiness consumed',
         Number(row?.happy_used || 0).toLocaleString(),
-        `${Number(row?.happy_known_actions || 0).toLocaleString()} / ${Number(row?.actions ?? growth?.valid_logs ?? 0).toLocaleString()} ${label.toLowerCase()} actions with valid data`
+        `${Number(row?.happy_known_actions || 0).toLocaleString()} / ${actionCount.toLocaleString()} actions include valid Happiness-used data.`
+      ),
+      renderStatGrowthDenseMetric(
+        'Training actions',
+        actionCount.toLocaleString(),
+        `Parsed Torn gym actions included in the selected ${label} history.`
       )
     ].join('');
 
     return `
       <div class="ta-stat-details-scope" data-ta-stat-details-scope>
-        ${renderStatGrowthViewControl(normalizedView, 'details', 'Growth details stat')}
-
         <div class="ta-stat-growth-compact-metrics">
           ${metrics}
         </div>
@@ -21244,8 +21400,6 @@
 
     return `
       <div class="ta-stat-recent-panel" data-ta-stat-recent-panel>
-        ${renderStatGrowthViewControl(normalizedView, 'recent', 'Recent growth stat')}
-
         ${renderStatGrowthWindows(growth, normalizedView)}
 
         ${renderStatGrowthRecentChart(growth, normalizedView)}
@@ -21630,13 +21784,10 @@
       uiSessionStatGrowthContext(
         safeOptions.context
       );
-    const detailsStat =
-      uiSessionStatView(
-        safeOptions.details_stat
-      );
-    const recentStat =
-      uiSessionStatView(
-        safeOptions.recent_stat
+    const focusView =
+      statGrowthFocusView(
+        growth,
+        focus
       );
 
     if (
@@ -21692,15 +21843,15 @@
               <span>Metrics, breakdowns &amp; diagnostics</span>
             </summary>
             <div class="ta-stat-subsection-body">
-              ${renderStatGrowthDetailsScope(growth, detailsStat)}
+              ${renderStatGrowthDetailsScope(growth, focusView)}
 
               <details class="ta-stat-subsection ta-stat-recent-growth">
                 <summary>
                   Recent growth
-                  <span>7, 14 &amp; 30-day trends</span>
+                  <span>7d, 14d, 30d &amp; all time</span>
                 </summary>
                 <div class="ta-stat-subsection-body">
-                  ${renderStatGrowthRecentPanel(growth, recentStat)}
+                  ${renderStatGrowthRecentPanel(growth, focusView)}
                 </div>
               </details>
 
@@ -21801,7 +21952,7 @@
 
     const uiState =
       readUiSessionState();
-    const statViewPreferences =
+    const statGrowthPreferences =
       readStatGrowthPreferences();
 
     root.__taStatGrowth =
@@ -21811,6 +21962,7 @@
 
     root.__taStatGrowthFocus =
       uiSessionTrainingFocus(
+        statGrowthPreferences.stat_growth_focus ||
         uiState.stat_growth_focus
       );
 
@@ -21828,16 +21980,6 @@
     root.__taStatGrowthSessionLimit =
       uiSessionStatGrowthSessionLimit(
         uiState.stat_growth_session_limit
-      );
-
-    root.__taStatGrowthDetailsStat =
-      uiSessionStatView(
-        statViewPreferences.stat_growth_details_stat
-      );
-
-    root.__taStatGrowthRecentStat =
-      uiSessionStatView(
-        statViewPreferences.stat_growth_recent_stat
       );
 
     const bindRecentChartInteractions =
@@ -21918,6 +22060,110 @@
               );
             }
           );
+        }
+      };
+
+    const currentFocusView =
+      () =>
+        statGrowthFocusView(
+          root.__taStatGrowth ||
+          {},
+          root.__taStatGrowthFocus
+        );
+
+    const syncTrainingReadinessFocus =
+      () => {
+        if (
+          Number(
+            root.__taStatGrowth?.valid_logs ||
+            0
+          ) <= 0
+        ) {
+          return;
+        }
+
+        const section =
+          root.querySelector(
+            '.ta-training-readiness-section'
+          );
+
+        if (
+          !section ||
+          typeof CustomEvent !==
+            'function'
+        ) {
+          return;
+        }
+
+        section.dispatchEvent(
+          new CustomEvent(
+            'ta-growth-focus-stat',
+            {
+              detail: {
+                stat:
+                  currentFocusView()
+              }
+            }
+          )
+        );
+      };
+
+    const refreshGrowthFocusPanels =
+      (
+        syncReadiness = true
+      ) => {
+        const view =
+          currentFocusView();
+        const detailsPanel =
+          root.querySelector(
+            '[data-ta-stat-details-scope]'
+          );
+        const recentPanel =
+          root.querySelector(
+            '[data-ta-stat-recent-panel]'
+          );
+
+        if (
+          detailsPanel
+        ) {
+          detailsPanel.outerHTML =
+            renderStatGrowthDetailsScope(
+              root.__taStatGrowth ||
+              {},
+              view
+            );
+        }
+
+        if (
+          recentPanel
+        ) {
+          recentPanel.outerHTML =
+            renderStatGrowthRecentPanel(
+              root.__taStatGrowth ||
+              {},
+              view
+            );
+
+          const replacement =
+            root.querySelector(
+              '[data-ta-stat-recent-panel]'
+            );
+
+          if (
+            replacement
+          ) {
+            bindRecentChartInteractions(
+              replacement
+            );
+          }
+        }
+
+        refreshScopedGainSummary();
+
+        if (
+          syncReadiness
+        ) {
+          syncTrainingReadinessFocus();
         }
       };
 
@@ -22116,6 +22362,10 @@
               stat_growth_focus:
                 root.__taStatGrowthFocus
             });
+            writeStatGrowthPreferences({
+              stat_growth_focus:
+                root.__taStatGrowthFocus
+            });
 
             card.outerHTML =
               renderStatGrowthCumulativeChart(
@@ -22126,7 +22376,7 @@
                 root.__taStatGrowthSessionLimit
               );
 
-            refreshScopedGainSummary();
+            refreshGrowthFocusPanels();
 
             bindCumulativeInteractions(
               root
@@ -22266,129 +22516,6 @@
         }
       };
 
-    const bindStatViewControl =
-      select => {
-        if (
-          !select ||
-          select.__taStatViewBound ===
-          true
-        ) {
-          return;
-        }
-
-        select.__taStatViewBound =
-          true;
-
-        select.addEventListener(
-          'change',
-          () => {
-            const next =
-              uiSessionStatView(
-                select.value
-              );
-            const target =
-              select.getAttribute(
-                'data-ta-stat-view'
-              );
-
-            if (
-              target ===
-              'details'
-            ) {
-              root.__taStatGrowthDetailsStat =
-                next;
-
-              writeStatGrowthPreferences({
-                stat_growth_details_stat:
-                  next
-              });
-
-              const panel =
-                select.closest(
-                  '[data-ta-stat-details-scope]'
-                );
-
-              if (
-                panel
-              ) {
-                panel.outerHTML =
-                  renderStatGrowthDetailsScope(
-                    root.__taStatGrowth ||
-                    {},
-                    next
-                  );
-
-                bindStatViewControls(
-                  root
-                );
-              }
-
-              return;
-            }
-
-            if (
-              target ===
-              'recent'
-            ) {
-              root.__taStatGrowthRecentStat =
-                next;
-
-              writeStatGrowthPreferences({
-                stat_growth_recent_stat:
-                  next
-              });
-
-              const panel =
-                select.closest(
-                  '[data-ta-stat-recent-panel]'
-                );
-
-              if (
-                panel
-              ) {
-                panel.outerHTML =
-                  renderStatGrowthRecentPanel(
-                    root.__taStatGrowth ||
-                    {},
-                    next
-                  );
-
-                const replacement =
-                  root.querySelector(
-                    '[data-ta-stat-recent-panel]'
-                  );
-
-                if (
-                  replacement
-                ) {
-                  bindRecentChartInteractions(
-                    replacement
-                  );
-                }
-
-                bindStatViewControls(
-                  root
-                );
-              }
-            }
-          }
-        );
-      };
-
-    const bindStatViewControls =
-      scope => {
-        for (
-          const select
-          of scope.querySelectorAll(
-            '[data-ta-stat-view]'
-          )
-        ) {
-          bindStatViewControl(
-            select
-          );
-        }
-      };
-
     bindCumulativeInteractions(
       root
     );
@@ -22399,9 +22526,73 @@
       root
     );
 
-    bindStatViewControls(
-      root
-    );
+    if (
+      root.__taTrainingStatBridgeBound !==
+      true
+    ) {
+      root.__taTrainingStatBridgeBound =
+        true;
+
+      root.addEventListener(
+        'ta-training-stat-change',
+        event => {
+          const next =
+            event?.detail?.stat;
+
+          if (
+            ![
+              'strength',
+              'defense',
+              'speed',
+              'dexterity'
+            ].includes(
+              next
+            )
+          ) {
+            return;
+          }
+
+          root.__taStatGrowthFocus =
+            next;
+
+          writeUiSessionState({
+            stat_growth_focus:
+              next
+          });
+          writeStatGrowthPreferences({
+            stat_growth_focus:
+              next
+          });
+
+          const card =
+            root.querySelector(
+              '[data-ta-stat-total-card]'
+            );
+
+          if (
+            card
+          ) {
+            card.outerHTML =
+              renderStatGrowthCumulativeChart(
+                root.__taStatGrowth ||
+                {},
+                next,
+                root.__taStatGrowthContext,
+                root.__taStatGrowthSessionLimit
+              );
+          }
+
+          refreshGrowthFocusPanels(
+            false
+          );
+          bindCumulativeInteractions(
+            root
+          );
+        }
+      );
+    }
+
+    syncTrainingReadinessFocus();
   }
 
   function renderTrainingWorkspace(
@@ -22460,14 +22651,6 @@
       uiSessionStatGrowthSessionLimit(
         state.stat_growth_session_limit
       );
-    const detailsStat =
-      uiSessionStatView(
-        state.stat_growth_details_stat
-      );
-    const recentStat =
-      uiSessionStatView(
-        state.stat_growth_recent_stat
-      );
 
     const meta = [
       readiness?.energy === null ||
@@ -22493,10 +22676,6 @@
             focus,
             scope,
             context,
-            details_stat:
-              detailsStat,
-            recent_stat:
-              recentStat,
             session_limit:
               sessionLimit
           })}
@@ -29045,38 +29224,79 @@
         overflow-wrap: anywhere;
       }
 
-      #${MODAL_ID} .ta-stat-window-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 7px;
-        margin: 10px 0;
-      }
-
-      #${MODAL_ID} .ta-stat-window-card {
-        min-width: 0;
-        padding: 9px;
-        border: 1px solid #2f2f2f;
+      #${MODAL_ID} .ta-stat-window-table-wrap {
+        overflow: hidden;
+        border: 1px solid #30333a;
         border-radius: 8px;
-        background: #141414;
+        background: #15161a;
       }
 
-      #${MODAL_ID} .ta-stat-window-title {
+      #${MODAL_ID} .ta-stat-window-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        color: #e7e7e7;
         font-size: 11px;
-        font-weight: 800;
-        opacity: .7;
+        font-variant-numeric: tabular-nums;
       }
 
-      #${MODAL_ID} .ta-stat-window-gain {
-        margin-top: 4px;
-        font-size: 16px;
-        font-weight: 800;
+      #${MODAL_ID} .ta-stat-window-table caption {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
 
-      #${MODAL_ID} .ta-stat-window-note {
-        margin-top: 5px;
-        font-size: 11px;
-        line-height: 1.4;
-        opacity: .6;
+      #${MODAL_ID} .ta-stat-window-table th,
+      #${MODAL_ID} .ta-stat-window-table td {
+        padding: 7px 6px;
+        border-bottom: 1px solid #292c32;
+        text-align: right;
+        vertical-align: middle;
+      }
+
+      #${MODAL_ID} .ta-stat-window-table th:first-child {
+        width: 30%;
+        text-align: left;
+      }
+
+      #${MODAL_ID} .ta-stat-window-table thead th {
+        color: #9fa5ad;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .035em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-stat-window-table tbody th,
+      #${MODAL_ID} .ta-stat-window-table tbody td {
+        font-weight: 750;
+      }
+
+      #${MODAL_ID} .ta-stat-window-table tbody tr:last-child {
+        background: #1a1d22;
+      }
+
+      #${MODAL_ID} .ta-stat-window-table tbody tr:last-child th,
+      #${MODAL_ID} .ta-stat-window-table tbody tr:last-child td {
+        border-bottom: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-window-table tbody th span,
+      #${MODAL_ID} .ta-stat-window-table tbody th small {
+        display: block;
+      }
+
+      #${MODAL_ID} .ta-stat-window-table tbody th small {
+        margin-top: 2px;
+        color: #969ca5;
+        font-size: 8px;
+        font-weight: 600;
+        line-height: 1.25;
       }
 
       #${MODAL_ID} .ta-stat-subsection {
@@ -30077,75 +30297,95 @@
         line-height: 1.4;
       }
 
-      /* v2.18.5: compact, scan-friendly advanced Stat Growth detail. */
+      /* v2.18.39: one dense surface for shared-focus Stat Growth detail. */
       #${MODAL_ID} .ta-stat-details-scope,
       #${MODAL_ID} .ta-stat-recent-panel {
         display: grid;
         gap: 9px;
       }
 
-      #${MODAL_ID} .ta-stat-view-control {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(146px, 210px);
-        gap: 10px;
-        align-items: center;
-        margin: 0;
-        padding: 8px 9px;
-        border: 1px solid #30333a;
-        border-radius: 8px;
-        background: #17181c;
-      }
-
-      #${MODAL_ID} .ta-stat-view-control > span {
-        color: #b7b7b7;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: .035em;
-        text-transform: uppercase;
-      }
-
-      #${MODAL_ID} .ta-stat-view-control select {
-        width: 100%;
-        min-height: 40px;
-        margin: 0;
-        padding: 7px 30px 7px 10px;
-        border: 1px solid #565a64;
-        border-radius: 7px;
-        background: #292a2f;
-        color: #f2f2f2;
-        font: inherit;
-        font-size: 13px;
-        font-weight: 700;
-      }
-
       #${MODAL_ID} .ta-stat-growth-compact-metrics {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 7px;
-      }
-
-      #${MODAL_ID} .ta-stat-growth-compact-metrics .ta-metric-card {
-        min-width: 0;
-        min-height: 74px;
-        margin: 0;
-        padding: 8px 9px;
+        overflow: hidden;
+        border: 1px solid #30333a;
         border-radius: 8px;
+        background: #15161a;
       }
 
-      #${MODAL_ID} .ta-stat-growth-compact-metrics .ta-metric-label {
+      #${MODAL_ID} .ta-stat-dense-metric {
+        min-width: 0;
+        margin: 0;
+        border: 0;
+        border-bottom: 1px solid #292c32;
+        border-radius: 0;
+        background: transparent;
+      }
+
+      #${MODAL_ID} .ta-stat-dense-metric:nth-child(odd) {
+        border-right: 1px solid #292c32;
+      }
+
+      #${MODAL_ID} .ta-stat-dense-metric:nth-last-child(-n+2) {
+        border-bottom: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-dense-metric > summary {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto 10px;
+        gap: 6px;
+        align-items: center;
+        min-height: 50px;
+        padding: 8px 9px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      #${MODAL_ID} .ta-stat-dense-metric > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-stat-dense-metric > summary::after {
+        content: '+';
+        color: #838b95;
+        font-size: 12px;
+        font-weight: 800;
+        text-align: center;
+      }
+
+      #${MODAL_ID} .ta-stat-dense-metric[open] > summary::after {
+        content: '–';
+      }
+
+      #${MODAL_ID} .ta-stat-dense-metric > summary span {
+        color: #aeb4bc;
         font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .025em;
+        line-height: 1.2;
+        text-transform: uppercase;
       }
 
-      #${MODAL_ID} .ta-stat-growth-compact-metrics .ta-metric-value {
-        margin-top: 3px;
-        font-size: 21px;
+      #${MODAL_ID} .ta-stat-dense-metric > summary strong {
+        color: #f0f2f4;
+        font-size: 16px;
+        font-weight: 850;
+        font-variant-numeric: tabular-nums;
         line-height: 1.1;
+        text-align: right;
+        overflow-wrap: anywhere;
       }
 
-      #${MODAL_ID} .ta-stat-growth-compact-metrics .ta-metric-note {
-        margin-top: 3px;
-        font-size: 10px;
-        line-height: 1.25;
+      #${MODAL_ID} .ta-stat-dense-metric > small {
+        display: block;
+        padding: 0 9px 9px;
+        color: #9da4ad;
+        font-size: 9px;
+        line-height: 1.35;
+      }
+
+      #${MODAL_ID} .ta-stat-dense-metric[open] {
+        background: #1a1d22;
       }
 
       @media(max-width:520px) {
@@ -30162,15 +30402,23 @@
           font-size: 12px;
         }
 
-        #${MODAL_ID} .ta-stat-view-control {
-          grid-template-columns: minmax(0, .9fr) minmax(140px, 1.1fr);
-          gap: 8px;
-          padding: 7px 8px;
+        #${MODAL_ID} .ta-stat-window-table {
+          font-size: 10px;
         }
 
-        #${MODAL_ID} .ta-stat-view-control select {
-          min-height: 42px;
-          font-size: 14px;
+        #${MODAL_ID} .ta-stat-window-table th,
+        #${MODAL_ID} .ta-stat-window-table td {
+          padding: 7px 4px;
+        }
+
+        #${MODAL_ID} .ta-stat-dense-metric > summary {
+          grid-template-columns: minmax(0, 1fr) auto 9px;
+          gap: 4px;
+          padding: 8px 7px;
+        }
+
+        #${MODAL_ID} .ta-stat-dense-metric > summary strong {
+          font-size: 15px;
         }
       }
 
