@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.40
+// @version      2.18.41
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.40';
+  const VERSION = '2.18.41';
 
-  // v2.18.40 unifies Growth focus and presents dense details plus all-time comparison.
+  // v2.18.41 adds compact calendar ranges and tappable Selected/All-stat history charts.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13568,20 +13568,34 @@
       : 'all';
   }
 
-  function uiSessionStatGrowthSessionLimit(
+  function uiSessionStatGrowthRange(
     value
   ) {
-    return [
-      12,
-      30,
-      60
-    ].includes(
-      Number(
-        value
+    const normalized =
+      String(
+        value ??
+        ''
+      ).toLowerCase();
+
+    if (
+      [
+        '7d',
+        '14d',
+        '30d',
+        'all'
+      ].includes(
+        normalized
       )
-    )
-      ? Number(value)
-      : 12;
+    ) {
+      return normalized;
+    }
+
+    // Migrate the earlier 12/30/60-session preference without allowing an
+    // old value to make the new calendar-range control invalid.
+    return Number(value) ===
+      12
+        ? '14d'
+        : '30d';
   }
 
   function writeUiOrientationHandoff(
@@ -13639,8 +13653,9 @@
         uiSessionStatGrowthContext(
           state.stat_growth_context
         ),
-      stat_growth_session_limit:
-        uiSessionStatGrowthSessionLimit(
+      stat_growth_range:
+        uiSessionStatGrowthRange(
+          state.stat_growth_range ??
           state.stat_growth_session_limit
         ),
       resource_energy_open:
@@ -13751,8 +13766,9 @@
           uiSessionStatGrowthContext(
             parsed.stat_growth_context
           ),
-        stat_growth_session_limit:
-          uiSessionStatGrowthSessionLimit(
+        stat_growth_range:
+          uiSessionStatGrowthRange(
+            parsed.stat_growth_range ??
             parsed.stat_growth_session_limit
           ),
         resource_energy_open:
@@ -13809,8 +13825,8 @@
         'selected',
       stat_growth_context:
         'all',
-      stat_growth_session_limit:
-        12,
+      stat_growth_range:
+        '30d',
       resource_energy_open:
         null,
       resource_nerve_open:
@@ -13903,8 +13919,9 @@
           uiSessionStatGrowthContext(
             parsed.stat_growth_context
           ),
-        stat_growth_session_limit:
-          uiSessionStatGrowthSessionLimit(
+        stat_growth_range:
+          uiSessionStatGrowthRange(
+            parsed.stat_growth_range ??
             parsed.stat_growth_session_limit
           ),
         resource_energy_open:
@@ -14141,8 +14158,9 @@
         uiSessionStatGrowthContext(
           source?.stat_growth_context
         ),
-      stat_growth_session_limit:
-        uiSessionStatGrowthSessionLimit(
+      stat_growth_range:
+        uiSessionStatGrowthRange(
+          source?.stat_growth_range ??
           source?.stat_growth_session_limit
         ),
       resource_energy_open:
@@ -16888,7 +16906,7 @@
   function statGrowthCumulativeSamples(
     growth,
     stat,
-    limit = 12,
+    range = '30d',
     contextFilter = 'all'
   ) {
     const normalizedStat =
@@ -16907,23 +16925,44 @@
         ? contextFilter
         : 'all';
 
-    const safeLimit =
-      Math.max(
-        1,
-        Math.min(
-          60,
-          Math.floor(
-            Number(limit) ||
-            12
-          )
-        )
+    const normalizedRange =
+      uiSessionStatGrowthRange(
+        range
       );
+
+    const rangeDays =
+      normalizedRange ===
+        '7d'
+        ? 7
+        : normalizedRange ===
+            '14d'
+          ? 14
+          : normalizedRange ===
+              '30d'
+            ? 30
+            : null;
+
+    const earliestTimestamp =
+      rangeDays ===
+        null
+        ? null
+        : Math.floor(
+            Date.now() /
+            1000
+          ) -
+          rangeDays *
+            86400;
 
     return (growth?.training_actions || [])
       .filter(
         action =>
           action?.stat ===
           normalizedStat &&
+          (
+            earliestTimestamp === null ||
+            Number(action?.timestamp || 0) >=
+              earliestTimestamp
+          ) &&
           (
             normalizedContextFilter === 'all' ||
             action?.training_context?.status ===
@@ -16941,9 +16980,6 @@
           String(left.id || '').localeCompare(
             String(right.id || '')
         )
-      )
-      .slice(
-        -safeLimit
       );
   }
 
@@ -19257,6 +19293,25 @@
     }
   }
 
+  function statGrowthRangeLabel(
+    range
+  ) {
+    return {
+      '7d':
+        '1 week',
+      '14d':
+        '2 weeks',
+      '30d':
+        '1 month',
+      all:
+        'All time'
+    }[
+      uiSessionStatGrowthRange(
+        range
+      )
+    ];
+  }
+
   function statGrowthViewLabel(
     view
   ) {
@@ -19503,7 +19558,8 @@
   function renderStatGrowthFocusControl(
     focus,
     context = 'all',
-    sessionLimit = 12
+    range = '30d',
+    scope = 'selected'
   ) {
     const selected =
       uiSessionTrainingFocus(
@@ -19513,36 +19569,45 @@
       uiSessionStatGrowthContext(
         context
       );
-    const selectedLimit =
-      uiSessionStatGrowthSessionLimit(
-        sessionLimit
+    const selectedRange =
+      uiSessionStatGrowthRange(
+        range
       );
+    const allStats =
+      scope ===
+      'all';
 
     return `
-      <div class="ta-stat-total-controls">
-        <label>
-          <span>Growth focus</span>
-          <select data-ta-stat-total-focus aria-label="Growth focus">
-            ${[
-              'most_trained',
-              'recent',
-              'strength',
-              'defense',
-              'speed',
-              'dexterity'
-            ].map(
-              option => `
-                <option
-                  value="${option}"
-                  ${option === selected ? 'selected' : ''}
-                >${escapeActivityHtml(statGrowthCumulativeFocusLabel(option))}</option>
-              `
-            ).join('')}
-          </select>
-        </label>
+      <div class="ta-stat-total-controls${allStats ? ' ta-stat-total-controls-all' : ''}">
+        ${
+          allStats
+            ? ''
+            : `
+              <label>
+                <span>Focus</span>
+                <select data-ta-stat-total-focus aria-label="Growth focus">
+                  ${[
+                    'most_trained',
+                    'recent',
+                    'strength',
+                    'defense',
+                    'speed',
+                    'dexterity'
+                  ].map(
+                    option => `
+                      <option
+                        value="${option}"
+                        ${option === selected ? 'selected' : ''}
+                      >${escapeActivityHtml(statGrowthCumulativeFocusLabel(option))}</option>
+                    `
+                  ).join('')}
+                </select>
+              </label>
+            `
+        }
         <label>
           <span>Context</span>
-          <select data-ta-stat-total-context>
+          <select data-ta-stat-total-context aria-label="Training context">
             ${[
               'all',
               'happiness_boost_observed',
@@ -19557,23 +19622,26 @@
             ).join('')}
           </select>
         </label>
-        <label>
-          <span>Sessions</span>
-          <select data-ta-stat-total-session-limit aria-label="Sessions shown">
+        <div class="ta-stat-range-control" role="group" aria-label="History range">
+          <span>Range</span>
+          <div>
             ${[
-              12,
-              30,
-              60
+              ['7d', '1W'],
+              ['14d', '2W'],
+              ['30d', '1M'],
+              ['all', 'All']
             ].map(
-              option => `
-                <option
-                  value="${option}"
-                  ${option === selectedLimit ? 'selected' : ''}
-                >${option}</option>
+              ([value, label]) => `
+                <button
+                  type="button"
+                  class="${value === selectedRange ? 'ta-stat-range-active' : ''}"
+                  data-ta-stat-total-range="${value}"
+                  aria-pressed="${value === selectedRange ? 'true' : 'false'}"
+                >${label}</button>
               `
             ).join('')}
-          </select>
-        </label>
+          </div>
+        </div>
       </div>
     `;
   }
@@ -20444,6 +20512,53 @@
     );
   }
 
+  function statGrowthSessionActionKey(
+    action
+  ) {
+    return [
+      String(
+        action?.id ||
+        ''
+      ),
+      String(
+        action?.stat ||
+        ''
+      ),
+      String(
+        Number(action?.timestamp || 0)
+      ),
+      String(
+        Number(action?.stat_after || 0)
+      )
+    ].join('|');
+  }
+
+  function statGrowthSessionActionFromElement(
+    element,
+    growth
+  ) {
+    const key =
+      element?.getAttribute?.(
+        'data-ta-stat-action-key'
+      );
+
+    if (
+      !key
+    ) {
+      return null;
+    }
+
+    return (growth?.training_actions || [])
+      .find(
+        action =>
+          statGrowthSessionActionKey(
+            action
+          ) ===
+          key
+      ) ||
+      null;
+  }
+
   function renderStatGrowthSessionInspector(
     action
   ) {
@@ -20472,6 +20587,8 @@
         </div>
 
         <div class="ta-stat-session-quickline">
+          <strong>Total ${field('stat_after', model.stat_after)}</strong>
+          <span>·</span>
           <strong>${field('energy', model.energy)}E</strong>
           <span>·</span>
           <strong>${field('trains', model.trains)} trains</strong>
@@ -20641,11 +20758,11 @@
     }
   }
 
-  function renderStatGrowthCumulativeChart(
+  function renderStatGrowthSelectedChart(
     growth,
     focus = 'recent',
     context = 'all',
-    sessionLimit = 12,
+    range = '30d',
     scope = 'selected'
   ) {
     const stat =
@@ -20658,16 +20775,16 @@
       uiSessionStatGrowthContext(
         context
       );
-    const selectedLimit =
-      uiSessionStatGrowthSessionLimit(
-        sessionLimit
+    const selectedRange =
+      uiSessionStatGrowthRange(
+        range
       );
 
     const samples =
       statGrowthCumulativeSamples(
         growth,
         stat,
-        selectedLimit,
+        selectedRange,
         selectedContext
       );
 
@@ -20690,11 +20807,12 @@
         <div class="ta-chart-card ta-stat-total-chart" data-ta-stat-total-card>
           <div class="ta-chart-heading">
             <span>Observed total &amp; session gain</span>
-            <span>No selected-stat observations</span>
+            <span>No observations · ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}</span>
           </div>
 
           <div class="ta-stat-post-chart-controls">
-            ${renderStatGrowthFocusControl(focus, selectedContext, selectedLimit)}
+            ${renderStatGrowthScopeControl(scope)}
+            ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, scope)}
             ${renderStatGrowthScopedGainSummary(growth, focus, scope)}
           </div>
         </div>
@@ -20916,8 +21034,8 @@
             statGrowthCumulativeSampleDetail(
               action
             );
-          const model =
-            statGrowthEncodedSessionModel(
+          const actionKey =
+            statGrowthSessionActionKey(
               action
             );
           const hitWidth =
@@ -20939,7 +21057,7 @@
               class="ta-stat-total-bar-hit"
               data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
               data-ta-stat-session-index="${index}"
-              data-ta-stat-session-model="${escapeActivityHtml(model)}"
+              data-ta-stat-action-key="${escapeActivityHtml(actionKey)}"
               aria-hidden="true"
               tabindex="-1"
             ></rect>
@@ -20957,8 +21075,8 @@
             statGrowthCumulativeSampleDetail(
               action
             );
-          const model =
-            statGrowthEncodedSessionModel(
+          const actionKey =
+            statGrowthSessionActionKey(
               action
             );
           const active =
@@ -20973,7 +21091,7 @@
               class="ta-stat-total-hit"
               data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
               data-ta-stat-session-index="${index}"
-              data-ta-stat-session-model="${escapeActivityHtml(model)}"
+              data-ta-stat-action-key="${escapeActivityHtml(actionKey)}"
               role="button"
               tabindex="0"
               aria-pressed="${active ? 'true' : 'false'}"
@@ -21014,12 +21132,6 @@
         }
       );
 
-    const firstDetail =
-      statGrowthCumulativeSampleDetail(
-        samples[
-          samples.length - 1
-        ]
-      );
     const firstSession =
       samples[
         samples.length - 1
@@ -21029,7 +21141,7 @@
       <div class="ta-chart-card ta-stat-total-chart" data-ta-stat-total-card>
         <div class="ta-chart-heading">
           <span>Observed total &amp; session gain</span>
-          <span>${escapeActivityHtml(label)} · last ${samples.length} observations</span>
+          <span>${escapeActivityHtml(label)} · ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))} · ${samples.length} observations</span>
         </div>
 
         <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars classified by observed Energy-source evidence" class="ta-stat-total-svg" data-ta-stat-total-svg>
@@ -21064,16 +21176,13 @@
           Session gain scale: 0–${escapeActivityHtml(statGrowthFormatCompactGain(maximumGain))} · tap a bar or point for exact values
         </div>
 
+        ${renderStatGrowthSessionInspector(firstSession)}
+
         <div class="ta-stat-post-chart-controls">
-          ${renderStatGrowthFocusControl(focus, selectedContext, selectedLimit)}
+          ${renderStatGrowthScopeControl(scope)}
+          ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, scope)}
           ${renderStatGrowthScopedGainSummary(growth, focus, scope)}
         </div>
-
-        <div class="ta-chart-detail" data-ta-stat-total-detail-output>
-          ${escapeActivityHtml(firstDetail)}
-        </div>
-
-        ${renderStatGrowthSessionInspector(firstSession)}
 
         <div class="ta-stat-context-summary">
           <strong>Observed training context · ${escapeActivityHtml(contextSummary.label)}</strong>
@@ -21086,6 +21195,375 @@
         </div>
       </div>
     `;
+  }
+
+  function renderStatGrowthAllChart(
+    growth,
+    focus = 'recent',
+    context = 'all',
+    range = '30d'
+  ) {
+    const selectedContext =
+      uiSessionStatGrowthContext(
+        context
+      );
+    const selectedRange =
+      uiSessionStatGrowthRange(
+        range
+      );
+    const definitions = [
+      {
+        stat: 'strength',
+        label: 'Strength',
+        short: 'STR'
+      },
+      {
+        stat: 'defense',
+        label: 'Defense',
+        short: 'DEF'
+      },
+      {
+        stat: 'speed',
+        label: 'Speed',
+        short: 'SPD'
+      },
+      {
+        stat: 'dexterity',
+        label: 'Dexterity',
+        short: 'DEX'
+      }
+    ];
+    const lanes =
+      definitions.map(
+        definition => ({
+          ...definition,
+          samples:
+            statGrowthCumulativeSamples(
+              growth,
+              definition.stat,
+              selectedRange,
+              selectedContext
+            )
+        })
+      );
+    const allSamples =
+      lanes
+        .flatMap(
+          lane =>
+            lane.samples
+        )
+        .slice()
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            Number(left?.timestamp || 0) -
+              Number(right?.timestamp || 0) ||
+            String(left?.id || '').localeCompare(
+              String(right?.id || '')
+            )
+        );
+
+    if (
+      !allSamples.length
+    ) {
+      return `
+        <div class="ta-chart-card ta-stat-total-chart ta-stat-all-chart" data-ta-stat-total-card>
+          <div class="ta-chart-heading">
+            <span>All-stat history</span>
+            <span>No observations · ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}</span>
+          </div>
+
+          <div class="ta-stat-post-chart-controls">
+            ${renderStatGrowthScopeControl('all')}
+            ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, 'all')}
+            ${renderStatGrowthScopedGainSummary(growth, focus, 'all')}
+          </div>
+        </div>
+      `;
+    }
+
+    const width =
+      620;
+    const left =
+      12;
+    const right =
+      12;
+    const top =
+      12;
+    const bottom =
+      30;
+    const laneHeight =
+      58;
+    const laneGap =
+      8;
+    const height =
+      top +
+      bottom +
+      laneHeight *
+        lanes.length +
+      laneGap *
+        (
+          lanes.length -
+          1
+        );
+    const plotWidth =
+      width -
+      left -
+      right;
+    const minimumTimestamp =
+      Math.min(
+        ...allSamples.map(
+          action =>
+            Number(action?.timestamp || 0)
+        )
+      );
+    const maximumTimestamp =
+      Math.max(
+        ...allSamples.map(
+          action =>
+            Number(action?.timestamp || 0)
+        )
+      );
+    const timestampRange =
+      Math.max(
+        1,
+        maximumTimestamp -
+        minimumTimestamp
+      );
+    const pointX =
+      action =>
+        minimumTimestamp ===
+        maximumTimestamp
+          ? left +
+            plotWidth /
+            2
+          : left +
+            (
+              Number(action?.timestamp || 0) -
+              minimumTimestamp
+            ) /
+            timestampRange *
+            plotWidth;
+    const latestSession =
+      allSamples[
+        allSamples.length -
+        1
+      ];
+    const latestSessionKey =
+      `${latestSession?.stat || 'stat'}-${String(latestSession?.id || latestSession?.timestamp || '')}`;
+
+    const laneMarkup =
+      lanes.map(
+        (
+          lane,
+          laneIndex
+        ) => {
+          const laneTop =
+            top +
+            laneIndex *
+              (
+                laneHeight +
+                laneGap
+              );
+          const totals =
+            lane.samples.map(
+              action =>
+                Number(action?.stat_after || 0)
+            );
+          const minimumTotal =
+            totals.length
+              ? Math.min(
+                  ...totals
+                )
+              : 0;
+          const maximumTotal =
+            totals.length
+              ? Math.max(
+                  ...totals
+                )
+              : 0;
+          const totalRange =
+            Math.max(
+              1,
+              maximumTotal -
+              minimumTotal
+            );
+          const lineTop =
+            laneTop +
+            18;
+          const lineHeight =
+            laneHeight -
+            24;
+          const pointY =
+            action =>
+              lane.samples.length ===
+              1
+                ? lineTop +
+                  lineHeight /
+                  2
+                : lineTop +
+                  (
+                    1 -
+                    (
+                      Number(action?.stat_after || 0) -
+                      minimumTotal
+                    ) /
+                    totalRange
+                  ) *
+                  lineHeight;
+          const path =
+            lane.samples.map(
+              (
+                action,
+                index
+              ) =>
+                `${index ? 'L' : 'M'}${pointX(action).toFixed(2)} ${pointY(action).toFixed(2)}`
+            ).join(' ');
+          const points =
+            lane.samples.map(
+              action => {
+                const detail =
+                  statGrowthCumulativeSampleDetail(
+                    action
+                  );
+                const actionKey =
+                  statGrowthSessionActionKey(
+                    action
+                  );
+                const sessionKey =
+                  `${lane.stat}-${String(action?.id || action?.timestamp || '')}`;
+                const active =
+                  sessionKey ===
+                  latestSessionKey;
+
+                return `
+                  <circle
+                    cx="${pointX(action).toFixed(2)}"
+                    cy="${pointY(action).toFixed(2)}"
+                    r="12"
+                    class="ta-stat-total-hit"
+                    data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
+                    data-ta-stat-session-index="${escapeActivityHtml(sessionKey)}"
+                    data-ta-stat-action-key="${escapeActivityHtml(actionKey)}"
+                    role="button"
+                    tabindex="0"
+                    aria-pressed="${active ? 'true' : 'false'}"
+                    aria-label="${escapeActivityHtml(detail)}"
+                  ></circle>
+                  <circle
+                    cx="${pointX(action).toFixed(2)}"
+                    cy="${pointY(action).toFixed(2)}"
+                    r="3.4"
+                    class="ta-stat-lane-point ta-stat-lane-${lane.stat}${active ? ' ta-stat-session-active' : ''}"
+                    data-ta-stat-session-visual="${escapeActivityHtml(sessionKey)}"
+                    aria-hidden="true"
+                  ></circle>
+                `;
+              }
+            ).join('');
+          const latestTotal =
+            lane.samples.length
+              ? statGrowthFormatCompactNumber(
+                  lane.samples[
+                    lane.samples.length -
+                    1
+                  ]?.stat_after,
+                  2
+                )
+              : 'No data';
+
+          return `
+            <g class="ta-stat-lane ta-stat-lane-${lane.stat}">
+              <rect x="${left}" y="${laneTop}" width="${plotWidth}" height="${laneHeight}" rx="7" class="ta-stat-lane-background"></rect>
+              ${path ? `<path d="${path}" class="ta-stat-lane-line ta-stat-lane-${lane.stat}"></path>` : ''}
+              ${points}
+              <text x="${left + 7}" y="${laneTop + 13}" class="ta-stat-lane-label ta-stat-lane-${lane.stat}">${lane.short}</text>
+              <text x="${left + plotWidth - 7}" y="${laneTop + 13}" text-anchor="end" class="ta-stat-lane-total">${escapeActivityHtml(latestTotal)}</text>
+            </g>
+          `;
+        }
+      ).join('');
+    const firstDate =
+      new Date(
+        minimumTimestamp *
+        1000
+      ).toLocaleDateString(
+        undefined,
+        {
+          month: 'short',
+          day: 'numeric'
+        }
+      );
+    const lastDate =
+      new Date(
+        maximumTimestamp *
+        1000
+      ).toLocaleDateString(
+        undefined,
+        {
+          month: 'short',
+          day: 'numeric'
+        }
+      );
+
+    return `
+      <div class="ta-chart-card ta-stat-total-chart ta-stat-all-chart" data-ta-stat-total-card>
+        <div class="ta-chart-heading">
+          <span>All-stat history</span>
+          <span>${escapeActivityHtml(statGrowthRangeLabel(selectedRange))} · ${allSamples.length.toLocaleString()} observations</span>
+        </div>
+
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Strength, Defense, Speed, and Dexterity observed totals over ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}" class="ta-stat-total-svg ta-stat-all-svg" data-ta-stat-total-svg>
+          ${laneMarkup}
+          <text x="${left}" y="${height - 8}" class="ta-stat-total-label">${escapeActivityHtml(firstDate)}</text>
+          <text x="${left + plotWidth}" y="${height - 8}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(lastDate)}</text>
+        </svg>
+
+        <div class="ta-stat-lane-legend" aria-label="All-stat chart legend">
+          ${definitions.map(
+            definition =>
+              `<span><i class="ta-stat-lane-key ta-stat-lane-${definition.stat}"></i>${definition.label}</span>`
+          ).join('')}
+        </div>
+        <div class="ta-stat-total-scale">
+          Each stat uses its own lane and scale · tap a point for exact values
+        </div>
+
+        ${renderStatGrowthSessionInspector(latestSession)}
+
+        <div class="ta-stat-post-chart-controls">
+          ${renderStatGrowthScopeControl('all')}
+          ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, 'all')}
+          ${renderStatGrowthScopedGainSummary(growth, focus, 'all')}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderStatGrowthCumulativeChart(
+    growth,
+    focus = 'recent',
+    context = 'all',
+    range = '30d',
+    scope = 'selected'
+  ) {
+    return scope ===
+      'all'
+        ? renderStatGrowthAllChart(
+            growth,
+            focus,
+            context,
+            range
+          )
+        : renderStatGrowthSelectedChart(
+            growth,
+            focus,
+            context,
+            range,
+            'selected'
+          );
   }
 
   function renderStatGrowthRecentChart(
@@ -21729,25 +22207,7 @@
           );
 
     return `
-      <div class="ta-stat-gain-scope" data-ta-stat-gain-scope>
-        <div class="ta-stat-gain-scope-controls" role="group" aria-label="Observed gain summary scope">
-          ${
-            [
-              ['selected', 'Selected stat'],
-              ['all', 'All stats']
-            ].map(
-              ([value, label]) => `
-                <button
-                  type="button"
-                  class="${value === summary.scope ? 'ta-stat-gain-scope-active' : ''}"
-                  data-ta-stat-gain-scope-option="${value}"
-                  aria-pressed="${value === summary.scope ? 'true' : 'false'}"
-                >${label}</button>
-              `
-            ).join('')
-          }
-        </div>
-
+      <div class="ta-stat-gain-scope" data-ta-stat-gain-summary>
         <div class="ta-stat-summary-tiles">
           <div class="ta-metric-card ta-stat-gain-primary">
             <div class="ta-metric-label">Observed stat gain</div>
@@ -21767,6 +22227,34 @@
         </div>
 
         ${renderStatGrowthDetailsScope(growth, detailsView)}
+      </div>
+    `;
+  }
+
+  function renderStatGrowthScopeControl(
+    scope = 'selected'
+  ) {
+    const selected =
+      scope ===
+      'all'
+        ? 'all'
+        : 'selected';
+
+    return `
+      <div class="ta-stat-gain-scope-controls" data-ta-stat-gain-scope-controls role="group" aria-label="Stat chart scope">
+        ${[
+          ['selected', 'Selected stat'],
+          ['all', 'All stats']
+        ].map(
+          ([value, label]) => `
+            <button
+              type="button"
+              class="${value === selected ? 'ta-stat-gain-scope-active' : ''}"
+              data-ta-stat-gain-scope-option="${value}"
+              aria-pressed="${value === selected ? 'true' : 'false'}"
+            >${label}</button>
+          `
+        ).join('')}
       </div>
     `;
   }
@@ -21794,19 +22282,22 @@
       'all'
         ? 'all'
         : 'selected';
-    const sessionLimit =
-      uiSessionStatGrowthSessionLimit(
-        safeOptions.session_limit
+    const range =
+      uiSessionStatGrowthRange(
+        safeOptions.range
       );
     const context =
       uiSessionStatGrowthContext(
         safeOptions.context
       );
     const focusView =
-      statGrowthFocusView(
-        growth,
-        focus
-      );
+      scope ===
+      'all'
+        ? 'all'
+        : statGrowthFocusView(
+            growth,
+            focus
+          );
 
     if (
       !growth?.valid_logs
@@ -21851,7 +22342,7 @@
             ${escapeActivityHtml(timeBasis)}; all-time totals do not.
           </div>
 
-          ${renderStatGrowthCumulativeChart(growth, focus, context, sessionLimit, scope)}
+          ${renderStatGrowthCumulativeChart(growth, focus, context, range, scope)}
           <details class="ta-stat-subsection ta-stat-recent-growth">
                 <summary>
                   Recent growth
@@ -21882,7 +22373,8 @@
 
   function statGrowthNearestCumulativePoint(
     points,
-    targetX
+    targetX,
+    targetY = null
   ) {
     const x =
       Number(
@@ -21899,6 +22391,18 @@
 
     let nearest =
       null;
+    const y =
+      Number(
+        targetY
+      );
+    const useY =
+      targetY !==
+        null &&
+      targetY !==
+        undefined &&
+      Number.isFinite(
+        y
+      );
 
     for (
       const candidate
@@ -21921,11 +22425,34 @@
         continue;
       }
 
-      const distance =
-        Math.abs(
-          candidateX -
-          x
+      const candidateY =
+        Number(
+          candidate?.y
         );
+      const xDistance =
+        candidateX -
+        x;
+      const yDistance =
+        useY &&
+        Number.isFinite(
+          candidateY
+        )
+          ? candidateY -
+            y
+          : 0;
+      const distance =
+        useY &&
+        Number.isFinite(
+          candidateY
+        )
+          ? Math.hypot(
+              xDistance,
+              yDistance *
+                1.35
+            )
+          : Math.abs(
+              xDistance
+            );
 
       if (
         !nearest ||
@@ -21982,9 +22509,9 @@
         uiState.stat_growth_context
       );
 
-    root.__taStatGrowthSessionLimit =
-      uiSessionStatGrowthSessionLimit(
-        uiState.stat_growth_session_limit
+    root.__taStatGrowthRange =
+      uiSessionStatGrowthRange(
+        uiState.stat_growth_range
       );
 
     const bindRecentChartInteractions =
@@ -22076,6 +22603,13 @@
           root.__taStatGrowthFocus
         );
 
+    const currentGrowthView =
+      () =>
+        root.__taStatGrowthScope ===
+        'all'
+          ? 'all'
+          : currentFocusView();
+
     const syncTrainingReadinessFocus =
       () => {
         if (
@@ -22118,7 +22652,7 @@
         syncReadiness = true
       ) => {
         const view =
-          currentFocusView();
+          currentGrowthView();
         const detailsPanel =
           root.querySelector(
             '[data-ta-stat-details-scope]'
@@ -22206,9 +22740,22 @@
                 '';
             }
 
+            const action =
+              statGrowthSessionActionFromElement(
+                point,
+                root.__taStatGrowth ||
+                {}
+              );
             const model =
               statGrowthSessionModelFromElement(
                 point
+              ) ||
+              (
+                action
+                  ? statGrowthSessionInspectorModel(
+                      action
+                    )
+                  : null
               );
 
             statGrowthApplySessionInspector(
@@ -22300,10 +22847,15 @@
               Number(
                 chart.viewBox?.baseVal?.width
               );
+            const viewHeight =
+              Number(
+                chart.viewBox?.baseVal?.height
+              );
 
             if (
               !rect ||
               rect.width <= 0 ||
+              rect.height <= 0 ||
               !Number.isFinite(
                 viewWidth
               ) ||
@@ -22321,6 +22873,25 @@
               ) /
               rect.width *
               viewWidth;
+            const useLaneY =
+              card.classList.contains(
+                'ta-stat-all-chart'
+              );
+            const tapY =
+              useLaneY &&
+              Number.isFinite(
+                viewHeight
+              ) &&
+              viewHeight > 0
+                ? (
+                    Number(
+                      event.clientY
+                    ) -
+                    rect.top
+                  ) /
+                  rect.height *
+                  viewHeight
+                : null;
             const nearest =
               statGrowthNearestCumulativePoint(
                 Array.from(
@@ -22334,10 +22905,16 @@
                       point.getAttribute(
                         'cx'
                       )
+                    ),
+                    y: Number(
+                      point.getAttribute(
+                        'cy'
+                      )
                     )
                   })
                 ),
-                tapX
+                tapX,
+                tapY
               );
 
             if (
@@ -22378,7 +22955,7 @@
                 {},
                 root.__taStatGrowthFocus,
                 root.__taStatGrowthContext,
-                root.__taStatGrowthSessionLimit,
+                root.__taStatGrowthRange,
                 root.__taStatGrowthScope
               );
 
@@ -22414,56 +22991,62 @@
                 {},
                 root.__taStatGrowthFocus,
                 root.__taStatGrowthContext,
-                root.__taStatGrowthSessionLimit,
+                root.__taStatGrowthRange,
                 root.__taStatGrowthScope
               );
 
             bindCumulativeInteractions(
               root
             );
+            bindScopedGainInteractions();
           }
         );
 
-        const sessionLimitSelect =
-          card.querySelector(
-            '[data-ta-stat-total-session-limit]'
+        for (
+          const rangeButton
+          of card.querySelectorAll(
+            '[data-ta-stat-total-range]'
+          )
+        ) {
+          rangeButton.addEventListener(
+            'click',
+            () => {
+              root.__taStatGrowthRange =
+                uiSessionStatGrowthRange(
+                  rangeButton.getAttribute(
+                    'data-ta-stat-total-range'
+                  )
+                );
+
+              writeUiSessionState({
+                stat_growth_range:
+                  root.__taStatGrowthRange
+              });
+
+              card.outerHTML =
+                renderStatGrowthCumulativeChart(
+                  root.__taStatGrowth ||
+                  {},
+                  root.__taStatGrowthFocus,
+                  root.__taStatGrowthContext,
+                  root.__taStatGrowthRange,
+                  root.__taStatGrowthScope
+                );
+
+              bindCumulativeInteractions(
+                root
+              );
+              bindScopedGainInteractions();
+            }
           );
-
-        sessionLimitSelect?.addEventListener(
-          'change',
-          () => {
-            root.__taStatGrowthSessionLimit =
-              uiSessionStatGrowthSessionLimit(
-                sessionLimitSelect.value
-              );
-
-            writeUiSessionState({
-              stat_growth_session_limit:
-                root.__taStatGrowthSessionLimit
-            });
-
-            card.outerHTML =
-              renderStatGrowthCumulativeChart(
-                root.__taStatGrowth ||
-                {},
-                root.__taStatGrowthFocus,
-                root.__taStatGrowthContext,
-                root.__taStatGrowthSessionLimit,
-                root.__taStatGrowthScope
-              );
-
-            bindCumulativeInteractions(
-              root
-            );
-          }
-        );
+        }
       };
 
     const refreshScopedGainSummary =
       () => {
         const current =
           root.querySelector(
-            '[data-ta-stat-gain-scope]'
+            '[data-ta-stat-gain-summary]'
           );
 
         if (
@@ -22487,7 +23070,7 @@
       () => {
         const panel =
           root.querySelector(
-            '[data-ta-stat-gain-scope]'
+            '[data-ta-stat-gain-scope-controls]'
           );
 
         if (
@@ -22518,7 +23101,31 @@
                   root.__taStatGrowthScope
               });
 
-              refreshScopedGainSummary();
+              const card =
+                root.querySelector(
+                  '[data-ta-stat-total-card]'
+                );
+
+              if (
+                card
+              ) {
+                card.outerHTML =
+                  renderStatGrowthCumulativeChart(
+                    root.__taStatGrowth ||
+                    {},
+                    root.__taStatGrowthFocus,
+                    root.__taStatGrowthContext,
+                    root.__taStatGrowthRange,
+                    root.__taStatGrowthScope
+                  );
+              }
+
+              refreshGrowthFocusPanels(
+                false
+              );
+              bindCumulativeInteractions(
+                root
+              );
             }
           );
         }
@@ -22586,7 +23193,7 @@
                 {},
                 next,
                 root.__taStatGrowthContext,
-                root.__taStatGrowthSessionLimit,
+                root.__taStatGrowthRange,
                 root.__taStatGrowthScope
               );
           }
@@ -22656,9 +23263,9 @@
       uiSessionStatGrowthContext(
         state.stat_growth_context
       );
-    const sessionLimit =
-      uiSessionStatGrowthSessionLimit(
-        state.stat_growth_session_limit
+    const range =
+      uiSessionStatGrowthRange(
+        state.stat_growth_range
       );
 
     const meta = [
@@ -22685,8 +23292,7 @@
             focus,
             scope,
             context,
-            session_limit:
-              sessionLimit
+            range
           })}
         </div>
       </details>
@@ -30409,6 +31015,221 @@
         background: #1a1d22;
       }
 
+      /* v2.18.41: compact chart controls and four-lane all-stat history. */
+      #${MODAL_ID} .ta-stat-post-chart-controls {
+        gap: 7px;
+        margin-top: 8px;
+      }
+
+      #${MODAL_ID} .ta-stat-gain-scope-controls {
+        gap: 5px;
+      }
+
+      #${MODAL_ID} .ta-stat-gain-scope-controls button {
+        min-height: 30px;
+        padding: 5px 7px;
+        font-size: 10px;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(150px, 1.35fr);
+        gap: 6px;
+        align-items: end;
+        margin: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls-all {
+        grid-template-columns: minmax(0, .9fr) minmax(170px, 1.2fr);
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls label,
+      #${MODAL_ID} .ta-stat-range-control {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 3px;
+        min-width: 0;
+        font-size: 9px;
+        font-weight: 800;
+        opacity: 1;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls label > span,
+      #${MODAL_ID} .ta-stat-range-control > span {
+        color: #9fa5ad;
+        font-size: 8px;
+        letter-spacing: .055em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-stat-total-controls select {
+        width: 100%;
+        min-width: 0;
+        min-height: 30px;
+        padding: 5px 22px 5px 7px;
+        border-radius: 6px;
+        color: #e8e8e8;
+        font-size: 10px;
+        font-weight: 750;
+      }
+
+      #${MODAL_ID} .ta-stat-range-control > div {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 3px;
+      }
+
+      #${MODAL_ID} .ta-stat-range-control button {
+        min-width: 0;
+        min-height: 30px;
+        margin: 0;
+        padding: 4px 3px;
+        border: 1px solid #3e4249;
+        border-radius: 5px;
+        background: #17191d;
+        color: #aeb4bc;
+        font-size: 9px;
+        font-weight: 850;
+        opacity: .78;
+      }
+
+      #${MODAL_ID} .ta-stat-range-control button.ta-stat-range-active {
+        border-color: #d2d5da;
+        background: #3a3d43;
+        color: #fff;
+        opacity: 1;
+      }
+
+      #${MODAL_ID} .ta-stat-total-chart > .ta-stat-session-inspector {
+        margin-top: 8px;
+        border-color: #4a4031;
+        border-left: 3px solid #d4a24f;
+        background: #171512;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-background {
+        fill: #15171b;
+        stroke: #30343a;
+        stroke-width: 1;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-line {
+        fill: none;
+        stroke-width: 2.4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        pointer-events: none;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-line.ta-stat-lane-strength {
+        stroke: #e58b75;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-line.ta-stat-lane-defense {
+        stroke: #72a7e8;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-line.ta-stat-lane-speed {
+        stroke: #65c7a3;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-line.ta-stat-lane-dexterity {
+        stroke: #b08be8;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-point {
+        pointer-events: none;
+        stroke: #111;
+        stroke-width: 1.2;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-point.ta-stat-lane-strength {
+        fill: #e58b75;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-point.ta-stat-lane-defense {
+        fill: #72a7e8;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-point.ta-stat-lane-speed {
+        fill: #65c7a3;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-point.ta-stat-lane-dexterity {
+        fill: #b08be8;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-point.ta-stat-session-active {
+        r: 5.2px;
+        stroke: #fff3d4;
+        stroke-width: 2.6;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-label,
+      #${MODAL_ID} .ta-stat-lane-total {
+        font-size: 10px;
+        font-weight: 850;
+        pointer-events: none;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-label.ta-stat-lane-strength {
+        fill: #f0a08d;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-label.ta-stat-lane-defense {
+        fill: #91bdf2;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-label.ta-stat-lane-speed {
+        fill: #83d7b9;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-label.ta-stat-lane-dexterity {
+        fill: #c7a5ef;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-total {
+        fill: #b7bbc1;
+        font-size: 9px;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px 11px;
+        margin-top: 6px;
+        color: #c5c9cf;
+        font-size: 10px;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-key {
+        width: 12px;
+        height: 3px;
+        border-radius: 999px;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-key.ta-stat-lane-strength {
+        background: #e58b75;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-key.ta-stat-lane-defense {
+        background: #72a7e8;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-key.ta-stat-lane-speed {
+        background: #65c7a3;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-key.ta-stat-lane-dexterity {
+        background: #b08be8;
+      }
+
       @media(max-width:520px) {
         #${MODAL_ID} .ta-stat-session-inspector {
           padding: 9px;
@@ -30440,6 +31261,20 @@
 
         #${MODAL_ID} .ta-stat-dense-metric > summary strong {
           font-size: 15px;
+        }
+
+        #${MODAL_ID} .ta-stat-total-controls {
+          grid-template-columns: minmax(0, .95fr) minmax(0, .95fr) minmax(132px, 1.25fr);
+          gap: 4px;
+        }
+
+        #${MODAL_ID} .ta-stat-total-controls-all {
+          grid-template-columns: minmax(0, .9fr) minmax(145px, 1.2fr);
+        }
+
+        #${MODAL_ID} .ta-stat-total-controls select {
+          padding-right: 17px;
+          font-size: 9px;
         }
       }
 
