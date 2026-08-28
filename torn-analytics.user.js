@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.35
+// @version      2.18.36
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.35';
+  const VERSION = '2.18.36';
 
-  // v2.18.35 makes checkpoint attribution independent of the quarantined native bridge.
+  // v2.18.36 hardens module contracts, evidence schemas, and startup diagnostics.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -343,31 +343,60 @@
           typeof parsed.version ===
             'string'
             ? parsed.version
+                .trim()
+                .slice(
+                  0,
+                  40
+                ) ||
+              null
             : null,
         stage:
           typeof parsed.stage ===
             'string'
             ? parsed.stage
+                .trim()
+                .slice(
+                  0,
+                  80
+                ) ||
+              null
             : null,
         recorded_at:
           typeof parsed.recorded_at ===
-            'string'
+            'string' &&
+          Number.isFinite(
+            Date.parse(
+              parsed.recorded_at
+            )
+          )
             ? parsed.recorded_at
             : null,
         error:
           typeof parsed.error ===
-            'string'
-            ? parsed.error
+            'string' &&
+          parsed.error.trim()
+            ? normalizeStartupHealthError(
+                parsed.error
+              )
             : null,
         last_error:
           typeof parsed.last_error ===
-            'string'
-            ? parsed.last_error
+            'string' &&
+          parsed.last_error.trim()
+            ? normalizeStartupHealthError(
+                parsed.last_error
+              )
             : null,
         last_error_stage:
           typeof parsed.last_error_stage ===
             'string'
             ? parsed.last_error_stage
+                .trim()
+                .slice(
+                  0,
+                  80
+                ) ||
+              null
             : null
       };
     } catch (_) {
@@ -391,6 +420,130 @@
     );
 
     return record;
+  }
+
+  function buildReliabilityHealthReport() {
+    const startup =
+      readStartupHealth();
+
+    let checkpoint =
+      null;
+
+    try {
+      if (
+        typeof readTrainingCheckpointCanaryState ===
+          'function'
+      ) {
+        const state =
+          readTrainingCheckpointCanaryState();
+
+        checkpoint = {
+          schema_version:
+            Number.isSafeInteger(
+              state?.schema_version
+            )
+              ? state.schema_version
+              : null,
+          status:
+            typeof state?.last_status ===
+              'string'
+              ? state.last_status
+              : 'unavailable',
+          checkpoints:
+            Array.isArray(
+              state?.checkpoints
+            )
+              ? state.checkpoints.length
+              : 0,
+          train_intents:
+            Array.isArray(
+              state?.train_intents
+            )
+              ? state.train_intents.length
+              : 0
+        };
+      }
+    } catch (_) {
+      checkpoint =
+        null;
+    }
+
+    return {
+      schema_version: 1,
+      version:
+        VERSION,
+      launcher: {
+        stage:
+          startup?.stage ||
+          'unavailable',
+        last_issue:
+          startup?.last_error ||
+          null,
+        last_issue_stage:
+          startup?.last_error_stage ||
+          null
+      },
+      checkpoint,
+      native_bridge:
+        'disabled'
+    };
+  }
+
+  function reliabilityHealthReportText(
+    report =
+      buildReliabilityHealthReport()
+  ) {
+    const lines = [
+      `Version: ${report?.version || VERSION}`,
+      `Launcher: ${report?.launcher?.stage || 'unavailable'}`
+    ];
+
+    if (
+      report?.launcher?.last_issue
+    ) {
+      lines.push(
+        `Last startup issue: ${report.launcher.last_issue_stage || 'unknown stage'} — ${report.launcher.last_issue}`
+      );
+    } else {
+      lines.push(
+        'Last startup issue: None recorded for this version.'
+      );
+    }
+
+    if (
+      report?.checkpoint
+    ) {
+      lines.push(
+        `Checkpoint evidence: Schema v${report.checkpoint.schema_version ?? 'unknown'} · ${report.checkpoint.checkpoints.toLocaleString()} checkpoints · ${report.checkpoint.train_intents.toLocaleString()} train taps`,
+        `Checkpoint engine: ${report.checkpoint.status}`
+      );
+    } else {
+      lines.push(
+        'Checkpoint evidence: Unavailable — optional module did not report.'
+      );
+    }
+
+    lines.push(
+      'TornPDA native bridge: Disabled'
+    );
+
+    return lines.join(
+      '\n'
+    );
+  }
+
+  const previousStartupHealth =
+    readStartupHealth();
+
+  if (
+    previousStartupHealth?.version ===
+      VERSION
+  ) {
+    startupHealthLastError =
+      previousStartupHealth.last_error;
+
+    startupHealthLastErrorStage =
+      previousStartupHealth.last_error_stage;
   }
 
   recordStartupHealth(
@@ -24481,6 +24634,9 @@
   const TRAINING_CHECKPOINT_CANARY_STORAGE_KEY =
     'tornAnalyticsTrainingCheckpointCanaryV1';
 
+  const TRAINING_CHECKPOINT_SCHEMA_VERSION =
+    1;
+
   const TRAINING_CHECKPOINT_ROUTINE_INTERVAL_MS =
     30 * 1000;
 
@@ -24742,6 +24898,25 @@
     nowMilliseconds =
       Date.now()
   ) {
+    const suppliedSchemaVersion =
+      trainingCheckpointCanaryInteger(
+        state?.storage_schema_version ??
+          state?.schema_version
+      );
+
+    const storageCompatible =
+      state?.storage_compatible !==
+        false &&
+      (
+        !state ||
+        (
+          suppliedSchemaVersion ===
+            null ||
+          suppliedSchemaVersion ===
+            TRAINING_CHECKPOINT_SCHEMA_VERSION
+        )
+      );
+
     const minimumIntentTime =
       Math.max(
         0,
@@ -24753,6 +24928,7 @@
 
     const checkpoints =
       (
+        storageCompatible &&
         Array.isArray(
           state?.checkpoints
         )
@@ -24779,6 +24955,7 @@
 
     const intents =
       (
+        storageCompatible &&
         Array.isArray(
           state?.train_intents
         )
@@ -24807,7 +24984,12 @@
         );
 
     return {
-      schema_version: 1,
+      schema_version:
+        TRAINING_CHECKPOINT_SCHEMA_VERSION,
+      storage_compatible:
+        storageCompatible,
+      storage_schema_version:
+        suppliedSchemaVersion,
       version:
         VERSION,
       installed_at:
@@ -24822,7 +25004,9 @@
           state?.last_attempt_at
         ),
       last_status:
-        [
+        !storageCompatible
+          ? 'unsupported_schema'
+          : [
           'idle',
           'requesting',
           'available',
@@ -24834,7 +25018,9 @@
           ? state.last_status
           : 'idle',
       last_error:
-        typeof state?.last_error ===
+        !storageCompatible
+          ? 'Stored checkpoint evidence uses a newer unsupported schema.'
+          : typeof state?.last_error ===
           'string'
           ? happinessCaptureCanaryErrorText(
               state.last_error
@@ -24871,11 +25057,25 @@
         state
       );
 
+    if (
+      safe.storage_compatible ===
+        false
+    ) {
+      return safe;
+    }
+
+    const persisted = {
+      ...safe
+    };
+
+    delete persisted.storage_compatible;
+    delete persisted.storage_schema_version;
+
     try {
       trainingCheckpointCanaryStorage()?.setItem(
         TRAINING_CHECKPOINT_CANARY_STORAGE_KEY,
         JSON.stringify(
-          safe
+          persisted
         )
       );
     } catch (_) {
@@ -24981,10 +25181,20 @@
       return await trainingCheckpointCanaryInFlight;
     }
 
-    const operation =
+      const operation =
       (async () => {
         let state =
           readTrainingCheckpointCanaryState();
+
+        if (
+          state.storage_compatible ===
+            false
+        ) {
+          return {
+            status:
+              'unsupported_schema'
+          };
+        }
 
         const startedAt =
           Date.now();
@@ -25187,6 +25397,13 @@
 
     const state =
       readTrainingCheckpointCanaryState();
+
+    if (
+      state.storage_compatible ===
+        false
+    ) {
+      return null;
+    }
 
     const checkpoint =
       trainingCheckpointCanaryLatestBeforeTap(
@@ -25604,7 +25821,10 @@
 
     const lines =
       [
-        'Capture engine: Ready — visible Torn pages only; routine limit 1 request / 30s.'
+        safe.storage_compatible ===
+          false
+          ? 'Capture engine: Paused safely — stored evidence uses a newer schema.'
+          : 'Capture engine: Ready — visible Torn pages only; routine limit 1 request / 30s.'
       ];
 
     if (
@@ -29625,6 +29845,32 @@
               </div>
             </div>
 
+            <div class="ta-settings-group">
+              <b>
+                Reliability health
+              </b>
+
+              <div class="small">
+                Shows bounded startup and checkpoint-module status. This
+                report never includes API keys, history keys, or log data.
+              </div>
+
+              <button
+                id="ta-reliability-health-refresh"
+                type="button"
+              >
+                Refresh Health Report
+              </button>
+
+              <div
+                id="ta-reliability-health-output"
+                class="small ta-training-checkpoint-canary-output"
+                aria-live="polite"
+              >
+                Loading reliability status…
+              </div>
+            </div>
+
             <div
               id="ta-main-actions"
               class="actions ta-settings-group"
@@ -29835,6 +30081,12 @@
     const trainingCheckpointOutput =
       $('#ta-training-checkpoint-output');
 
+    const reliabilityHealthRefreshButton =
+      $('#ta-reliability-health-refresh');
+
+    const reliabilityHealthOutput =
+      $('#ta-reliability-health-output');
+
     function refreshTrainingSnapshotCapabilityCheck() {
       if (
         !trainingSnapshotCheckOutput
@@ -29952,6 +30204,42 @@
     }
 
     refreshTrainingCheckpointCanaryStatus();
+
+    function refreshReliabilityHealthReport() {
+      if (
+        !reliabilityHealthOutput
+      ) {
+        return null;
+      }
+
+      try {
+        const report =
+          buildReliabilityHealthReport();
+
+        reliabilityHealthOutput.textContent =
+          reliabilityHealthReportText(
+            report
+          );
+
+        return report;
+      } catch (_) {
+        reliabilityHealthOutput.textContent =
+          'Reliability report unavailable. The launcher remains independent.';
+
+        return null;
+      }
+    }
+
+    if (
+      reliabilityHealthRefreshButton
+    ) {
+      reliabilityHealthRefreshButton.addEventListener(
+        'click',
+        refreshReliabilityHealthReport
+      );
+    }
+
+    refreshReliabilityHealthReport();
 
     for (
       const button
