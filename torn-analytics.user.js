@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.43
+// @version      2.18.44
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,10 +22,10 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.43';
+  const VERSION = '2.18.44';
 
-  // v2.18.43 spaces short all-stat ranges by session order and adds exact
-  // previous/next session navigation without changing stored observations.
+  // v2.18.44 adds an active-lane calendar navigator for exact dense-history
+  // browsing without changing stored observations or short session ranges.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -20922,6 +20922,31 @@
     }
   }
 
+  function statGrowthCumulativePointsForStat(
+    points,
+    stat
+  ) {
+    const normalizedStat =
+      String(
+        stat ||
+        ''
+      );
+
+    return Array.from(
+      points ||
+      []
+    ).filter(
+      point =>
+        (
+          point?.getAttribute?.(
+            'data-ta-stat-name'
+          ) ||
+          ''
+        ) ===
+        normalizedStat
+    );
+  }
+
   function statGrowthAdjacentCumulativePoint(
     points,
     currentPoint,
@@ -20933,18 +20958,9 @@
       ) ||
       '';
     const matchingPoints =
-      Array.from(
-        points ||
-        []
-      ).filter(
-        point =>
-          (
-            point?.getAttribute?.(
-              'data-ta-stat-name'
-            ) ||
-            ''
-          ) ===
-          currentStat
+      statGrowthCumulativePointsForStat(
+        points,
+        currentStat
       );
     const currentIndex =
       matchingPoints.indexOf(
@@ -20966,6 +20982,37 @@
       step
     ] ||
     null;
+  }
+
+  function statGrowthClampedSessionIndex(
+    value,
+    sampleCount
+  ) {
+    const count =
+      Math.max(
+        0,
+        Math.floor(
+          Number(sampleCount) ||
+          0
+        )
+      );
+
+    if (
+      count <= 0
+    ) {
+      return -1;
+    }
+
+    return Math.max(
+      0,
+      Math.min(
+        count - 1,
+        Math.round(
+          Number(value) ||
+          0
+        )
+      )
+    );
   }
 
   function statGrowthSessionOrderPointX(
@@ -21613,6 +21660,11 @@
       ];
     const latestSessionKey =
       `${latestSession?.stat || 'stat'}-${String(latestSession?.id || latestSession?.timestamp || '')}`;
+    const latestSessionStat =
+      String(
+        latestSession?.stat ||
+        ''
+      );
 
     const laneMarkup =
       lanes.map(
@@ -21774,7 +21826,7 @@
               : 'No data';
 
           return `
-            <g class="ta-stat-lane ta-stat-lane-${lane.stat}">
+            <g class="ta-stat-lane ta-stat-lane-${lane.stat}${sessionOrder ? '' : lane.stat === latestSessionStat ? ' ta-stat-lane-active' : ' ta-stat-lane-muted'}" data-ta-stat-lane-group="${escapeActivityHtml(lane.stat)}">
               <rect x="${left}" y="${laneTop}" width="${plotWidth}" height="${laneHeight}" rx="7" class="ta-stat-lane-background"></rect>
               ${path ? `<path d="${path}" class="ta-stat-lane-line ta-stat-lane-${lane.stat}"></path>` : ''}
               ${points}
@@ -21810,9 +21862,61 @@
               day: 'numeric'
             }
           );
+    const latestLane =
+      lanes.find(
+        lane =>
+          lane.stat ===
+          latestSessionStat
+      );
+    const latestLaneIndex =
+      Math.max(
+        0,
+        latestLane?.samples?.findIndex(
+          action =>
+            statGrowthSessionActionKey(
+              action
+            ) ===
+            statGrowthSessionActionKey(
+              latestSession
+            )
+        ) ||
+        0
+      );
+    const latestLaneCount =
+      Number(
+        latestLane?.samples?.length ||
+        0
+      );
+    const latestSessionModel =
+      statGrowthSessionInspectorModel(
+        latestSession
+      );
+    const calendarNavigator =
+      sessionOrder
+        ? ''
+        : `
+          <div class="ta-stat-calendar-navigator" data-ta-stat-calendar-navigator>
+            <div class="ta-stat-calendar-navigator-heading">
+              <strong data-ta-stat-calendar-navigator-label>${escapeActivityHtml(statGrowthViewLabel(latestSessionStat))} · ${latestLaneIndex + 1} of ${latestLaneCount}</strong>
+              <span data-ta-stat-calendar-navigator-date>${escapeActivityHtml(latestSessionModel.date)}</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="${Math.max(0, latestLaneCount - 1)}"
+              step="1"
+              value="${latestLaneIndex}"
+              data-ta-stat-calendar-scrubber
+              data-ta-stat-name="${escapeActivityHtml(latestSessionStat)}"
+              aria-label="Browse ${escapeActivityHtml(statGrowthViewLabel(latestSessionStat))} sessions"
+              aria-valuetext="${escapeActivityHtml(latestSessionModel.date)}"
+            >
+            <small>Drag to a nearby exact session · use ‹ › for one session at a time</small>
+          </div>
+        `;
 
     return `
-      <div class="ta-chart-card ta-stat-total-chart ta-stat-all-chart" data-ta-stat-total-card>
+      <div class="ta-chart-card ta-stat-total-chart ta-stat-all-chart ${sessionOrder ? 'ta-stat-session-order-mode' : 'ta-stat-calendar-mode'}" data-ta-stat-total-card>
         <div class="ta-chart-heading">
           <span>All-stat history</span>
           <span>${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}${statGrowthRangeUsesSessions(selectedRange) ? ' per stat' : ''} · ${allSamples.length.toLocaleString()} observations</span>
@@ -21824,15 +21928,27 @@
           <text x="${left + plotWidth}" y="${height - 8}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(lastDate)}</text>
         </svg>
 
-        <div class="ta-stat-lane-legend" aria-label="All-stat chart legend">
+        <div class="ta-stat-lane-legend${sessionOrder ? '' : ' ta-stat-lane-selector'}" aria-label="${sessionOrder ? 'All-stat chart legend' : 'Choose the active stat lane'}">
           ${definitions.map(
-            definition =>
-              `<span><i class="ta-stat-lane-key ta-stat-lane-${definition.stat}"></i>${definition.label}</span>`
+            definition => {
+              const lane =
+                lanes.find(
+                  candidate =>
+                    candidate.stat ===
+                    definition.stat
+                );
+
+              return sessionOrder
+                ? `<span><i class="ta-stat-lane-key ta-stat-lane-${definition.stat}"></i>${definition.label}</span>`
+                : `<button type="button" data-ta-stat-lane-select="${definition.stat}" aria-pressed="${definition.stat === latestSessionStat ? 'true' : 'false'}" ${lane?.samples?.length ? '' : 'disabled'}><i class="ta-stat-lane-key ta-stat-lane-${definition.stat}"></i>${definition.label}</button>`;
+            }
           ).join('')}
         </div>
         <div class="ta-stat-total-scale">
-          ${sessionOrder ? 'Each lane runs oldest → latest with even session spacing' : 'Each stat uses its own lane and scale'} · tap a line or point for exact values
+          ${sessionOrder ? 'Each lane runs oldest → latest with even session spacing · tap a line or point for exact values' : 'Each stat uses its own lane and scale · choose a stat, then drag for exact sessions'}
         </div>
+
+        ${calendarNavigator}
 
         ${renderStatGrowthSessionInspector(latestSession)}
 
@@ -23026,6 +23142,155 @@
           return;
         }
 
+        const cumulativePoints =
+          () =>
+            card.querySelectorAll(
+              '[data-ta-stat-session-index][role="button"]'
+            );
+
+        const syncCalendarNavigator =
+          (
+            point,
+            model
+          ) => {
+            const navigator =
+              card.querySelector(
+                '[data-ta-stat-calendar-navigator]'
+              );
+
+            if (
+              !navigator ||
+              !point
+            ) {
+              return;
+            }
+
+            const stat =
+              point.getAttribute(
+                'data-ta-stat-name'
+              ) ||
+              '';
+            const points =
+              statGrowthCumulativePointsForStat(
+                cumulativePoints(),
+                stat
+              );
+            const index =
+              points.indexOf(
+                point
+              );
+
+            if (
+              index < 0 ||
+              !points.length
+            ) {
+              return;
+            }
+
+            const label =
+              statGrowthViewLabel(
+                stat
+              );
+            const date =
+              String(
+                model?.date ||
+                ''
+              );
+            const slider =
+              navigator.querySelector(
+                '[data-ta-stat-calendar-scrubber]'
+              );
+            const heading =
+              navigator.querySelector(
+                '[data-ta-stat-calendar-navigator-label]'
+              );
+            const dateOutput =
+              navigator.querySelector(
+                '[data-ta-stat-calendar-navigator-date]'
+              );
+
+            if (
+              slider
+            ) {
+              slider.min =
+                '0';
+              slider.max =
+                String(
+                  points.length -
+                  1
+                );
+              slider.value =
+                String(
+                  index
+                );
+              slider.setAttribute(
+                'data-ta-stat-name',
+                stat
+              );
+              slider.setAttribute(
+                'aria-label',
+                `Browse ${label} sessions`
+              );
+              slider.setAttribute(
+                'aria-valuetext',
+                `${date} · ${index + 1} of ${points.length}`
+              );
+            }
+
+            if (
+              heading
+            ) {
+              heading.textContent =
+                `${label} · ${index + 1} of ${points.length}`;
+            }
+
+            if (
+              dateOutput
+            ) {
+              dateOutput.textContent =
+                date;
+            }
+
+            for (
+              const button
+              of card.querySelectorAll(
+                '[data-ta-stat-lane-select]'
+              )
+            ) {
+              button.setAttribute(
+                'aria-pressed',
+                button.getAttribute(
+                  'data-ta-stat-lane-select'
+                ) ===
+                  stat
+                  ? 'true'
+                  : 'false'
+              );
+            }
+
+            for (
+              const lane
+              of card.querySelectorAll(
+                '[data-ta-stat-lane-group]'
+              )
+            ) {
+              const active =
+                lane.getAttribute(
+                  'data-ta-stat-lane-group'
+                ) ===
+                stat;
+
+              lane.classList.toggle(
+                'ta-stat-lane-active',
+                active
+              );
+              lane.classList.toggle(
+                'ta-stat-lane-muted',
+                !active
+              );
+            }
+          };
+
         const activatePoint =
           point => {
             const output =
@@ -23106,6 +23371,11 @@
             card.__taStatGrowthActivePoint =
               point;
 
+            syncCalendarNavigator(
+              point,
+              model
+            );
+
             for (
               const button
               of card.querySelectorAll(
@@ -23144,6 +23414,22 @@
         ) {
           card.__taStatGrowthActivePoint =
             initiallyActivePoint;
+
+          const initialAction =
+            statGrowthSessionActionFromElement(
+              initiallyActivePoint,
+              root.__taStatGrowth ||
+              {}
+            );
+
+          syncCalendarNavigator(
+            initiallyActivePoint,
+            initialAction
+              ? statGrowthSessionInspectorModel(
+                  initialAction
+                )
+              : null
+          );
         }
 
         for (
@@ -23205,6 +23491,76 @@
             }
           );
         }
+
+        for (
+          const button
+          of card.querySelectorAll(
+            '[data-ta-stat-lane-select]'
+          )
+        ) {
+          button.addEventListener(
+            'click',
+            () => {
+              const stat =
+                button.getAttribute(
+                  'data-ta-stat-lane-select'
+                );
+              const points =
+                statGrowthCumulativePointsForStat(
+                  cumulativePoints(),
+                  stat
+                );
+              const point =
+                points[
+                  points.length -
+                  1
+                ];
+
+              if (
+                point
+              ) {
+                activatePoint(
+                  point
+                );
+              }
+            }
+          );
+        }
+
+        const calendarScrubber =
+          card.querySelector(
+            '[data-ta-stat-calendar-scrubber]'
+          );
+
+        calendarScrubber?.addEventListener(
+          'input',
+          () => {
+            const points =
+              statGrowthCumulativePointsForStat(
+                cumulativePoints(),
+                calendarScrubber.getAttribute(
+                  'data-ta-stat-name'
+                )
+              );
+            const index =
+              statGrowthClampedSessionIndex(
+                calendarScrubber.value,
+                points.length
+              );
+            const point =
+              points[
+                index
+              ];
+
+            if (
+              point
+            ) {
+              activatePoint(
+                point
+              );
+            }
+          }
+        );
 
         for (
           const point
@@ -31444,7 +31800,7 @@
         background: #1a1d22;
       }
 
-      /* v2.18.43: session-order lanes and exact session-step navigation. */
+      /* v2.18.44: active-lane calendar navigation with exact session scrubbing. */
       #${MODAL_ID} .ta-stat-post-chart-controls {
         gap: 7px;
         margin-top: 8px;
@@ -31540,6 +31896,23 @@
         fill: #15171b;
         stroke: #30343a;
         stroke-width: 1;
+      }
+
+      #${MODAL_ID} .ta-stat-calendar-mode .ta-stat-lane {
+        transition: opacity .14s ease;
+      }
+
+      #${MODAL_ID} .ta-stat-calendar-mode .ta-stat-lane-muted {
+        opacity: .58;
+      }
+
+      #${MODAL_ID} .ta-stat-calendar-mode .ta-stat-lane-active .ta-stat-lane-background {
+        stroke: #b58b48;
+        stroke-width: 1.8;
+      }
+
+      #${MODAL_ID} .ta-stat-calendar-mode .ta-stat-lane-active .ta-stat-lane-line {
+        stroke-width: 3.1;
       }
 
       #${MODAL_ID} .ta-stat-lane-line {
@@ -31643,6 +32016,84 @@
         display: inline-flex;
         align-items: center;
         gap: 5px;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-selector {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 4px;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-selector button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        min-width: 0;
+        min-height: 34px;
+        margin: 0;
+        padding: 5px 3px;
+        border: 1px solid #353940;
+        border-radius: 6px;
+        background: #17191d;
+        color: #b9bec6;
+        font-size: 9px;
+        font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-stat-lane-selector button[aria-pressed="true"] {
+        border-color: #c39a55;
+        background: #2b2419;
+        color: #fff0cf;
+      }
+
+      #${MODAL_ID} .ta-stat-calendar-navigator {
+        display: grid;
+        gap: 2px;
+        margin-top: 7px;
+        padding: 7px 9px 6px;
+        border: 1px solid #4a4031;
+        border-radius: 8px;
+        background: #171512;
+      }
+
+      #${MODAL_ID} .ta-stat-calendar-navigator-heading {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-calendar-navigator-heading strong {
+        color: #f0d49e;
+        font-size: 11px;
+      }
+
+      #${MODAL_ID} .ta-stat-calendar-navigator-heading span {
+        overflow: hidden;
+        color: #b6b6b6;
+        font-size: 10px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #${MODAL_ID} .ta-stat-calendar-navigator input[type="range"] {
+        width: 100%;
+        min-height: 32px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        accent-color: #d4a24f;
+        touch-action: pan-y;
+      }
+
+      #${MODAL_ID} .ta-stat-calendar-navigator small {
+        color: #969696;
+        font-size: 9px;
+        line-height: 1.25;
+        text-align: center;
       }
 
       #${MODAL_ID} .ta-stat-lane-key {
