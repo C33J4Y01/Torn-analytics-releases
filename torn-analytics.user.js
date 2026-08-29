@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.41
+// @version      2.18.42
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,10 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.41';
+  const VERSION = '2.18.42';
 
-  // v2.18.41 adds compact calendar ranges and tappable Selected/All-stat history charts.
+  // v2.18.42 adds compact session ranges and adaptive calendar markers while
+  // preserving exact selection across every underlying training observation.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -159,7 +160,6 @@
 
   const STYLE_ID =
     'torn-analytics-style';
-
   // ============================================================
   // RUNTIME STATE
   // ============================================================
@@ -1421,7 +1421,6 @@
       ? `${hours}h ${remMinutes}m`
       : `${hours}h`;
   }
-
   // ============================================================
   // INDEXEDDB
   // ============================================================
@@ -5024,7 +5023,6 @@
 
     return ownerId;
   }
-
   // ============================================================
   // ATOMIC STAGED HISTORY PROMOTION
   // ============================================================
@@ -5383,7 +5381,6 @@
       }
     );
   }
-
   // ============================================================
   // ENCRYPTED SAME-ID HISTORY DRIFT AUDIT
   // ============================================================
@@ -5883,7 +5880,6 @@
         true
     };
   }
-
   // ============================================================
   // PROGRESS
   // ============================================================
@@ -6039,7 +6035,6 @@
       });
     }
   }
-
   // ============================================================
   // API HELPERS
   // ============================================================
@@ -6438,7 +6433,6 @@
       );
     }
   }
-
   // ============================================================
   // ACCOUNT DETECTION
   // ============================================================
@@ -6510,7 +6504,6 @@
         )
     };
   }
-
   // ============================================================
   // ITEM DICTIONARY
   // ============================================================
@@ -6838,7 +6831,6 @@
       }
     );
   }
-
   // ============================================================
   // LOG NORMALIZATION / RAW ARCHIVE
   // ============================================================
@@ -7413,7 +7405,6 @@
         )
     );
   }
-
   // ============================================================
   // DEFENSIVE LOG FETCHING
   // ============================================================
@@ -8866,7 +8857,6 @@
       };
     }
   }
-
   // ============================================================
   // HISTORY SEGMENTS
   // ============================================================
@@ -8929,7 +8919,6 @@
 
     return segments;
   }
-
   // ============================================================
   // FIRST-RUN / RESUMABLE HISTORY BUILD
   // ============================================================
@@ -9301,7 +9290,6 @@
           : 'complete'
     };
   }
-
   // ============================================================
   // INCREMENTAL UPDATES
   // ============================================================
@@ -11048,7 +11036,6 @@
       items
     };
   }
-
   // ============================================================
   // OVERALL ACTIVITY ANALYTICS
   // ============================================================
@@ -11898,7 +11885,6 @@
       </div>
     `;
   }
-
   // ============================================================
   // OVERALL ACTIVITY DASHBOARD
   // ============================================================
@@ -13579,6 +13565,9 @@
 
     if (
       [
+        '10s',
+        '20s',
+        '30s',
         '7d',
         '14d',
         '30d',
@@ -13590,12 +13579,24 @@
       return normalized;
     }
 
-    // Migrate the earlier 12/30/60-session preference without allowing an
-    // old value to make the new calendar-range control invalid.
-    return Number(value) ===
-      12
-        ? '14d'
-        : '30d';
+    // Migrate the earlier numeric session-window preference into the closest
+    // supported compact window. Missing or malformed values use the safest
+    // uncluttered default.
+    const legacySessionLimit =
+      Number(
+        value
+      );
+
+    if (
+      legacySessionLimit ===
+      30 ||
+      legacySessionLimit ===
+      60
+    ) {
+      return '30s';
+    }
+
+    return '10s';
   }
 
   function writeUiOrientationHandoff(
@@ -13826,7 +13827,7 @@
       stat_growth_context:
         'all',
       stat_growth_range:
-        '30d',
+        '10s',
       resource_energy_open:
         null,
       resource_nerve_open:
@@ -16906,7 +16907,7 @@
   function statGrowthCumulativeSamples(
     growth,
     stat,
-    range = '30d',
+    range = '10s',
     contextFilter = 'all'
   ) {
     const normalizedStat =
@@ -16953,7 +16954,20 @@
           rangeDays *
             86400;
 
-    return (growth?.training_actions || [])
+    const sessionLimit =
+      normalizedRange ===
+        '10s'
+        ? 10
+        : normalizedRange ===
+            '20s'
+          ? 20
+          : normalizedRange ===
+              '30s'
+            ? 30
+            : null;
+
+    const samples =
+      (growth?.training_actions || [])
       .filter(
         action =>
           action?.stat ===
@@ -16979,8 +16993,15 @@
             Number(right.timestamp || 0) ||
           String(left.id || '').localeCompare(
             String(right.id || '')
-        )
+          )
       );
+
+    return sessionLimit ===
+      null
+        ? samples
+        : samples.slice(
+            -sessionLimit
+          );
   }
 
   function statGrowthAddToStat(
@@ -19297,6 +19318,12 @@
     range
   ) {
     return {
+      '10s':
+        '10 sessions',
+      '20s':
+        '20 sessions',
+      '30s':
+        '30 sessions',
       '7d':
         '1 week',
       '14d':
@@ -19310,6 +19337,136 @@
         range
       )
     ];
+  }
+
+  function statGrowthRangeUsesSessions(
+    range
+  ) {
+    return [
+      '10s',
+      '20s',
+      '30s'
+    ].includes(
+      uiSessionStatGrowthRange(
+        range
+      )
+    );
+  }
+
+  function statGrowthVisibleMarkerIndexes(
+    samples,
+    range,
+    positionForIndex,
+    selectedIndex = null,
+    minimumSpacing = 24
+  ) {
+    const rows =
+      Array.isArray(
+        samples
+      )
+        ? samples
+        : [];
+
+    if (
+      statGrowthRangeUsesSessions(
+        range
+      )
+    ) {
+      return rows.map(
+        (
+          _,
+          index
+        ) => index
+      );
+    }
+
+    if (
+      rows.length <= 2
+    ) {
+      return rows.map(
+        (
+          _,
+          index
+        ) => index
+      );
+    }
+
+    const visible =
+      new Set([
+        0,
+        rows.length - 1
+      ]);
+    const normalizedSelectedIndex =
+      Number(
+        selectedIndex
+      );
+
+    if (
+      Number.isSafeInteger(
+        normalizedSelectedIndex
+      ) &&
+      normalizedSelectedIndex >= 0 &&
+      normalizedSelectedIndex < rows.length
+    ) {
+      visible.add(
+        normalizedSelectedIndex
+      );
+    }
+
+    const spacing =
+      Math.max(
+        1,
+        Number(
+          minimumSpacing
+        ) ||
+        24
+      );
+    let lastVisiblePosition =
+      Number(
+        positionForIndex?.(
+          0
+        )
+      );
+
+    for (
+      let index = 1;
+      index < rows.length - 1;
+      index++
+    ) {
+      const position =
+        Number(
+          positionForIndex?.(
+            index
+          )
+        );
+
+      if (
+        !Number.isFinite(
+          position
+        ) ||
+        !Number.isFinite(
+          lastVisiblePosition
+        ) ||
+        position -
+          lastVisiblePosition >=
+          spacing
+      ) {
+        visible.add(
+          index
+        );
+        lastVisiblePosition =
+          position;
+      }
+    }
+
+    return Array.from(
+      visible
+    ).sort(
+      (
+        left,
+        right
+      ) => left - right
+    );
   }
 
   function statGrowthViewLabel(
@@ -19558,7 +19715,7 @@
   function renderStatGrowthFocusControl(
     focus,
     context = 'all',
-    range = '30d',
+    range = '10s',
     scope = 'selected'
   ) {
     const selected =
@@ -19626,17 +19783,22 @@
           <span>Range</span>
           <div>
             ${[
+              ['10s', '10', 'Latest 10 sessions'],
+              ['20s', '20', 'Latest 20 sessions'],
+              ['30s', '30', 'Latest 30 sessions'],
               ['7d', '1W'],
               ['14d', '2W'],
               ['30d', '1M'],
               ['all', 'All']
             ].map(
-              ([value, label]) => `
+              ([value, label, description = label]) => `
                 <button
                   type="button"
                   class="${value === selectedRange ? 'ta-stat-range-active' : ''}"
                   data-ta-stat-total-range="${value}"
                   aria-pressed="${value === selectedRange ? 'true' : 'false'}"
+                  aria-label="${description}"
+                  title="${description}"
                 >${label}</button>
               `
             ).join('')}
@@ -20762,7 +20924,7 @@
     growth,
     focus = 'recent',
     context = 'all',
-    range = '30d',
+    range = '10s',
     scope = 'selected'
   ) {
     const stat =
@@ -20914,6 +21076,16 @@
         ) *
           plotHeight;
 
+    const visibleMarkerIndexes =
+      new Set(
+        statGrowthVisibleMarkerIndexes(
+          samples,
+          selectedRange,
+          pointX,
+          samples.length - 1
+        )
+      );
+
     const line =
       samples.map(
         (
@@ -20981,7 +21153,10 @@
             ];
 
           if (
-            !visual.happy_jump
+            !visual.happy_jump ||
+            !visibleMarkerIndexes.has(
+              index
+            )
           ) {
             return '';
           }
@@ -21082,6 +21257,10 @@
           const active =
             index ===
             samples.length - 1;
+          const markerVisible =
+            visibleMarkerIndexes.has(
+              index
+            );
 
           return `
             <circle
@@ -21101,8 +21280,9 @@
               cx="${pointX(index).toFixed(2)}"
               cy="${pointY(Number(action.stat_after || 0)).toFixed(2)}"
               r="3.7"
-              class="ta-stat-total-point${active ? ' ta-stat-session-active' : ''}"
+              class="ta-stat-total-point${markerVisible ? '' : ' ta-stat-marker-hidden'}${active ? ' ta-stat-session-active' : ''}"
               data-ta-stat-session-visual="${index}"
+              data-ta-stat-marker-visible="${markerVisible ? 'true' : 'false'}"
             ></circle>
           `;
         }
@@ -21173,7 +21353,7 @@
           ${happyJumpLegend}
         </div>
         <div class="ta-stat-total-scale">
-          Session gain scale: 0–${escapeActivityHtml(statGrowthFormatCompactGain(maximumGain))} · tap a bar or point for exact values
+          Session gain scale: 0–${escapeActivityHtml(statGrowthFormatCompactGain(maximumGain))} · tap a bar, line, or point for exact values
         </div>
 
         ${renderStatGrowthSessionInspector(firstSession)}
@@ -21201,7 +21381,7 @@
     growth,
     focus = 'recent',
     context = 'all',
-    range = '30d'
+    range = '10s'
   ) {
     const selectedContext =
       uiSessionStatGrowthContext(
@@ -21421,9 +21601,26 @@
               ) =>
                 `${index ? 'L' : 'M'}${pointX(action).toFixed(2)} ${pointY(action).toFixed(2)}`
             ).join(' ');
+          const visibleMarkerIndexes =
+            new Set(
+              statGrowthVisibleMarkerIndexes(
+                lane.samples,
+                selectedRange,
+                index =>
+                  pointX(
+                    lane.samples[
+                      index
+                    ]
+                  ),
+                lane.samples.length - 1
+              )
+            );
           const points =
             lane.samples.map(
-              action => {
+              (
+                action,
+                index
+              ) => {
                 const detail =
                   statGrowthCumulativeSampleDetail(
                     action
@@ -21437,6 +21634,10 @@
                 const active =
                   sessionKey ===
                   latestSessionKey;
+                const markerVisible =
+                  visibleMarkerIndexes.has(
+                    index
+                  );
 
                 return `
                   <circle
@@ -21456,8 +21657,9 @@
                     cx="${pointX(action).toFixed(2)}"
                     cy="${pointY(action).toFixed(2)}"
                     r="3.4"
-                    class="ta-stat-lane-point ta-stat-lane-${lane.stat}${active ? ' ta-stat-session-active' : ''}"
+                    class="ta-stat-lane-point ta-stat-lane-${lane.stat}${markerVisible ? '' : ' ta-stat-marker-hidden'}${active ? ' ta-stat-session-active' : ''}"
                     data-ta-stat-session-visual="${escapeActivityHtml(sessionKey)}"
+                    data-ta-stat-marker-visible="${markerVisible ? 'true' : 'false'}"
                     aria-hidden="true"
                   ></circle>
                 `;
@@ -21512,7 +21714,7 @@
       <div class="ta-chart-card ta-stat-total-chart ta-stat-all-chart" data-ta-stat-total-card>
         <div class="ta-chart-heading">
           <span>All-stat history</span>
-          <span>${escapeActivityHtml(statGrowthRangeLabel(selectedRange))} · ${allSamples.length.toLocaleString()} observations</span>
+          <span>${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}${statGrowthRangeUsesSessions(selectedRange) ? ' per stat' : ''} · ${allSamples.length.toLocaleString()} observations</span>
         </div>
 
         <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Strength, Defense, Speed, and Dexterity observed totals over ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}" class="ta-stat-total-svg ta-stat-all-svg" data-ta-stat-total-svg>
@@ -21528,7 +21730,7 @@
           ).join('')}
         </div>
         <div class="ta-stat-total-scale">
-          Each stat uses its own lane and scale · tap a point for exact values
+          Each stat uses its own lane and scale · tap a line or point for exact values
         </div>
 
         ${renderStatGrowthSessionInspector(latestSession)}
@@ -21546,7 +21748,7 @@
     growth,
     focus = 'recent',
     context = 'all',
-    range = '30d',
+    range = '10s',
     scope = 'selected'
   ) {
     return scope ===
@@ -27740,7 +27942,6 @@
       account
     );
   }
-
   // ============================================================
   // EPHEMERAL READABLE HISTORY DOWNLOAD
   // ============================================================
@@ -27926,7 +28127,6 @@
       result
     );
   }
-
   // ============================================================
   // READ-ONLY HISTORY FORENSICS
   // ============================================================
@@ -28675,7 +28875,6 @@
       'No stored history was modified.'
     );
   }
-
   // ============================================================
   // CSS
   // ============================================================
@@ -31015,7 +31214,7 @@
         background: #1a1d22;
       }
 
-      /* v2.18.41: compact chart controls and four-lane all-stat history. */
+      /* v2.18.42: hybrid history ranges and adaptive calendar markers. */
       #${MODAL_ID} .ta-stat-post-chart-controls {
         gap: 7px;
         margin-top: 8px;
@@ -31163,6 +31362,14 @@
         r: 5.2px;
         stroke: #fff3d4;
         stroke-width: 2.6;
+      }
+
+      #${MODAL_ID} .ta-stat-marker-hidden {
+        opacity: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-marker-hidden.ta-stat-session-active {
+        opacity: 1;
       }
 
       #${MODAL_ID} .ta-stat-lane-label,
