@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.42
+// @version      2.18.43
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,10 +22,10 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.42';
+  const VERSION = '2.18.43';
 
-  // v2.18.42 adds compact session ranges and adaptive calendar markers while
-  // preserving exact selection across every underlying training observation.
+  // v2.18.43 spaces short all-stat ranges by session order and adds exact
+  // previous/next session navigation without changing stored observations.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -20739,6 +20739,7 @@
     return `
       <section class="ta-stat-session-inspector" data-ta-stat-session-inspector aria-live="polite">
         <div class="ta-stat-session-header">
+          <button type="button" class="ta-stat-session-step" data-ta-stat-session-step="-1" aria-label="Previous session">‹</button>
           <div>
             <span class="ta-stat-session-eyebrow">Selected session</span>
             <strong data-ta-stat-session-field="title">${escapeActivityHtml(model.title)}</strong>
@@ -20746,6 +20747,7 @@
               ${field('date', model.date)}
             </span>
           </div>
+          <button type="button" class="ta-stat-session-step" data-ta-stat-session-step="1" aria-label="Next session">›</button>
         </div>
 
         <div class="ta-stat-session-quickline">
@@ -20920,6 +20922,71 @@
     }
   }
 
+  function statGrowthAdjacentCumulativePoint(
+    points,
+    currentPoint,
+    direction
+  ) {
+    const currentStat =
+      currentPoint?.getAttribute?.(
+        'data-ta-stat-name'
+      ) ||
+      '';
+    const matchingPoints =
+      Array.from(
+        points ||
+        []
+      ).filter(
+        point =>
+          (
+            point?.getAttribute?.(
+              'data-ta-stat-name'
+            ) ||
+            ''
+          ) ===
+          currentStat
+      );
+    const currentIndex =
+      matchingPoints.indexOf(
+        currentPoint
+      );
+    const step =
+      Number(direction) < 0
+        ? -1
+        : 1;
+
+    if (
+      currentIndex < 0
+    ) {
+      return null;
+    }
+
+    return matchingPoints[
+      currentIndex +
+      step
+    ] ||
+    null;
+  }
+
+  function statGrowthSessionOrderPointX(
+    index,
+    sampleCount,
+    left,
+    plotWidth
+  ) {
+    return sampleCount <= 1
+      ? left +
+        plotWidth /
+        2
+      : left +
+        index /
+        (
+          sampleCount -
+          1
+        ) *
+        plotWidth;
+  }
+
   function renderStatGrowthSelectedChart(
     growth,
     focus = 'recent',
@@ -21057,13 +21124,12 @@
 
     const pointX =
       index =>
-        samples.length === 1
-          ? left +
-            plotWidth / 2
-          : left +
-            index /
-              (samples.length - 1) *
-              plotWidth;
+        statGrowthSessionOrderPointX(
+          index,
+          samples.length,
+          left,
+          plotWidth
+        );
 
     const pointY =
       total =>
@@ -21232,6 +21298,7 @@
               class="ta-stat-total-bar-hit"
               data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
               data-ta-stat-session-index="${index}"
+              data-ta-stat-name="${escapeActivityHtml(stat)}"
               data-ta-stat-action-key="${escapeActivityHtml(actionKey)}"
               aria-hidden="true"
               tabindex="-1"
@@ -21270,6 +21337,7 @@
               class="ta-stat-total-hit"
               data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
               data-ta-stat-session-index="${index}"
+              data-ta-stat-name="${escapeActivityHtml(stat)}"
               data-ta-stat-action-key="${escapeActivityHtml(actionKey)}"
               role="button"
               tabindex="0"
@@ -21288,29 +21356,37 @@
         }
       ).join('');
 
-    const firstDate =
-      new Date(
-        Number(samples[0].timestamp || 0) *
-        1000
-      ).toLocaleDateString(
-        undefined,
-        {
-          month: 'short',
-          day: 'numeric'
-        }
+    const sessionOrder =
+      statGrowthRangeUsesSessions(
+        selectedRange
       );
+    const firstDate =
+      sessionOrder
+        ? 'Oldest'
+        : new Date(
+            Number(samples[0].timestamp || 0) *
+            1000
+          ).toLocaleDateString(
+            undefined,
+            {
+              month: 'short',
+              day: 'numeric'
+            }
+          );
 
     const lastDate =
-      new Date(
-        Number(samples[samples.length - 1].timestamp || 0) *
-        1000
-      ).toLocaleDateString(
-        undefined,
-        {
-          month: 'short',
-          day: 'numeric'
-        }
-      );
+      sessionOrder
+        ? 'Latest'
+        : new Date(
+            Number(samples[samples.length - 1].timestamp || 0) *
+            1000
+          ).toLocaleDateString(
+            undefined,
+            {
+              month: 'short',
+              day: 'numeric'
+            }
+          );
 
     const firstSession =
       samples[
@@ -21324,7 +21400,7 @@
           <span>${escapeActivityHtml(label)} · ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))} · ${samples.length} observations</span>
         </div>
 
-        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line with session gain bars classified by observed Energy-source evidence" class="ta-stat-total-svg" data-ta-stat-total-svg>
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line ${sessionOrder ? 'in oldest-to-latest session order' : 'over calendar time'} with session gain bars classified by observed Energy-source evidence" class="ta-stat-total-svg" data-ta-stat-total-svg>
           <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
           <line x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}" class="ta-stat-total-axis"></line>
           <line x1="${left}" y1="${top + plotHeight / 2}" x2="${left + plotWidth}" y2="${top + plotHeight / 2}" class="ta-stat-total-guide"></line>
@@ -21353,7 +21429,7 @@
           ${happyJumpLegend}
         </div>
         <div class="ta-stat-total-scale">
-          Session gain scale: 0–${escapeActivityHtml(statGrowthFormatCompactGain(maximumGain))} · tap a bar, line, or point for exact values
+          ${sessionOrder ? 'Even session spacing · ' : ''}Session gain scale: 0–${escapeActivityHtml(statGrowthFormatCompactGain(maximumGain))} · tap a bar, line, or point for exact values
         </div>
 
         ${renderStatGrowthSessionInspector(firstSession)}
@@ -21526,6 +21602,10 @@
             ) /
             timestampRange *
             plotWidth;
+    const sessionOrder =
+      statGrowthRangeUsesSessions(
+        selectedRange
+      );
     const latestSession =
       allSamples[
         allSamples.length -
@@ -21593,13 +21673,28 @@
                     totalRange
                   ) *
                   lineHeight;
+          const lanePointX =
+            (
+              action,
+              index
+            ) =>
+              sessionOrder
+                ? statGrowthSessionOrderPointX(
+                    index,
+                    lane.samples.length,
+                    left,
+                    plotWidth
+                  )
+                : pointX(
+                    action
+                  );
           const path =
             lane.samples.map(
               (
                 action,
                 index
               ) =>
-                `${index ? 'L' : 'M'}${pointX(action).toFixed(2)} ${pointY(action).toFixed(2)}`
+                `${index ? 'L' : 'M'}${lanePointX(action, index).toFixed(2)} ${pointY(action).toFixed(2)}`
             ).join(' ');
           const visibleMarkerIndexes =
             new Set(
@@ -21607,10 +21702,11 @@
                 lane.samples,
                 selectedRange,
                 index =>
-                  pointX(
+                  lanePointX(
                     lane.samples[
                       index
-                    ]
+                    ],
+                    index
                   ),
                 lane.samples.length - 1
               )
@@ -21641,12 +21737,13 @@
 
                 return `
                   <circle
-                    cx="${pointX(action).toFixed(2)}"
+                    cx="${lanePointX(action, index).toFixed(2)}"
                     cy="${pointY(action).toFixed(2)}"
                     r="12"
                     class="ta-stat-total-hit"
                     data-ta-stat-total-detail="${escapeActivityHtml(detail)}"
                     data-ta-stat-session-index="${escapeActivityHtml(sessionKey)}"
+                    data-ta-stat-name="${escapeActivityHtml(lane.stat)}"
                     data-ta-stat-action-key="${escapeActivityHtml(actionKey)}"
                     role="button"
                     tabindex="0"
@@ -21654,7 +21751,7 @@
                     aria-label="${escapeActivityHtml(detail)}"
                   ></circle>
                   <circle
-                    cx="${pointX(action).toFixed(2)}"
+                    cx="${lanePointX(action, index).toFixed(2)}"
                     cy="${pointY(action).toFixed(2)}"
                     r="3.4"
                     class="ta-stat-lane-point ta-stat-lane-${lane.stat}${markerVisible ? '' : ' ta-stat-marker-hidden'}${active ? ' ta-stat-session-active' : ''}"
@@ -21688,27 +21785,31 @@
         }
       ).join('');
     const firstDate =
-      new Date(
-        minimumTimestamp *
-        1000
-      ).toLocaleDateString(
-        undefined,
-        {
-          month: 'short',
-          day: 'numeric'
-        }
-      );
+      sessionOrder
+        ? 'Oldest'
+        : new Date(
+            minimumTimestamp *
+            1000
+          ).toLocaleDateString(
+            undefined,
+            {
+              month: 'short',
+              day: 'numeric'
+            }
+          );
     const lastDate =
-      new Date(
-        maximumTimestamp *
-        1000
-      ).toLocaleDateString(
-        undefined,
-        {
-          month: 'short',
-          day: 'numeric'
-        }
-      );
+      sessionOrder
+        ? 'Latest'
+        : new Date(
+            maximumTimestamp *
+            1000
+          ).toLocaleDateString(
+            undefined,
+            {
+              month: 'short',
+              day: 'numeric'
+            }
+          );
 
     return `
       <div class="ta-chart-card ta-stat-total-chart ta-stat-all-chart" data-ta-stat-total-card>
@@ -21717,7 +21818,7 @@
           <span>${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}${statGrowthRangeUsesSessions(selectedRange) ? ' per stat' : ''} · ${allSamples.length.toLocaleString()} observations</span>
         </div>
 
-        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Strength, Defense, Speed, and Dexterity observed totals over ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}" class="ta-stat-total-svg ta-stat-all-svg" data-ta-stat-total-svg>
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Strength, Defense, Speed, and Dexterity observed totals ${sessionOrder ? 'in independent oldest-to-latest session order per stat' : `over ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}`}" class="ta-stat-total-svg ta-stat-all-svg" data-ta-stat-total-svg>
           ${laneMarkup}
           <text x="${left}" y="${height - 8}" class="ta-stat-total-label">${escapeActivityHtml(firstDate)}</text>
           <text x="${left + plotWidth}" y="${height - 8}" text-anchor="end" class="ta-stat-total-label">${escapeActivityHtml(lastDate)}</text>
@@ -21730,7 +21831,7 @@
           ).join('')}
         </div>
         <div class="ta-stat-total-scale">
-          Each stat uses its own lane and scale · tap a line or point for exact values
+          ${sessionOrder ? 'Each lane runs oldest → latest with even session spacing' : 'Each stat uses its own lane and scale'} · tap a line or point for exact values
         </div>
 
         ${renderStatGrowthSessionInspector(latestSession)}
@@ -23001,7 +23102,109 @@
                   : 'false'
               );
             }
+
+            card.__taStatGrowthActivePoint =
+              point;
+
+            for (
+              const button
+              of card.querySelectorAll(
+                '[data-ta-stat-session-step]'
+              )
+            ) {
+              const adjacent =
+                statGrowthAdjacentCumulativePoint(
+                  card.querySelectorAll(
+                    '[data-ta-stat-session-index][role="button"]'
+                  ),
+                  point,
+                  button.getAttribute(
+                    'data-ta-stat-session-step'
+                  )
+                );
+
+              button.disabled =
+                !adjacent;
+              button.setAttribute(
+                'aria-disabled',
+                adjacent
+                  ? 'false'
+                  : 'true'
+              );
+            }
           };
+
+        const initiallyActivePoint =
+          card.querySelector(
+            '[data-ta-stat-session-index][role="button"][aria-pressed="true"]'
+          );
+
+        if (
+          initiallyActivePoint
+        ) {
+          card.__taStatGrowthActivePoint =
+            initiallyActivePoint;
+        }
+
+        for (
+          const button
+          of card.querySelectorAll(
+            '[data-ta-stat-session-step]'
+          )
+        ) {
+          const direction =
+            button.getAttribute(
+              'data-ta-stat-session-step'
+            );
+          const adjacent =
+            initiallyActivePoint
+              ? statGrowthAdjacentCumulativePoint(
+                  card.querySelectorAll(
+                    '[data-ta-stat-session-index][role="button"]'
+                  ),
+                  initiallyActivePoint,
+                  direction
+                )
+              : null;
+
+          button.disabled =
+            !adjacent;
+          button.setAttribute(
+            'aria-disabled',
+            adjacent
+              ? 'false'
+              : 'true'
+          );
+          button.addEventListener(
+            'click',
+            () => {
+              const currentPoint =
+                card.__taStatGrowthActivePoint ||
+                card.querySelector(
+                  '[data-ta-stat-session-index][role="button"][aria-pressed="true"]'
+                );
+              const nextPoint =
+                statGrowthAdjacentCumulativePoint(
+                  card.querySelectorAll(
+                    '[data-ta-stat-session-index][role="button"]'
+                  ),
+                  currentPoint,
+                  direction
+                );
+
+              if (
+                nextPoint
+              ) {
+                activatePoint(
+                  nextPoint
+                );
+                nextPoint.focus?.({
+                  preventScroll: true
+                });
+              }
+            }
+          );
+        }
 
         for (
           const point
@@ -30869,15 +31072,19 @@
       /* v2.18.22: compact selected-session summary with evidence badges. */
       #${MODAL_ID} .ta-stat-session-inspector {
         display: grid;
-        gap: 7px;
+        gap: 6px;
         margin-top: 10px;
-        padding: 10px;
+        padding: 8px;
         border: 1px solid #3b3b3b;
         border-radius: 9px;
         background: #141414;
       }
 
       #${MODAL_ID} .ta-stat-session-header {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr) 32px;
+        align-items: center;
+        gap: 7px;
         min-width: 0;
       }
 
@@ -30885,6 +31092,29 @@
         display: grid;
         gap: 2px;
         min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-session-step {
+        width: 32px;
+        min-width: 32px;
+        height: 36px;
+        min-height: 36px;
+        margin: 0;
+        padding: 0;
+        border: 1px solid #5b4c35;
+        border-radius: 7px;
+        background: #242019;
+        color: #f1c36d;
+        font-size: 24px;
+        font-weight: 800;
+        line-height: 1;
+      }
+
+      #${MODAL_ID} .ta-stat-session-step:disabled {
+        border-color: #333;
+        background: #191919;
+        color: #666;
+        opacity: .72;
       }
 
       #${MODAL_ID} .ta-stat-session-eyebrow {
@@ -31000,8 +31230,8 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        min-height: 38px;
-        padding: 6px 8px;
+        min-height: 34px;
+        padding: 5px 8px;
         cursor: pointer;
         list-style: none;
       }
@@ -31214,7 +31444,7 @@
         background: #1a1d22;
       }
 
-      /* v2.18.42: hybrid history ranges and adaptive calendar markers. */
+      /* v2.18.43: session-order lanes and exact session-step navigation. */
       #${MODAL_ID} .ta-stat-post-chart-controls {
         gap: 7px;
         margin-top: 8px;
@@ -31439,7 +31669,7 @@
 
       @media(max-width:520px) {
         #${MODAL_ID} .ta-stat-session-inspector {
-          padding: 9px;
+          padding: 8px;
         }
 
         #${MODAL_ID} .ta-stat-session-header strong {
