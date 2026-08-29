@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.44
+// @version      2.18.45
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,10 +22,10 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.44';
+  const VERSION = '2.18.45';
 
-  // v2.18.44 adds an active-lane calendar navigator for exact dense-history
-  // browsing without changing stored observations or short session ranges.
+  // v2.18.45 preserves modal scroll across manual close/reopen and waits for
+  // TornPDA's viewport to settle before finalizing rotation restoration.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -14058,7 +14058,9 @@
     return true;
   }
 
-  function consumeUiOrientationRestoreState() {
+  function consumeUiOrientationRestoreState(
+    options = {}
+  ) {
     const current =
       readUiSessionState();
 
@@ -14093,6 +14095,26 @@
       handoffAgeMs >= 0 &&
       handoffAgeMs <
         UI_ORIENTATION_HANDOFF_MAX_AGE_MS;
+
+    const unchangedOrientationHandoff =
+      !sessionRestore &&
+      handoff?.modal_open &&
+      handoffFresh &&
+      handoff.orientation ===
+        orientation;
+
+    // TornPDA/iOS can start the replacement page before WebKit updates
+    // innerWidth and innerHeight. Preserve one fresh, otherwise-valid handoff
+    // for a bounded second pass instead of rejecting it against stale viewport
+    // dimensions. The final pass still fails closed if orientation never
+    // changes, so a normal same-orientation tab cannot inherit the modal.
+    if (
+      options?.defer_unchanged_orientation ===
+        true &&
+      unchangedOrientationHandoff
+    ) {
+      return undefined;
+    }
 
     // A persistent handoff is accepted only when orientation actually
     // changed. This lets TornPDA survive a replaced page context without
@@ -34153,7 +34175,13 @@
         writeUiSessionState({
           modal_open: false,
           analysis_visible: false,
-          scroll_top: 0,
+          scroll_top: Math.max(
+            0,
+            Number(
+              scrollContainer?.scrollTop
+            ) ||
+            0
+          ),
           orientation_refresh_pending: false
         });
 
@@ -34652,15 +34680,16 @@
 
     button.addEventListener(
       'click',
-      async event => {
+      async () => {
         try {
           recordStartupHealth(
             'modal_open_requested'
           );
 
-          await openModal(
-            event
-          );
+          await openModal({
+            restoreState:
+              readUiSessionState()
+          });
 
           recordStartupHealth(
             'ready'
@@ -34718,11 +34747,17 @@
   const LAUNCHER_BOOT_MAX_ATTEMPTS =
     40;
 
+  const UI_ORIENTATION_VIEWPORT_SETTLE_MS =
+    250;
+
   let uiModalWasPresent =
     false;
 
   let uiModalRestorePromise =
     null;
+
+  let uiSessionLifecycleListenersInstalled =
+    false;
 
   async function restoreOpenModalAfterDomReplacement(
     restoreState = null
@@ -34797,6 +34832,168 @@
     }
   }
 
+  function installUiSessionLifecycleListeners() {
+    if (
+      uiSessionLifecycleListenersInstalled ||
+      typeof window ===
+        'undefined'
+    ) {
+      return;
+    }
+
+    uiSessionLifecycleListenersInstalled =
+      true;
+
+    window.addEventListener(
+      'orientationchange',
+      markUiOrientationRefreshPending,
+      { passive: true }
+    );
+
+    window.addEventListener(
+      'pagehide',
+      markUiOrientationRefreshPending,
+      { passive: true }
+    );
+
+    window.addEventListener(
+      'resize',
+      markUiOrientationRefreshPending,
+      { passive: true }
+    );
+  }
+
+  function restoreUiAfterViewportSettles() {
+    if (
+      typeof window ===
+        'undefined'
+    ) {
+      installUiSessionLifecycleListeners();
+      return;
+    }
+
+    let finished =
+      false;
+
+    let settleTimer =
+      null;
+
+    const temporaryEvents = [
+      'orientationchange',
+      'resize',
+      'pageshow'
+    ];
+
+    const finishRestore =
+      () => {
+        if (
+          finished
+        ) {
+          return;
+        }
+
+        finished =
+          true;
+
+        for (
+          const eventName
+          of temporaryEvents
+        ) {
+          window.removeEventListener?.(
+            eventName,
+            waitForViewportPaint
+          );
+        }
+
+        if (
+          settleTimer !==
+            null &&
+          typeof clearTimeout ===
+            'function'
+        ) {
+          clearTimeout(
+            settleTimer
+          );
+        }
+
+        let settledRestoreState =
+          null;
+
+        try {
+          settledRestoreState =
+            consumeUiOrientationRestoreState();
+        } catch (error) {
+          launcherStartupFailure(
+            'ui_orientation_settle_restore_failed',
+            error
+          );
+
+          console.warn(
+            '[Torn Analytics] Could not restore the prior UI after viewport settlement:',
+            error
+          );
+        }
+
+        installUiSessionLifecycleListeners();
+
+        if (
+          settledRestoreState
+        ) {
+          void restoreOpenModalAfterDomReplacement(
+            settledRestoreState
+          );
+        }
+      };
+
+    const waitForViewportPaint =
+      () => {
+        if (
+          finished
+        ) {
+          return;
+        }
+
+        if (
+          typeof requestAnimationFrame ===
+            'function'
+        ) {
+          requestAnimationFrame(
+            () => {
+              requestAnimationFrame(
+                finishRestore
+              );
+            }
+          );
+        } else {
+          finishRestore();
+        }
+      };
+
+    for (
+      const eventName
+      of temporaryEvents
+    ) {
+      window.addEventListener(
+        eventName,
+        waitForViewportPaint,
+        { passive: true }
+      );
+    }
+
+    if (
+      typeof setTimeout ===
+        'function'
+    ) {
+      settleTimer =
+        setTimeout(
+          waitForViewportPaint,
+          UI_ORIENTATION_VIEWPORT_SETTLE_MS
+        );
+    } else {
+      waitForViewportPaint();
+    }
+  }
+
   function initialize() {
 
     // The launcher is the recovery path for every other feature. Install it
@@ -34815,7 +35012,10 @@
 
     try {
       restoreState =
-        consumeUiOrientationRestoreState();
+        consumeUiOrientationRestoreState({
+          defer_unchanged_orientation:
+            true
+        });
     } catch (error) {
       launcherStartupFailure(
         'ui_session_restore_failed',
@@ -34829,34 +35029,20 @@
     }
 
     if (
-      typeof window !==
-      'undefined'
+      restoreState ===
+        undefined
     ) {
-      window.addEventListener(
-        'orientationchange',
-        markUiOrientationRefreshPending,
-        { passive: true }
-      );
+      restoreUiAfterViewportSettles();
+    } else {
+      installUiSessionLifecycleListeners();
 
-      window.addEventListener(
-        'pagehide',
-        markUiOrientationRefreshPending,
-        { passive: true }
-      );
-
-      window.addEventListener(
-        'resize',
-        markUiOrientationRefreshPending,
-        { passive: true }
-      );
-    }
-
-    if (
-      restoreState
-    ) {
-      void restoreOpenModalAfterDomReplacement(
+      if (
         restoreState
-      );
+      ) {
+        void restoreOpenModalAfterDomReplacement(
+          restoreState
+        );
+      }
     }
 
     try {
