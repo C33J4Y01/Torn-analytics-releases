@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics — Independent Log Reconciler
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      1.0.3
+// @version      1.0.4
 // @description  One-time, read-only comparison of a Torn Analytics history export against fresh Torn API log responses.
 // @author       Personal use
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERIFIER_VERSION = '1.0.3';
+  const VERIFIER_VERSION = '1.0.4';
   const EXPORT_FORMAT = 'torn-analytics-readable-history';
   const EXPORT_VERSION = 2;
   const RAW_FORMAT = 'torn-api-v2-user-log-record-v1';
@@ -614,6 +614,15 @@
     return collected.records;
   }
 
+  function retainLogicalCoverage(records, first, last) {
+    const retained = new Map();
+    for (const [id, record] of records) {
+      if (record.timestamp < first || record.timestamp > last) continue;
+      retained.set(id, record);
+    }
+    return retained;
+  }
+
   async function confirmAccount(transport, expectedAccountId) {
     const json = await transport.getJson(
       approvedApiUrl(`${API_ORIGIN}/v2/user/profile`, '/v2/user/profile'),
@@ -686,8 +695,10 @@
       reason,
       method: {
         source: 'Fresh GET-only Torn API v2 user/profile and user/log requests',
-        range_semantics: '(from, to]',
-        coverage_strategy: 'Recursive timestamp bisection; raw pages split at 90 records or an older-page prev signal; exact-from echoes are quarantined and right-child midpoint records are promoted into the parent after exact-content checks; the root pre-coverage boundary remains excluded; next links are metadata, not collection continuations',
+        range_semantics: 'Inclusive history coverage inside one-second guarded API request bounds',
+        api_request_from: source.first - 1,
+        api_request_to: source.last + 1,
+        coverage_strategy: 'Recursive timestamp bisection; raw pages split at 90 records or an older-page prev signal; one-second outer guards protect both history endpoints; exact-from echoes are quarantined; records outside logical history coverage are excluded; right-child midpoint records are promoted into the parent after exact-content checks; next links are metadata, not collection continuations',
         mutation: 'None; results were held in memory only'
       },
       account: { id: account.id, name: account.name || source.accountName },
@@ -721,7 +732,13 @@
     const transport = createTransport(apiKey, hooks);
     hooks.onTransport?.(transport);
     const account = await confirmAccount(transport, source.accountId);
-    const fresh = await collectRange(source.first - 1, source.last, transport, hooks.onProgress);
+    const guardedFresh = await collectRange(
+      source.first - 1,
+      source.last + 1,
+      transport,
+      hooks.onProgress
+    );
+    const fresh = retainLogicalCoverage(guardedFresh, source.first, source.last);
     const comparison = compareRecords(source.records, fresh);
     const outcome = comparison.apiOnly.length || comparison.exportOnly.length || comparison.mismatched.length
       ? 'FAIL'
@@ -753,6 +770,7 @@
     createTransport,
     collectRange,
     collectRangeDetailed,
+    retainLogicalCoverage,
     compareRecords,
     buildReport,
     runReconciliation,
