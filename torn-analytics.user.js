@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.45
+// @version      2.18.46
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,10 +22,10 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.45';
+  const VERSION = '2.18.46';
 
-  // v2.18.45 preserves modal scroll across manual close/reopen and waits for
-  // TornPDA's viewport to settle before finalizing rotation restoration.
+  // v2.18.46 adds a transparent deterministic-advisor explanation contract
+  // without changing advice decisions, collection, storage, or predictions.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -18194,6 +18194,119 @@
     };
   }
 
+  function trainingReadinessAdvisorContract(
+    readiness,
+    advice,
+    nowSeconds = Math.floor(Date.now() / 1000)
+  ) {
+    const now = Number.isFinite(Number(nowSeconds))
+      ? Math.floor(Number(nowSeconds))
+      : Math.floor(Date.now() / 1000);
+    const finiteValue = value =>
+      value !== null &&
+      value !== undefined &&
+      value !== '' &&
+      Number.isFinite(Number(value))
+        ? Number(value)
+        : null;
+    const safeAdvice = advice && typeof advice === 'object'
+      ? advice
+      : {};
+    const plan = trainingReadinessPlan(safeAdvice.plan);
+    const energy = finiteValue(readiness?.energy);
+    const energyMaximum = finiteValue(readiness?.energy_maximum);
+    const happiness = finiteValue(readiness?.happiness);
+    const happinessMaximum = finiteValue(readiness?.happiness_maximum);
+    const drugReadyAt = finiteValue(readiness?.drug_ready_at);
+    const boosterReadyAt = finiteValue(readiness?.booster_ready_at);
+    const validReadyAt = value =>
+      value !== null &&
+      Number.isSafeInteger(value) &&
+      value > 0;
+    const cooldownEvidence = readyAt => {
+      if (!validReadyAt(readyAt)) {
+        return 'Unavailable';
+      }
+
+      if (readyAt <= now) {
+        return 'Ready now';
+      }
+
+      return `Ready in ${trainingReadinessFormatDuration(readyAt - now)}`;
+    };
+    const liveValue = (value, maximum) => {
+      if (value === null) {
+        return 'Unavailable';
+      }
+
+      return maximum === null
+        ? value.toLocaleString()
+        : `${value.toLocaleString()} / ${maximum.toLocaleString()}`;
+    };
+    const planLabel = plan === 'happy_jump'
+      ? 'Happy Jump'
+      : 'Efficient training';
+    const evidence = [
+      `Rule: ${planLabel}`,
+      `Live Torn fact — Energy: ${liveValue(energy, energyMaximum)}`,
+      `Live Torn fact — Happiness: ${liveValue(happiness, happinessMaximum)}`,
+      `Live Torn fact — Drug cooldown: ${cooldownEvidence(drugReadyAt)}`,
+      `Live Torn fact — Booster cooldown: ${cooldownEvidence(boosterReadyAt)}`
+    ];
+    const missingInputs = [];
+
+    if (energy === null) {
+      missingInputs.push('Energy');
+    }
+
+    if (happiness === null || happinessMaximum === null) {
+      missingInputs.push('Happiness');
+    }
+
+    if (!validReadyAt(drugReadyAt)) {
+      missingInputs.push('drug cooldown');
+    }
+
+    if (!validReadyAt(boosterReadyAt)) {
+      missingInputs.push('booster cooldown');
+    }
+
+    const coreInputsAvailable =
+      energy !== null &&
+      validReadyAt(drugReadyAt);
+    const confidence = missingInputs.length === 0
+      ? {
+          label: 'High',
+          detail: 'All live inputs checked by this deterministic plan rule are available.'
+        }
+      : coreInputsAvailable
+        ? {
+            label: 'Medium',
+            detail: 'Core Energy and drug-cooldown inputs are live, but some supporting context is unavailable.'
+          }
+        : {
+            label: 'Limited',
+            detail: 'A required live input is unavailable; refresh before relying on this action.'
+          };
+    const limitations = [
+      'Read-only: no items are used and no training is performed.',
+      'Inventory, item prices, and personal risk preferences are not known.',
+      'Historical gain estimates are separate; this rule does not predict exact gains or Happiness effects.'
+    ];
+
+    if (missingInputs.length) {
+      limitations.push(`Missing live context: ${missingInputs.join(', ')}.`);
+    }
+
+    return {
+      action: String(safeAdvice.title || 'Guidance unavailable'),
+      reason: String(safeAdvice.detail || 'No explanation is available for this action.'),
+      evidence,
+      confidence,
+      limitations
+    };
+  }
+
   function trainingReadinessQuarterHour(
     nowMs = Date.now()
   ) {
@@ -18566,9 +18679,16 @@
     const trainingPlan = trainingReadinessPlan(
       safeRenderOptions.plan || readTrainingReadinessPlan()
     );
+    const advisorNow = Math.floor(Date.now() / 1000);
     const planAdvice = trainingReadinessPlanAdvice(
       readiness,
-      trainingPlan
+      trainingPlan,
+      advisorNow
+    );
+    const advisorContract = trainingReadinessAdvisorContract(
+      readiness,
+      planAdvice,
+      advisorNow
     );
 
     const options = ['strength', 'defense', 'speed', 'dexterity']
@@ -18675,7 +18795,7 @@
     `;
 
     return `
-      <details class="ta-section ta-training-readiness-section" ${sectionOpen ? 'open' : ''} data-ta-live-energy="${readiness.energy === null ? '' : Number(readiness.energy)}" data-ta-live-happiness="${readiness.happiness === null ? '' : Number(readiness.happiness)}" data-ta-live-happiness-maximum="${readiness.happiness_maximum === null ? '' : Number(readiness.happiness_maximum)}" data-ta-over-happiness="${readiness.over_happiness ? 'true' : 'false'}" data-ta-drug-ready-at="${readiness.drug_ready_at === null ? '' : Number(readiness.drug_ready_at)}" data-ta-booster-ready-at="${readiness.booster_ready_at === null ? '' : Number(readiness.booster_ready_at)}">
+      <details class="ta-section ta-training-readiness-section" ${sectionOpen ? 'open' : ''} data-ta-live-energy="${readiness.energy === null ? '' : Number(readiness.energy)}" data-ta-live-energy-maximum="${readiness.energy_maximum === null ? '' : Number(readiness.energy_maximum)}" data-ta-live-happiness="${readiness.happiness === null ? '' : Number(readiness.happiness)}" data-ta-live-happiness-maximum="${readiness.happiness_maximum === null ? '' : Number(readiness.happiness_maximum)}" data-ta-over-happiness="${readiness.over_happiness ? 'true' : 'false'}" data-ta-drug-ready-at="${readiness.drug_ready_at === null ? '' : Number(readiness.drug_ready_at)}" data-ta-booster-ready-at="${readiness.booster_ready_at === null ? '' : Number(readiness.booster_ready_at)}">
         <summary class="ta-section-summary-row">
           <span class="ta-section-title">Gym Trainer</span>
           <span class="ta-section-meta">${readiness.energy === null ? 'Historical only' : `${Number(readiness.energy).toLocaleString()} E`}</span>
@@ -18699,6 +18819,34 @@
               <strong data-ta-training-plan-title>${escapeActivityHtml(planAdvice.title)}</strong>
               <small data-ta-training-plan-detail>${escapeActivityHtml(planAdvice.detail)}</small>
             </div>
+            <details class="ta-training-advisor-explanation">
+              <summary>
+                <span>Why this advice</span>
+                <b data-ta-training-advisor-confidence-summary>${escapeActivityHtml(advisorContract.confidence.label)} rule confidence</b>
+              </summary>
+              <div class="ta-training-advisor-body">
+                <div class="ta-training-advisor-row">
+                  <span>Action</span>
+                  <p data-ta-training-advisor-action>${escapeActivityHtml(advisorContract.action)}</p>
+                </div>
+                <div class="ta-training-advisor-row">
+                  <span>Reason</span>
+                  <p data-ta-training-advisor-reason>${escapeActivityHtml(advisorContract.reason)}</p>
+                </div>
+                <div class="ta-training-advisor-row">
+                  <span>Evidence</span>
+                  <p data-ta-training-advisor-evidence>${escapeActivityHtml(advisorContract.evidence.join('\n'))}</p>
+                </div>
+                <div class="ta-training-advisor-row">
+                  <span>Confidence</span>
+                  <p data-ta-training-advisor-confidence>${escapeActivityHtml(`${advisorContract.confidence.label} — ${advisorContract.confidence.detail}`)}</p>
+                </div>
+                <div class="ta-training-advisor-row">
+                  <span>Limitations</span>
+                  <p data-ta-training-advisor-limitations>${escapeActivityHtml(advisorContract.limitations.join('\n'))}</p>
+                </div>
+              </div>
+            </details>
           </div>
 
           <div class="ta-section-intro">
@@ -18765,6 +18913,12 @@
     const planCard = section.querySelector('[data-ta-training-plan-card]');
     const planTitle = section.querySelector('[data-ta-training-plan-title]');
     const planDetail = section.querySelector('[data-ta-training-plan-detail]');
+    const advisorAction = section.querySelector('[data-ta-training-advisor-action]');
+    const advisorReason = section.querySelector('[data-ta-training-advisor-reason]');
+    const advisorEvidence = section.querySelector('[data-ta-training-advisor-evidence]');
+    const advisorConfidence = section.querySelector('[data-ta-training-advisor-confidence]');
+    const advisorConfidenceSummary = section.querySelector('[data-ta-training-advisor-confidence-summary]');
+    const advisorLimitations = section.querySelector('[data-ta-training-advisor-limitations]');
     const datasetNumber = key => {
       const value = section.dataset?.[key];
 
@@ -18775,18 +18929,27 @@
           ? Number(value)
           : null;
     };
+    const readinessFromDataset = () => ({
+      energy: datasetNumber('taLiveEnergy'),
+      energy_maximum: datasetNumber('taLiveEnergyMaximum'),
+      happiness: datasetNumber('taLiveHappiness'),
+      happiness_maximum: datasetNumber('taLiveHappinessMaximum'),
+      over_happiness: section.dataset?.taOverHappiness === 'true',
+      drug_ready_at: datasetNumber('taDrugReadyAt'),
+      booster_ready_at: datasetNumber('taBoosterReadyAt')
+    });
     const refreshPlan = () => {
+      const now = Math.floor(Date.now() / 1000);
+      const readiness = readinessFromDataset();
       const advice = trainingReadinessPlanAdvice(
-        {
-          energy: datasetNumber('taLiveEnergy'),
-          happiness: datasetNumber('taLiveHappiness'),
-          happiness_maximum: datasetNumber('taLiveHappinessMaximum'),
-          over_happiness: section.dataset?.taOverHappiness === 'true',
-          drug_ready_at: datasetNumber('taDrugReadyAt'),
-          booster_ready_at: datasetNumber('taBoosterReadyAt')
-        },
+        readiness,
         planSelect?.value,
-        Math.floor(Date.now() / 1000)
+        now
+      );
+      const advisorContract = trainingReadinessAdvisorContract(
+        readiness,
+        advice,
+        now
       );
 
       if (planTitle) {
@@ -18795,6 +18958,30 @@
 
       if (planDetail) {
         planDetail.textContent = advice.detail;
+      }
+
+      if (advisorAction) {
+        advisorAction.textContent = advisorContract.action;
+      }
+
+      if (advisorReason) {
+        advisorReason.textContent = advisorContract.reason;
+      }
+
+      if (advisorEvidence) {
+        advisorEvidence.textContent = advisorContract.evidence.join('\n');
+      }
+
+      if (advisorConfidence) {
+        advisorConfidence.textContent = `${advisorContract.confidence.label} — ${advisorContract.confidence.detail}`;
+      }
+
+      if (advisorConfidenceSummary) {
+        advisorConfidenceSummary.textContent = `${advisorContract.confidence.label} rule confidence`;
+      }
+
+      if (advisorLimitations) {
+        advisorLimitations.textContent = advisorContract.limitations.join('\n');
       }
 
       if (planCard) {
@@ -29989,6 +30176,78 @@
         opacity: .74;
       }
 
+      #${MODAL_ID} .ta-training-advisor-explanation {
+        border-top: 1px solid #40341f;
+      }
+
+      #${MODAL_ID} .ta-training-advisor-explanation > summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 42px;
+        padding: 0 10px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      #${MODAL_ID} .ta-training-advisor-explanation > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-training-advisor-explanation > summary > span {
+        color: #e8e8e8;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-training-advisor-explanation > summary > b {
+        color: #c9aa6a;
+        font-size: 10px;
+        text-align: right;
+      }
+
+      #${MODAL_ID} .ta-training-advisor-explanation > summary::after {
+        content: '⌄';
+        color: #aaa;
+        font-size: 15px;
+      }
+
+      #${MODAL_ID} .ta-training-advisor-explanation[open] > summary::after {
+        transform: rotate(180deg);
+      }
+
+      #${MODAL_ID} .ta-training-advisor-body {
+        display: grid;
+        gap: 0;
+        padding: 0 10px 9px;
+      }
+
+      #${MODAL_ID} .ta-training-advisor-row {
+        display: grid;
+        grid-template-columns: 76px minmax(0, 1fr);
+        gap: 8px;
+        padding: 7px 0;
+        border-top: 1px solid rgba(255, 255, 255, .07);
+      }
+
+      #${MODAL_ID} .ta-training-advisor-row > span {
+        color: #c9aa6a;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-training-advisor-row > p {
+        margin: 0;
+        color: #ddd;
+        font-size: 11px;
+        line-height: 1.42;
+        overflow-wrap: anywhere;
+        white-space: pre-line;
+      }
+
       #${MODAL_ID} .ta-training-plan-ready {
         border-left-color: #d6a84e;
       }
@@ -30036,6 +30295,10 @@
       @media (max-width: 520px) {
         #${MODAL_ID} .ta-training-controls {
           grid-template-columns: 1fr;
+        }
+
+        #${MODAL_ID} .ta-training-advisor-row {
+          grid-template-columns: 68px minmax(0, 1fr);
         }
       }
 
