@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics — Independent API Log Exporter
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      1.0.0
+// @version      1.0.1
 // @description  One-time, read-only export of fresh Torn API logs over an existing Torn Analytics history coverage period.
 // @author       Personal use
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const EXPORTER_VERSION = '1.0.0';
+  const EXPORTER_VERSION = '1.0.1';
   const HISTORY_FORMAT = 'torn-analytics-readable-history';
   const HISTORY_VERSION = 2;
   const HISTORY_RAW_FORMAT = 'torn-api-v2-user-log-record-v1';
@@ -643,48 +643,56 @@
     return `TornAnalytics-${payload.account.id}-fresh-api-${day}.json`;
   }
 
-  function triggerJsonDownload(text, filename, hooks = {}) {
-    if (typeof text !== 'string' || !text.length || !/^[A-Za-z0-9._-]+\.json$/.test(filename)) {
-      throw new ExporterError('Refusing an invalid JSON download.');
-    }
-    const BlobImpl = hooks.Blob || globalThis.Blob;
-    const urlApi = hooks.URL || globalThis.URL;
-    const doc = hooks.document || globalThis.document;
-    const defer = hooks.setTimeout || globalThis.setTimeout;
-    if (
-      typeof BlobImpl !== 'function' ||
-      typeof urlApi?.createObjectURL !== 'function' ||
-      typeof urlApi?.revokeObjectURL !== 'function' ||
-      typeof doc?.createElement !== 'function'
-    ) {
-      throw new ExporterError('This browser cannot create a normal JSON download.');
-    }
-    const blob = new BlobImpl([text], { type: 'application/json;charset=utf-8' });
-    const objectUrl = urlApi.createObjectURL(blob);
-    const anchor = doc.createElement('a');
-    anchor.href = objectUrl;
-    anchor.download = filename;
-    anchor.rel = 'noopener';
-    anchor.style.display = 'none';
-    try {
-      anchor.click();
-    } finally {
-      anchor.remove?.();
-      defer(() => urlApi.revokeObjectURL(objectUrl), 1000);
-    }
-    return { filename, bytes: new TextEncoder().encode(text).byteLength };
+  function isIphoneFileShareRuntime(hooks = {}) {
+    const nav = hooks.navigator || globalThis.navigator;
+    const FileImpl = hooks.File || globalThis.File;
+    return /(?:iPhone|iPod)/i.test(String(nav?.userAgent || '')) &&
+      typeof FileImpl === 'function' &&
+      typeof nav?.share === 'function';
   }
 
-  function triggerPreflightDownload(hooks = {}) {
+  function shareJsonFile(text, filename, hooks = {}) {
+    if (typeof text !== 'string' || !text.length || !/^[A-Za-z0-9._-]+\.json$/.test(filename)) {
+      throw new ExporterError('Refusing an invalid JSON file share.');
+    }
+    const FileImpl = hooks.File || globalThis.File;
+    const nav = hooks.navigator || globalThis.navigator;
+    if (typeof FileImpl !== 'function' || typeof nav?.share !== 'function') {
+      throw new ExporterError('Native iPhone file sharing is unavailable. Open this exporter in iPhone TornPDA.');
+    }
+    const file = new FileImpl(
+      [text],
+      filename,
+      { type: 'application/json;charset=utf-8' }
+    );
+    const shareData = { files: [file] };
+    if (typeof nav.canShare === 'function' && !nav.canShare(shareData)) {
+      throw new ExporterError('This iPhone TornPDA browser cannot safely share the prepared JSON file.');
+    }
+    const receipt = {
+      filename,
+      bytes: new TextEncoder().encode(text).byteLength
+    };
+
+    // Keep this call synchronous with the button tap. WebKit/WKWebView may
+    // reject native file sharing after any awaited work consumes activation.
+    const shareResult = nav.share(shareData);
+    if (!shareResult || typeof shareResult.then !== 'function') {
+      throw new ExporterError('Native iPhone file sharing did not start correctly.');
+    }
+    return shareResult.then(() => receipt);
+  }
+
+  function triggerPreflightShare(hooks = {}) {
     const payload = {
-      test: 'torn-independent-api-log-export-download',
+      test: 'torn-independent-api-log-export-save-to-files',
       exporter_version: EXPORTER_VERSION,
       created_at: new Date().toISOString(),
-      message: 'If this file is in Downloads, the full fresh API export can be saved normally.'
+      message: 'If this JSON is visible in Files, the full fresh API export can use the same native iPhone save path.'
     };
-    return triggerJsonDownload(
+    return shareJsonFile(
       JSON.stringify(payload, null, 2),
-      `TornAnalytics-download-test-${new Date().toISOString().slice(0, 10)}.json`,
+      `TornAnalytics-save-test-${new Date().toISOString().slice(0, 10)}.json`,
       hooks
     );
   }
@@ -704,8 +712,9 @@
     validateFreshApiExport,
     runApiExport,
     filenameForApiExport,
-    triggerJsonDownload,
-    triggerPreflightDownload,
+    isIphoneFileShareRuntime,
+    shareJsonFile,
+    triggerPreflightShare,
     constants: {
       HISTORY_FORMAT,
       HISTORY_VERSION,
@@ -727,6 +736,7 @@
   let selectedSource = null;
   let activeTransport = null;
   let preparedExport = null;
+  let preparedExportText = null;
   let preflightConfirmed = false;
 
   function installStyle() {
@@ -764,26 +774,27 @@
   function mount() {
     if (document.getElementById(ROOT_ID)) return;
     installStyle();
+    const compatibleRuntime = isIphoneFileShareRuntime();
     const root = document.createElement('div');
     root.id = ROOT_ID;
     root.innerHTML = `
       <section class="ta-e-card" role="dialog" aria-modal="true" aria-labelledby="ta-e-title">
         <h2 id="ta-e-title">Independent API Log Exporter v${EXPORTER_VERSION}</h2>
-        <p class="ta-e-safe">Read-only: this temporary tool makes GET requests only and creates a fresh JSON download. It does not compare, repair, open, change, or store Torn Analytics history.</p>
-        <p class="ta-e-note">First test that a normal JSON download reaches Downloads. Then choose the readable-history export so the fresh API scan uses the exact same account and coverage.</p>
+        <p class="ta-e-safe">Read-only: this temporary tool makes GET requests only and prepares a fresh JSON file. It does not compare, repair, open, change, or store Torn Analytics history.</p>
+        <p class="ta-e-note">iPhone TornPDA only. First use the tiny native share test and choose <strong>Save to Files</strong>. Then choose the readable-history export so the fresh API scan uses the exact same account and coverage.</p>
         <div class="ta-e-actions">
-          <button id="ta-e-test-download">1. Test JSON download</button>
+          <button id="ta-e-test-download"${compatibleRuntime ? '' : ' disabled'}>1. Test Save to Files</button>
         </div>
-        <label class="ta-e-confirm"><input id="ta-e-test-confirm" type="checkbox">I found the test JSON in Downloads</label>
+        <label class="ta-e-confirm"><input id="ta-e-test-confirm" type="checkbox"${compatibleRuntime ? '' : ' disabled'}>I found the test JSON in Files</label>
         <label>History export<input id="ta-e-file" type="file" accept="application/json,.json"></label>
         ${injectedKey ? '' : '<label>Session-only Torn API key<input id="ta-e-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></label>'}
         <div class="ta-e-actions">
           <button id="ta-e-run" class="ta-e-primary" disabled>2. Collect fresh API logs</button>
           <button id="ta-e-cancel" disabled>Cancel</button>
-          <button id="ta-e-download" disabled>3. Download fresh API JSON</button>
+          <button id="ta-e-download" disabled>3. Save fresh API JSON to Files</button>
           <button id="ta-e-close">Close</button>
         </div>
-        <p id="ta-e-status" class="ta-e-status">Run the tiny download test first.</p>
+        <p id="ta-e-status" class="ta-e-status">${compatibleRuntime ? 'Run the tiny Save to Files test first.' : 'Open this exporter in iPhone TornPDA. Mac TornPDA and ordinary downloads are not supported.'}</p>
         <pre id="ta-e-output" hidden></pre>
       </section>`;
     document.body.appendChild(root);
@@ -800,14 +811,23 @@
     const output = root.querySelector('#ta-e-output');
 
     testDownload.addEventListener('click', () => {
+      let sharePromise;
       try {
-        const receipt = triggerPreflightDownload();
+        sharePromise = triggerPreflightShare();
         status.className = 'ta-e-status';
-        status.textContent = `Download requested: ${receipt.filename}. Confirm it exists before continuing.`;
+        status.textContent = 'Native share opened. Choose Save to Files and finish saving the test JSON.';
       } catch (error) {
         status.className = 'ta-e-status ta-e-fail';
-        status.textContent = `Test download failed: ${error.message}`;
+        status.textContent = `Test Save to Files failed: ${error.message}`;
+        return;
       }
+      sharePromise.then(receipt => {
+        status.className = 'ta-e-status';
+        status.textContent = `Share completed for ${receipt.filename}. Find it in Files before continuing.`;
+      }).catch(error => {
+        status.className = 'ta-e-status ta-e-fail';
+        status.textContent = `Test Save to Files did not complete: ${error.message}`;
+      });
     });
 
     testConfirm.addEventListener('change', () => {
@@ -815,7 +835,7 @@
       refreshRunState(run);
       if (preflightConfirmed) {
         status.className = 'ta-e-status ta-e-ok';
-        status.textContent = 'Download path confirmed. Choose and validate the history export.';
+        status.textContent = 'Save to Files confirmed. Choose and validate the history export.';
       }
     });
 
@@ -823,6 +843,7 @@
       selectedPayload = null;
       selectedSource = null;
       preparedExport = null;
+      preparedExportText = null;
       download.disabled = true;
       output.hidden = true;
       const file = fileInput.files?.[0];
@@ -851,13 +872,14 @@
       const key = String(injectedKey || keyInput?.value || '').trim();
       if (!selectedPayload || !selectedSource || !preflightConfirmed || !key) {
         status.className = 'ta-e-status ta-e-fail';
-        status.textContent = 'Confirm the test download, choose a valid history export, and provide the session-only API key.';
+        status.textContent = 'Confirm the Save to Files test, choose a valid history export, and provide the session-only API key.';
         return;
       }
       run.disabled = true;
       cancel.disabled = false;
       download.disabled = true;
       preparedExport = null;
+      preparedExportText = null;
       output.hidden = true;
       status.className = 'ta-e-status';
       status.textContent = 'Confirming the API key account…';
@@ -871,6 +893,7 @@
         });
         preparedExport = result.payload;
         const check = await validateFreshApiExport(preparedExport);
+        preparedExportText = JSON.stringify(preparedExport, null, 2);
         status.className = 'ta-e-status ta-e-ok';
         status.textContent = `Fresh API export ready: ${check.count.toLocaleString()} records.`;
         output.textContent = [
@@ -879,7 +902,7 @@
           `Fresh records: ${check.count.toLocaleString()}`,
           `API requests: ${preparedExport.collection.api_requests.toLocaleString()}`,
           `SHA-256: ${check.digest}`,
-          'Click Download fresh API JSON. The prepared file remains in memory until this window closes.'
+          'Tap Save fresh API JSON to Files and finish the iOS Save to Files action. The prepared file remains in memory for retry until this window closes.'
         ].join('\n');
         output.hidden = false;
         download.disabled = false;
@@ -899,18 +922,27 @@
     });
 
     cancel.addEventListener('click', () => activeTransport?.cancel());
-    download.addEventListener('click', async () => {
-      if (!preparedExport) return;
+    download.addEventListener('click', () => {
+      if (!preparedExport || !preparedExportText) return;
+      let sharePromise;
+      let filename;
       try {
-        const check = await validateFreshApiExport(preparedExport);
-        const filename = filenameForApiExport(preparedExport);
-        const receipt = triggerJsonDownload(JSON.stringify(preparedExport, null, 2), filename);
-        status.className = 'ta-e-status ta-e-ok';
-        status.textContent = `Download requested: ${receipt.filename} · ${check.count.toLocaleString()} records. Keep this window open until the file is visible.`;
+        filename = filenameForApiExport(preparedExport);
+        sharePromise = shareJsonFile(preparedExportText, filename);
+        status.className = 'ta-e-status';
+        status.textContent = 'Native share opened. Choose Save to Files and finish saving the fresh API JSON.';
       } catch (error) {
         status.className = 'ta-e-status ta-e-fail';
-        status.textContent = `Could not download the fresh API JSON: ${error.message}`;
+        status.textContent = `Could not start Save to Files: ${error.message}`;
+        return;
       }
+      sharePromise.then(receipt => {
+        status.className = 'ta-e-status ta-e-ok';
+        status.textContent = `Share completed for ${receipt.filename}. Confirm the file is visible in Files; you may tap Save again if needed.`;
+      }).catch(error => {
+        status.className = 'ta-e-status ta-e-fail';
+        status.textContent = `Save to Files did not complete: ${error.message}. The verified JSON remains ready for retry.`;
+      });
     });
     close.addEventListener('click', () => {
       activeTransport?.cancel();
@@ -918,6 +950,7 @@
       selectedPayload = null;
       selectedSource = null;
       preparedExport = null;
+      preparedExportText = null;
       root.remove();
     });
   }
