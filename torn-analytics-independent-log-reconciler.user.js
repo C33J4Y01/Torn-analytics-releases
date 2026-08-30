@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics — Independent Log Reconciler
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      1.0.0
+// @version      1.0.1
 // @description  One-time, read-only comparison of a Torn Analytics history export against fresh Torn API log responses.
 // @author       Personal use
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERIFIER_VERSION = '1.0.0';
+  const VERIFIER_VERSION = '1.0.1';
   const EXPORT_FORMAT = 'torn-analytics-readable-history';
   const EXPORT_VERSION = 2;
   const RAW_FORMAT = 'torn-api-v2-user-log-record-v1';
@@ -31,11 +31,35 @@
     : API_KEY_MARKER.trim();
 
   class ReconciliationError extends Error {
-    constructor(message, outcome = 'INCONCLUSIVE') {
+    constructor(message, outcome = 'INCONCLUSIVE', diagnostic = null) {
       super(message);
       this.name = 'ReconciliationError';
       this.outcome = outcome;
+      this.diagnostic = diagnostic;
     }
+  }
+
+  function safeDiagnostic(error) {
+    const source = error?.diagnostic;
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+    const output = {};
+    for (const key of [
+      'phase',
+      'range_from',
+      'range_to',
+      'range_from_iso',
+      'range_to_iso',
+      'split_depth',
+      'page_record_count',
+      'prev_present',
+      'next_present'
+    ]) {
+      const value = source[key];
+      if (typeof value === 'string' || typeof value === 'boolean' || Number.isSafeInteger(value)) {
+        output[key] = value;
+      }
+    }
+    return Object.keys(output).length ? output : null;
   }
 
   function canonicalId(value) {
@@ -402,11 +426,17 @@
     mergeUnique(collected, firstPage.records);
     let cursor = firstPage.prev;
     const visited = new Set();
-    if (firstPage.next !== null) {
-      throw new ReconciliationError('The initial one-second page unexpectedly pointed to a newer page.');
-    }
     if (!cursor && firstPage.records.length >= PAGE_LIMIT) {
-      throw new ReconciliationError('A full one-second API page had no continuation link; completeness cannot be proven.');
+      throw new ReconciliationError(
+        'A full one-second API page had no older-page continuation link; completeness cannot be proven.',
+        'INCONCLUSIVE',
+        {
+          phase: 'one_second_pagination',
+          page_record_count: firstPage.records.length,
+          prev_present: false,
+          next_present: firstPage.next !== null
+        }
+      );
     }
     while (cursor) {
       const safeCursor = approvedApiUrl(cursor, '/v2/user/log', { from, to, cursor: true });
@@ -418,7 +448,16 @@
       const page = normalizeApiPage(json, from, to);
       mergeUnique(collected, page.records);
       if (page.records.length >= PAGE_LIMIT && page.prev === null) {
-        throw new ReconciliationError('A full terminal one-second page had no continuation link; completeness cannot be proven.');
+        throw new ReconciliationError(
+          'A full terminal one-second page had no older-page continuation link; completeness cannot be proven.',
+          'INCONCLUSIVE',
+          {
+            phase: 'one_second_pagination',
+            page_record_count: page.records.length,
+            prev_present: false,
+            next_present: page.next !== null
+          }
+        );
       }
       cursor = page.prev;
       progress?.({ from, to, accepted: collected.size, mode: 'one-second pagination' });
@@ -426,24 +465,40 @@
     return collected;
   }
 
-  async function collectRange(from, to, transport, progress, depth = 0) {
+  async function collectRangeCore(from, to, transport, progress, depth = 0) {
     if (depth > 32 || to <= from) {
       throw new ReconciliationError('The independent timestamp split reached an invalid depth or range.');
     }
     const json = await transport.getJson(buildLogUrl(from, to), '/v2/user/log', { from, to });
     const page = normalizeApiPage(json, from, to);
     const width = to - from;
-    const mustSplit = width > 1 && (page.records.length >= SPLIT_THRESHOLD || page.prev !== null || page.next !== null);
+    // Torn returns descending log pages. `prev` is the evidence-bearing link
+    // toward older records; `next` is a forward-navigation link and can be
+    // present even on an otherwise terminal direct range response. Validate
+    // its metadata shape above, but never treat `next` alone as missing older
+    // history or follow it during reconciliation.
+    const mustSplit = width > 1 && (
+      page.records.length >= SPLIT_THRESHOLD ||
+      page.prev !== null
+    );
     if (!mustSplit) {
       if (width === 1 && (page.prev !== null || page.records.length >= PAGE_LIMIT)) {
-        return collectSingleSecond(from, to, page, transport, progress);
+        return await collectSingleSecond(from, to, page, transport, progress);
       }
       if (
         page.prev !== null ||
-        page.next !== null ||
         (width > 1 && page.records.length >= SPLIT_THRESHOLD)
       ) {
-        throw new ReconciliationError('An unsplit API range remained paginated or saturated.');
+        throw new ReconciliationError(
+          'An unsplit API range retained an older-page link or remained saturated.',
+          'INCONCLUSIVE',
+          {
+            phase: 'terminal_range',
+            page_record_count: page.records.length,
+            prev_present: page.prev !== null,
+            next_present: page.next !== null
+          }
+        );
       }
       const accepted = new Map(page.records.map(record => [record.id, record]));
       progress?.({ from, to, accepted: accepted.size, mode: 'terminal range' });
@@ -461,6 +516,31 @@
     mergeUnique(merged, right.values());
     assertParentSurvives(page.records, merged);
     return merged;
+  }
+
+  async function collectRange(from, to, transport, progress, depth = 0) {
+    try {
+      return await collectRangeCore(from, to, transport, progress, depth);
+    } catch (error) {
+      const diagnostic = {
+        phase: 'range_collection',
+        range_from: from,
+        range_to: to,
+        range_from_iso: new Date(from * 1000).toISOString(),
+        range_to_iso: new Date(to * 1000).toISOString(),
+        split_depth: depth,
+        ...(safeDiagnostic(error) || {})
+      };
+      if (error instanceof ReconciliationError) {
+        error.diagnostic = diagnostic;
+        throw error;
+      }
+      throw new ReconciliationError(
+        String(error?.message || error),
+        'INCONCLUSIVE',
+        diagnostic
+      );
+    }
   }
 
   async function confirmAccount(transport, expectedAccountId) {
@@ -536,7 +616,7 @@
       method: {
         source: 'Fresh GET-only Torn API v2 user/profile and user/log requests',
         range_semantics: '(from, to]',
-        coverage_strategy: 'Recursive timestamp bisection; pages split at 90 records or any pagination signal',
+        coverage_strategy: 'Recursive timestamp bisection; pages split at 90 records or an older-page prev signal; next links are validated as metadata but are not collection continuations',
         mutation: 'None; results were held in memory only'
       },
       account: { id: account.id, name: account.name || source.accountName },
@@ -592,6 +672,7 @@
 
   const testApi = {
     ReconciliationError,
+    safeDiagnostic,
     stableJson,
     sha256Hex,
     validateExport,
@@ -643,7 +724,7 @@
 
   function reportSummary(report) {
     const c = report.comparison;
-    return [
+    const lines = [
       `Outcome: ${report.outcome}`,
       report.reason,
       `Account: ${report.account.name || '(unknown)'} [${report.account.id}]`,
@@ -654,7 +735,16 @@
       `Export-only: ${c.export_only}`,
       `Payload mismatches: ${c.same_id_payload_mismatches}`,
       `API requests: ${report.run.api_requests}`
-    ].join('\n');
+    ];
+    if (report.diagnostic?.range_from_iso && report.diagnostic?.range_to_iso) {
+      lines.push(`Failing range: ${report.diagnostic.range_from_iso} to ${report.diagnostic.range_to_iso}`);
+      lines.push(
+        `Page state: ${report.diagnostic.page_record_count ?? 'unknown'} records · ` +
+        `prev ${report.diagnostic.prev_present ? 'present' : 'absent'} · ` +
+        `next ${report.diagnostic.next_present ? 'present' : 'absent'}`
+      );
+    }
+    return lines.join('\n');
   }
 
   function filenameFor(report) {
@@ -774,6 +864,7 @@
           verifier_version: VERIFIER_VERSION,
           outcome,
           reason: String(error?.message || error),
+          diagnostic: safeDiagnostic(error),
           method: { source: 'Fresh GET-only Torn API requests', mutation: 'None; results were held in memory only' },
           account: { id: fallbackSource?.accountId || 0, name: fallbackSource?.accountName || '' },
           source_export: fallbackSource ? {
