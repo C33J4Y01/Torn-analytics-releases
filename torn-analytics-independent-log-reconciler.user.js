@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics — Independent Log Reconciler
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      1.0.2
+// @version      1.0.3
 // @description  One-time, read-only comparison of a Torn Analytics history export against fresh Torn API log responses.
 // @author       Personal use
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERIFIER_VERSION = '1.0.2';
+  const VERIFIER_VERSION = '1.0.3';
   const EXPORT_FORMAT = 'torn-analytics-readable-history';
   const EXPORT_VERSION = 2;
   const RAW_FORMAT = 'torn-api-v2-user-log-record-v1';
@@ -371,6 +371,7 @@
       throw new ReconciliationError('Torn API returned an invalid log page.');
     }
     const records = [];
+    const boundaryRecords = [];
     const seen = new Set();
     const responseCount = json.log.length;
     let boundaryOverlapCount = 0;
@@ -402,20 +403,22 @@
         throw new ReconciliationError(`Torn API duplicated log identity ${id} within one page.`);
       }
       seen.add(id);
-      // Torn can echo the exclusive `from` boundary on overlapping requests.
-      // The preceding logical range owns that timestamp, so accept the API
-      // response but exclude the overlap from this range's comparison set.
-      if (timestamp === from) {
-        boundaryOverlapCount += 1;
-        continue;
-      }
-      records.push({
+      const prepared = {
         id,
         timestamp,
         title: String(raw?.details?.title || ''),
         raw,
         canonical: stableJson(raw)
-      });
+      };
+      // Quarantine exact-from echoes. They remain available to the parent
+      // merge, where a right child's from boundary is the parent's internal
+      // midpoint. The root boundary is never promoted into comparison data.
+      if (timestamp === from) {
+        boundaryOverlapCount += 1;
+        boundaryRecords.push(prepared);
+        continue;
+      }
+      records.push(prepared);
     }
     const links = json?._metadata?.links;
     if (!links || !Object.prototype.hasOwnProperty.call(links, 'prev') || !Object.prototype.hasOwnProperty.call(links, 'next')) {
@@ -429,6 +432,7 @@
     }
     return {
       records,
+      boundaryRecords,
       responseCount,
       boundaryOverlapCount,
       prev: links.prev,
@@ -457,9 +461,15 @@
     }
   }
 
-  async function collectSingleSecond(from, to, firstPage, transport, progress) {
-    const collected = new Map();
-    mergeUnique(collected, firstPage.records);
+  function pageCollection(page) {
+    return {
+      records: new Map(page.records.map(record => [record.id, record])),
+      fromBoundary: new Map(page.boundaryRecords.map(record => [record.id, record]))
+    };
+  }
+
+  async function collectSingleSecondDetailed(from, to, firstPage, transport, progress) {
+    const collected = pageCollection(firstPage);
     let cursor = firstPage.prev;
     const visited = new Set();
     if (!cursor && firstPage.responseCount >= PAGE_LIMIT) {
@@ -484,7 +494,8 @@
       visited.add(safeCursor);
       const json = await transport.getJson(safeCursor, '/v2/user/log', { from, to, cursor: true });
       const page = normalizeApiPage(json, from, to);
-      mergeUnique(collected, page.records);
+      mergeUnique(collected.records, page.records);
+      mergeUnique(collected.fromBoundary, page.boundaryRecords);
       if (page.responseCount >= PAGE_LIMIT && page.prev === null) {
         throw new ReconciliationError(
           'A full terminal one-second page had no older-page continuation link; completeness cannot be proven.',
@@ -500,12 +511,12 @@
         );
       }
       cursor = page.prev;
-      progress?.({ from, to, accepted: collected.size, mode: 'one-second pagination' });
+      progress?.({ from, to, accepted: collected.records.size, mode: 'one-second pagination' });
     }
     return collected;
   }
 
-  async function collectRangeCore(from, to, transport, progress, depth = 0) {
+  async function collectRangeDetailedCore(from, to, transport, progress, depth = 0) {
     if (depth > 32 || to <= from) {
       throw new ReconciliationError('The independent timestamp split reached an invalid depth or range.');
     }
@@ -523,7 +534,7 @@
     );
     if (!mustSplit) {
       if (width === 1 && (page.prev !== null || page.responseCount >= PAGE_LIMIT)) {
-        return await collectSingleSecond(from, to, page, transport, progress);
+        return await collectSingleSecondDetailed(from, to, page, transport, progress);
       }
       if (
         page.prev !== null ||
@@ -542,8 +553,8 @@
           }
         );
       }
-      const accepted = new Map(page.records.map(record => [record.id, record]));
-      progress?.({ from, to, accepted: accepted.size, mode: 'terminal range' });
+      const accepted = pageCollection(page);
+      progress?.({ from, to, accepted: accepted.records.size, mode: 'terminal range' });
       return accepted;
     }
 
@@ -552,17 +563,28 @@
       throw new ReconciliationError('The API range could not be divided safely.');
     }
     progress?.({ from, to, accepted: 0, mode: 'splitting dense range' });
-    const left = await collectRange(from, midpoint, transport, progress, depth + 1);
-    const right = await collectRange(midpoint, to, transport, progress, depth + 1);
-    const merged = new Map(left);
-    mergeUnique(merged, right.values());
-    assertParentSurvives(page.records, merged);
-    return merged;
+    const left = await collectRangeDetailed(from, midpoint, transport, progress, depth + 1);
+    const right = await collectRangeDetailed(midpoint, to, transport, progress, depth + 1);
+
+    const mergedRecords = new Map(left.records);
+    mergeUnique(mergedRecords, right.records.values());
+    // A right child's exact-from boundary is this parent's midpoint, which is
+    // inside the parent logical range. Promote that independently observed
+    // boundary only after exact-ID/content conflict checks.
+    mergeUnique(mergedRecords, right.fromBoundary.values());
+    assertParentSurvives(page.records, mergedRecords);
+
+    const parentBoundary = new Map(left.fromBoundary);
+    mergeUnique(parentBoundary, page.boundaryRecords);
+    return {
+      records: mergedRecords,
+      fromBoundary: parentBoundary
+    };
   }
 
-  async function collectRange(from, to, transport, progress, depth = 0) {
+  async function collectRangeDetailed(from, to, transport, progress, depth = 0) {
     try {
-      return await collectRangeCore(from, to, transport, progress, depth);
+      return await collectRangeDetailedCore(from, to, transport, progress, depth);
     } catch (error) {
       const diagnostic = {
         phase: 'range_collection',
@@ -583,6 +605,13 @@
         diagnostic
       );
     }
+  }
+
+  async function collectRange(from, to, transport, progress) {
+    const collected = await collectRangeDetailed(from, to, transport, progress, 0);
+    // Deliberately return only logical records. The root's exact-from boundary
+    // sits one second before exported coverage and remains quarantined.
+    return collected.records;
   }
 
   async function confirmAccount(transport, expectedAccountId) {
@@ -658,7 +687,7 @@
       method: {
         source: 'Fresh GET-only Torn API v2 user/profile and user/log requests',
         range_semantics: '(from, to]',
-        coverage_strategy: 'Recursive timestamp bisection; raw pages split at 90 records or an older-page prev signal; exact-from API overlaps are discarded to preserve logical (from, to] coverage; next links are metadata, not collection continuations',
+        coverage_strategy: 'Recursive timestamp bisection; raw pages split at 90 records or an older-page prev signal; exact-from echoes are quarantined and right-child midpoint records are promoted into the parent after exact-content checks; the root pre-coverage boundary remains excluded; next links are metadata, not collection continuations',
         mutation: 'None; results were held in memory only'
       },
       account: { id: account.id, name: account.name || source.accountName },
@@ -723,6 +752,7 @@
     normalizeApiPage,
     createTransport,
     collectRange,
+    collectRangeDetailed,
     compareRecords,
     buildReport,
     runReconciliation,
