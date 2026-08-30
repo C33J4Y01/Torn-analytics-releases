@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics — Independent API Log Exporter
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      1.0.1
+// @version      1.0.2
 // @description  One-time, read-only export of fresh Torn API logs over an existing Torn Analytics history coverage period.
 // @author       Personal use
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const EXPORTER_VERSION = '1.0.1';
+  const EXPORTER_VERSION = '1.0.2';
   const HISTORY_FORMAT = 'torn-analytics-readable-history';
   const HISTORY_VERSION = 2;
   const HISTORY_RAW_FORMAT = 'torn-api-v2-user-log-record-v1';
@@ -499,6 +499,15 @@
     return collected.records;
   }
 
+  function retainLogicalCoverage(records, first, last) {
+    const retained = new Map();
+    for (const [id, record] of records) {
+      if (record.timestamp < first || record.timestamp > last) continue;
+      retained.set(id, record);
+    }
+    return retained;
+  }
+
   async function confirmAccount(transport, expectedAccountId) {
     const json = await transport.getJson(
       approvedApiUrl(`${API_ORIGIN}/v2/user/profile`, '/v2/user/profile'),
@@ -537,8 +546,9 @@
         record_count: source.count
       },
       coverage: {
-        semantics: '(from, to]',
+        semantics: 'Inclusive history coverage inside one-second guarded API request bounds',
         request_from: source.first - 1,
+        request_to: source.last + 1,
         first_timestamp: source.first,
         last_timestamp: source.last,
         record_count: rawRecords.length
@@ -548,7 +558,7 @@
         finished_at: finishedAt,
         api_requests: requests,
         complete: true,
-        strategy: 'Recursive timestamp bisection with exact-from quarantine, internal midpoint promotion, parent-child reproduction checks, and fail-closed saturation handling'
+        strategy: 'Recursive timestamp bisection with one-second outer guards, exact-from quarantine, strict logical-coverage retention, internal midpoint promotion, parent-child reproduction checks, and fail-closed saturation handling'
       },
       raw_record_format: HISTORY_RAW_FORMAT,
       records: rawRecords
@@ -578,6 +588,13 @@
       throw new ExporterError('The prepared fresh API export is incomplete or malformed.');
     }
     const accountId = positiveSafeInteger(payload.account?.id, 'API export account ID');
+    const first = positiveSafeInteger(payload.coverage?.first_timestamp, 'API export coverage start');
+    const last = nonnegativeSafeInteger(payload.coverage?.last_timestamp, 'API export coverage end');
+    const requestFrom = nonnegativeSafeInteger(payload.coverage?.request_from, 'API request start');
+    const requestTo = nonnegativeSafeInteger(payload.coverage?.request_to, 'API request end');
+    if (requestFrom !== first - 1 || requestTo !== last + 1 || last < first) {
+      throw new ExporterError('The fresh API export does not declare the required one-second coverage guards.');
+    }
     const identities = new Set();
     let previousTimestamp = -1;
     let previousId = '';
@@ -589,6 +606,9 @@
       const timestamp = nonnegativeSafeInteger(raw.timestamp, 'Fresh API record timestamp');
       if (!id || identities.has(id)) {
         throw new ExporterError('The prepared fresh API export contains an invalid or duplicate identity.');
+      }
+      if (timestamp < first || timestamp > last) {
+        throw new ExporterError('The prepared fresh API export contains a record outside logical history coverage.');
       }
       if (
         timestamp < previousTimestamp ||
@@ -624,7 +644,13 @@
     const transport = createTransport(apiKey, hooks);
     hooks.onTransport?.(transport);
     const account = await confirmAccount(transport, source.accountId);
-    const records = await collectRange(source.first - 1, source.last, transport, hooks.onProgress);
+    const guardedRecords = await collectRange(
+      source.first - 1,
+      source.last + 1,
+      transport,
+      hooks.onProgress
+    );
+    const records = retainLogicalCoverage(guardedRecords, source.first, source.last);
     const finishedAt = new Date().toISOString();
     const payload = await buildFreshApiExport({
       source,
@@ -708,6 +734,7 @@
     normalizeApiPage,
     collectRange,
     collectRangeDetailed,
+    retainLogicalCoverage,
     buildFreshApiExport,
     validateFreshApiExport,
     runApiExport,
