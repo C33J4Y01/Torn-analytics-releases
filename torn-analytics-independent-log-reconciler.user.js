@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics — Independent Log Reconciler
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      1.0.1
+// @version      1.0.2
 // @description  One-time, read-only comparison of a Torn Analytics history export against fresh Torn API log responses.
 // @author       Personal use
 // @match        https://www.torn.com/*
@@ -14,7 +14,7 @@
 (() => {
   'use strict';
 
-  const VERIFIER_VERSION = '1.0.1';
+  const VERIFIER_VERSION = '1.0.2';
   const EXPORT_FORMAT = 'torn-analytics-readable-history';
   const EXPORT_VERSION = 2;
   const RAW_FORMAT = 'torn-api-v2-user-log-record-v1';
@@ -51,6 +51,12 @@
       'range_to_iso',
       'split_depth',
       'page_record_count',
+      'logical_record_count',
+      'boundary_overlap_count',
+      'offending_log_id',
+      'offending_timestamp',
+      'offending_iso',
+      'boundary_relation',
       'prev_present',
       'next_present'
     ]) {
@@ -366,19 +372,43 @@
     }
     const records = [];
     const seen = new Set();
+    const responseCount = json.log.length;
+    let boundaryOverlapCount = 0;
     for (const raw of json.log) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         throw new ReconciliationError('Torn API returned a malformed log record.');
       }
       const id = canonicalId(raw.id);
       const timestamp = nonnegativeSafeInteger(raw.timestamp, 'API record timestamp');
-      if (!id || timestamp <= from || timestamp > to) {
-        throw new ReconciliationError('Torn API returned a log outside the requested (from, to] range.');
+      if (!id) {
+        throw new ReconciliationError('Torn API returned a log with an invalid identity.');
+      }
+      if (timestamp < from || timestamp > to) {
+        const boundaryRelation = timestamp < from ? 'below_from' : 'above_to';
+        throw new ReconciliationError(
+          `Torn API returned log ${id} ${boundaryRelation === 'below_from' ? 'below the from boundary' : 'above the to boundary'}.`,
+          'INCONCLUSIVE',
+          {
+            phase: 'page_validation',
+            page_record_count: responseCount,
+            offending_log_id: id,
+            offending_timestamp: timestamp,
+            offending_iso: new Date(timestamp * 1000).toISOString(),
+            boundary_relation: boundaryRelation
+          }
+        );
       }
       if (seen.has(id)) {
         throw new ReconciliationError(`Torn API duplicated log identity ${id} within one page.`);
       }
       seen.add(id);
+      // Torn can echo the exclusive `from` boundary on overlapping requests.
+      // The preceding logical range owns that timestamp, so accept the API
+      // response but exclude the overlap from this range's comparison set.
+      if (timestamp === from) {
+        boundaryOverlapCount += 1;
+        continue;
+      }
       records.push({
         id,
         timestamp,
@@ -397,7 +427,13 @@
     if (links.next !== null && typeof links.next !== 'string') {
       throw new ReconciliationError('Torn API returned invalid next-page metadata.');
     }
-    return { records, prev: links.prev, next: links.next };
+    return {
+      records,
+      responseCount,
+      boundaryOverlapCount,
+      prev: links.prev,
+      next: links.next
+    };
   }
 
   function mergeUnique(target, incoming) {
@@ -426,13 +462,15 @@
     mergeUnique(collected, firstPage.records);
     let cursor = firstPage.prev;
     const visited = new Set();
-    if (!cursor && firstPage.records.length >= PAGE_LIMIT) {
+    if (!cursor && firstPage.responseCount >= PAGE_LIMIT) {
       throw new ReconciliationError(
         'A full one-second API page had no older-page continuation link; completeness cannot be proven.',
         'INCONCLUSIVE',
         {
           phase: 'one_second_pagination',
-          page_record_count: firstPage.records.length,
+          page_record_count: firstPage.responseCount,
+          logical_record_count: firstPage.records.length,
+          boundary_overlap_count: firstPage.boundaryOverlapCount,
           prev_present: false,
           next_present: firstPage.next !== null
         }
@@ -447,13 +485,15 @@
       const json = await transport.getJson(safeCursor, '/v2/user/log', { from, to, cursor: true });
       const page = normalizeApiPage(json, from, to);
       mergeUnique(collected, page.records);
-      if (page.records.length >= PAGE_LIMIT && page.prev === null) {
+      if (page.responseCount >= PAGE_LIMIT && page.prev === null) {
         throw new ReconciliationError(
           'A full terminal one-second page had no older-page continuation link; completeness cannot be proven.',
           'INCONCLUSIVE',
           {
             phase: 'one_second_pagination',
-            page_record_count: page.records.length,
+            page_record_count: page.responseCount,
+            logical_record_count: page.records.length,
+            boundary_overlap_count: page.boundaryOverlapCount,
             prev_present: false,
             next_present: page.next !== null
           }
@@ -478,23 +518,25 @@
     // its metadata shape above, but never treat `next` alone as missing older
     // history or follow it during reconciliation.
     const mustSplit = width > 1 && (
-      page.records.length >= SPLIT_THRESHOLD ||
+      page.responseCount >= SPLIT_THRESHOLD ||
       page.prev !== null
     );
     if (!mustSplit) {
-      if (width === 1 && (page.prev !== null || page.records.length >= PAGE_LIMIT)) {
+      if (width === 1 && (page.prev !== null || page.responseCount >= PAGE_LIMIT)) {
         return await collectSingleSecond(from, to, page, transport, progress);
       }
       if (
         page.prev !== null ||
-        (width > 1 && page.records.length >= SPLIT_THRESHOLD)
+        (width > 1 && page.responseCount >= SPLIT_THRESHOLD)
       ) {
         throw new ReconciliationError(
           'An unsplit API range retained an older-page link or remained saturated.',
           'INCONCLUSIVE',
           {
             phase: 'terminal_range',
-            page_record_count: page.records.length,
+            page_record_count: page.responseCount,
+            logical_record_count: page.records.length,
+            boundary_overlap_count: page.boundaryOverlapCount,
             prev_present: page.prev !== null,
             next_present: page.next !== null
           }
@@ -616,7 +658,7 @@
       method: {
         source: 'Fresh GET-only Torn API v2 user/profile and user/log requests',
         range_semantics: '(from, to]',
-        coverage_strategy: 'Recursive timestamp bisection; pages split at 90 records or an older-page prev signal; next links are validated as metadata but are not collection continuations',
+        coverage_strategy: 'Recursive timestamp bisection; raw pages split at 90 records or an older-page prev signal; exact-from API overlaps are discarded to preserve logical (from, to] coverage; next links are metadata, not collection continuations',
         mutation: 'None; results were held in memory only'
       },
       account: { id: account.id, name: account.name || source.accountName },
@@ -742,6 +784,12 @@
         `Page state: ${report.diagnostic.page_record_count ?? 'unknown'} records · ` +
         `prev ${report.diagnostic.prev_present ? 'present' : 'absent'} · ` +
         `next ${report.diagnostic.next_present ? 'present' : 'absent'}`
+      );
+    }
+    if (report.diagnostic?.offending_iso) {
+      lines.push(
+        `Out-of-range log: ${report.diagnostic.offending_log_id || '(unknown)'} · ` +
+        `${report.diagnostic.offending_iso} · ${report.diagnostic.boundary_relation || 'unknown relation'}`
       );
     }
     return lines.join('\n');
