@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.48
+// @version      2.18.49
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.48';
+  const VERSION = '2.18.49';
 
-  // v2.18.48 compacts Resources, Overall Activity, and detailed Stat Growth
-  // presentation. Collection, prediction math, storage, synchronization,
-  // exports, and TornPDA integration remain unchanged.
+  // v2.18.49 makes the compact Stat Growth total follow the active range.
+  // Collection, chart data, prediction math, storage, synchronization, exports,
+  // and TornPDA integration remain unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -21313,7 +21313,7 @@
           <div class="ta-stat-post-chart-controls">
             ${renderStatGrowthScopeControl(scope)}
             ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, scope)}
-            ${renderStatGrowthScopedGainSummary(growth, focus, scope)}
+            ${renderStatGrowthScopedGainSummary(growth, focus, scope, selectedRange, selectedContext)}
           </div>
         </div>
       `;
@@ -21708,7 +21708,7 @@
         <div class="ta-stat-post-chart-controls">
           ${renderStatGrowthScopeControl(scope)}
           ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, scope)}
-          ${renderStatGrowthScopedGainSummary(growth, focus, scope)}
+          ${renderStatGrowthScopedGainSummary(growth, focus, scope, selectedRange, selectedContext)}
         </div>
 
 
@@ -21797,7 +21797,7 @@
           <div class="ta-stat-post-chart-controls">
             ${renderStatGrowthScopeControl('all')}
             ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, 'all')}
-            ${renderStatGrowthScopedGainSummary(growth, focus, 'all')}
+            ${renderStatGrowthScopedGainSummary(growth, focus, 'all', selectedRange, selectedContext)}
           </div>
         </div>
       `;
@@ -22171,7 +22171,7 @@
         <div class="ta-stat-post-chart-controls">
           ${renderStatGrowthScopeControl('all')}
           ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, 'all')}
-          ${renderStatGrowthScopedGainSummary(growth, focus, 'all')}
+          ${renderStatGrowthScopedGainSummary(growth, focus, 'all', selectedRange, selectedContext)}
         </div>
       </div>
     `;
@@ -22754,7 +22754,9 @@
   function statGrowthScopedGainSummary(
     growth,
     focus = 'recent',
-    scope = 'selected'
+    scope = 'selected',
+    range = 'all',
+    context = 'all'
   ) {
     const normalizedFocus =
       [
@@ -22787,12 +22789,88 @@
         ? growth?.stats?.[stat]
         : null;
 
-    const row =
+    const normalizedRange =
+      uiSessionStatGrowthRange(
+        range
+      );
+    const normalizedContext =
+      uiSessionStatGrowthContext(
+        context
+      );
+    const stats =
       normalizedScope ===
-        'all' ||
-      !selected
-        ? growth
-        : selected;
+        'all'
+        ? [
+            'strength',
+            'defense',
+            'speed',
+            'dexterity'
+          ]
+        : stat
+          ? [stat]
+          : [];
+    const samples =
+      stats.flatMap(
+        statName =>
+          statGrowthCumulativeSamples(
+            growth,
+            statName,
+            normalizedRange,
+            normalizedContext
+          )
+      );
+    const gain =
+      samples.reduce(
+        (
+          total,
+          action
+        ) =>
+          total +
+          Number(
+            action?.stat_increased ||
+            0
+          ),
+        0
+      );
+    const energyUsed =
+      samples.reduce(
+        (
+          total,
+          action
+        ) =>
+          total +
+          Number(
+            action?.energy_used ||
+            0
+          ),
+        0
+      );
+    const trainingDays =
+      new Set(
+        samples
+          .map(
+            action => {
+              const timestamp =
+                Number(
+                  action?.timestamp
+                );
+
+              return Number.isSafeInteger(
+                timestamp
+              ) &&
+                timestamp > 0
+                ? activityDateKeyForBasis(
+                    new Date(
+                      timestamp *
+                      1000
+                    ),
+                    growth?.time_basis
+                  )
+                : null;
+            }
+          )
+          .filter(Boolean)
+      ).size;
 
     return {
       focus:
@@ -22806,58 +22884,52 @@
           ? 'All stats'
           : selected?.label ||
             'Selected stat',
-      gain:
-        Number(
-          row?.gain ||
-          0
+      range:
+        normalizedRange,
+      range_label:
+        statGrowthRangeLabel(
+          normalizedRange
         ),
+      gain,
       actions:
-        Number(
-          row?.actions ??
-          row?.valid_logs ??
-          0
-        )
+        samples.length,
+      energy_used:
+        energyUsed,
+      gain_per_energy:
+        energyUsed > 0
+          ? gain /
+            energyUsed
+          : 0,
+      training_days:
+        trainingDays
     };
   }
 
   function renderStatGrowthScopedGainSummary(
     growth,
     focus = 'recent',
-    scope = 'selected'
+    scope = 'selected',
+    range = 'all',
+    context = 'all'
   ) {
     const summary =
       statGrowthScopedGainSummary(
         growth,
         focus,
-        scope
-      );
-    const detailsView =
-      summary.scope ===
-      'all'
-        ? 'all'
-        : statGrowthFocusView(
-            growth,
-            summary.focus
-          );
-    const row =
-      statGrowthScopedRow(
-        growth,
-        detailsView
-      );
-    const trainingDays =
-      statGrowthScopedTrainingDays(
-        growth,
-        detailsView
+        scope,
+        range,
+        context
       );
 
     return `
       <div class="ta-stat-gain-scope ta-stat-compact-efficiency" data-ta-stat-gain-summary>
         <strong>${escapeActivityHtml(statGrowthFormatGain(summary.gain))}</strong>
         <span>
+          ${escapeActivityHtml(summary.range_label)} ·
           ${summary.actions.toLocaleString()} actions ·
-          ${Number(row?.energy_used || 0).toLocaleString()} E ·
-          ${escapeActivityHtml(statGrowthFormatRate(row?.gain_per_energy || 0))} gain/E ·
-          ${trainingDays.toLocaleString()} days
+          ${summary.energy_used.toLocaleString()} E ·
+          ${escapeActivityHtml(statGrowthFormatRate(summary.gain_per_energy))} gain/E ·
+          ${summary.training_days.toLocaleString()} days
         </span>
       </div>
     `;
@@ -24000,7 +24072,9 @@
             root.__taStatGrowth ||
             {},
             root.__taStatGrowthFocus,
-            root.__taStatGrowthScope
+            root.__taStatGrowthScope,
+            root.__taStatGrowthRange,
+            root.__taStatGrowthContext
           );
 
         bindScopedGainInteractions();
