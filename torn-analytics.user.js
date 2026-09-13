@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.47
+// @version      2.18.48
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.47';
+  const VERSION = '2.18.48';
 
-  // v2.18.47 adds a text-first compact training overview while retaining
-  // existing graphs and evidence behind one details control. Prediction math,
-  // collection, storage, synchronization, and exports remain unchanged.
+  // v2.18.48 compacts Resources, Overall Activity, and detailed Stat Growth
+  // presentation. Collection, prediction math, storage, synchronization,
+  // exports, and TornPDA integration remain unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13118,6 +13118,93 @@
     `;
   }
 
+  function activityDashboardCompactModel(
+    activity
+  ) {
+    const rows =
+      activityDashboardRecentDays(
+        activity,
+        7
+      );
+    const total =
+      rows.reduce(
+        (
+          sum,
+          row
+        ) =>
+          sum +
+          Number(
+            row?.count ||
+            0
+          ),
+        0
+      );
+    const activeDays =
+      rows.filter(
+        row =>
+          Number(
+            row?.count ||
+            0
+          ) >
+          0
+      ).length;
+    const busiest =
+      rows.reduce(
+        (
+          best,
+          row
+        ) =>
+          !best ||
+          Number(row?.count || 0) >
+          Number(best?.count || 0)
+            ? row
+            : best,
+        null
+      );
+    const categories =
+      (
+        activity?.categories ||
+        []
+      )
+        .slice(
+          0,
+          3
+        )
+        .map(
+          row =>
+            String(
+              row?.name ||
+              ''
+            ).trim()
+        )
+        .filter(Boolean);
+
+    return {
+      days: 7,
+      total,
+      active_days:
+        activeDays,
+      average_per_active_day:
+        activeDays
+          ? total /
+            activeDays
+          : 0,
+      busiest,
+      categories
+    };
+  }
+
+  function activityDashboardCompactSentence(
+    model
+  ) {
+    const categoryText =
+      model?.categories?.length
+        ? ` Most activity: ${model.categories.join(', ')}.`
+        : '';
+
+    return `Last 7 days: ${Number(model?.total || 0).toLocaleString()} recorded actions across ${Number(model?.active_days || 0).toLocaleString()} active days.${categoryText}`;
+  }
+
   function renderOverallActivityDashboard(
     activity
   ) {
@@ -13130,12 +13217,10 @@
             <span class="ta-section-title">
               Overall Activity
             </span>
-
             <span class="ta-section-meta">
               No activity data
             </span>
           </summary>
-
           <div class="ta-section-body">
             <div class="small">
               No timestamped logs were available for activity analysis.
@@ -13145,81 +13230,26 @@
       `;
     }
 
-    const longestStreak =
-      Number(
-        activity.longest_active_streak?.days ||
-        0
+    const summary =
+      activityDashboardCompactModel(
+        activity
       );
-
-    const endingStreak =
-      Number(
-        activity.ending_active_streak?.days ||
-        0
-      );
-
-    const gapText =
-      activity.largest_inactive_gap
-        ? `${activity.largest_inactive_gap.days} days · ` +
-          `${activity.largest_inactive_gap.start_date} → ${activity.largest_inactive_gap.end_date}`
-        : 'None between recorded active days';
-
-    const peakHourRange =
-      activity.peak_hour
-        ? activityDashboardHourRange(
-            activity.peak_hour.hour,
-            1
-          ).label
-        : '—';
-
     const timezone =
       activityDashboardTimezoneContext(
         new Date(),
         activity?.time_basis
       );
-
     const partialContext =
       activityDashboardPartialTodayContext(
         activity
       );
-
-    const metrics = [
-      activityDashboardMetric(
-        'Timestamped logs',
-        Number(activity.total_logs).toLocaleString(),
-        `${Number(activity.span_days).toLocaleString()} calendar days`
-      ),
-      activityDashboardMetric(
-        'Active days',
-        `${Number(activity.active_days).toLocaleString()} / ${Number(activity.span_days).toLocaleString()}`,
-        `${Number(activity.inactive_days).toLocaleString()} inactive`
-      ),
-      activityDashboardMetric(
-        'Average / day',
-        activity.average_logs_per_calendar_day.toFixed(1),
-        `${activity.average_logs_per_active_day.toFixed(1)} per active day`
-      ),
-      activityDashboardMetric(
-        'Longest streak',
-        `${longestStreak} days`,
-        `${activity.longest_active_streak?.start_date || '—'} → ${activity.longest_active_streak?.end_date || '—'}`
-      ),
-      activityDashboardMetric(
-        'Peak day',
-        Number(activity.peak_day?.count || 0).toLocaleString(),
-        activity.peak_day?.date || '—'
-      ),
-      activityDashboardMetric(
-        'Peak hour',
-        peakHourRange,
-        `${Number(activity.peak_hour?.count || 0).toLocaleString()} logs · single-hour statistic`
-      )
-    ].join('');
-
-    const partialIntro =
+    const busiestText =
+      summary.busiest
+        ? `${activityDashboardShortDate(summary.busiest.date)}: ${Number(summary.busiest.count || 0).toLocaleString()}`
+        : '—';
+    const partialText =
       partialContext.is_partial_today
-        ? partialContext.latest_stored_time
-          ? ` Today is partial; latest stored activity is ${partialContext.latest_stored_time}.`
-          : ' Today is partial.'
+        ? ' · today partial'
         : '';
 
     return `
@@ -13228,51 +13258,35 @@
           <span class="ta-section-title">
             Overall Activity
           </span>
-
           <span class="ta-section-meta">
             ${Number(activity.total_logs).toLocaleString()} logs · ${Number(activity.active_days).toLocaleString()} active days
           </span>
         </summary>
 
-        <div class="ta-section-body">
-          <div class="ta-section-intro">
-            Activity patterns from your locally stored Torn history.
-            Time basis: ${escapeActivityHtml(timezone.label)}.${escapeActivityHtml(partialIntro)}
-          </div>
+        <div class="ta-section-body ta-activity-compact-body">
+          <section class="ta-activity-compact-summary">
+            <strong>${escapeActivityHtml(activityDashboardCompactSentence(summary))}</strong>
+            <span>
+              ${summary.average_per_active_day.toFixed(0)} per active day ·
+              ${Number(activity.longest_active_streak?.days || 0).toLocaleString()}-day streak ·
+              busiest ${escapeActivityHtml(busiestText)}${partialText}
+            </span>
+          </section>
 
-          <div class="ta-metric-grid">
-            ${metrics}
-          </div>
-
-          ${renderActivityDailyChart(activity)}
-
-          ${renderActivityHourlyChart(activity)}
-
-          ${renderActivityCategoryBars(activity)}
-
-          <div class="ta-detail-grid">
-            <div>
-              <span>Stored range</span>
-              <b>
-                ${escapeActivityHtml(activity.first_date)} → ${escapeActivityHtml(activity.last_date)}
-              </b>
+          <details class="ta-stat-subsection ta-activity-details-section">
+            <summary>
+              Activity details
+              <span>Recent chart &amp; top categories</span>
+            </summary>
+            <div class="ta-stat-subsection-body ta-activity-details-body">
+              ${renderActivityDailyChart(activity)}
+              ${renderActivityCategoryBars(activity)}
+              <div class="ta-activity-compact-note">
+                Stored ${escapeActivityHtml(activity.first_date)} → ${escapeActivityHtml(activity.last_date)} ·
+                ${escapeActivityHtml(timezone.label)}
+              </div>
             </div>
-
-            <div>
-              <span>Time basis</span>
-              <b>${escapeActivityHtml(timezone.label)}</b>
-            </div>
-
-            <div>
-              <span>Ending streak</span>
-              <b>${endingStreak} days</b>
-            </div>
-
-            <div>
-              <span>Largest inactive gap</span>
-              <b>${escapeActivityHtml(gapText)}</b>
-            </div>
-          </div>
+          </details>
         </div>
       </details>
     `;
@@ -21697,15 +21711,7 @@
           ${renderStatGrowthScopedGainSummary(growth, focus, scope)}
         </div>
 
-        <div class="ta-stat-context-summary">
-          <strong>Observed training context · ${escapeActivityHtml(contextSummary.label)}</strong>
-          <span>
-            ${Number(contextSummary.happiness_boost_observed || 0).toLocaleString()} boost observed ·
-            ${Number(contextSummary.no_happiness_boost_observed || 0).toLocaleString()} no boost observed ·
-            ${Number(contextSummary.context_unavailable || 0).toLocaleString()} unavailable
-          </span>
-          <small>15-minute log lookback; exact Happiness is not inferred.</small>
-        </div>
+
       </div>
     `;
   }
@@ -22825,7 +22831,6 @@
         focus,
         scope
       );
-
     const detailsView =
       summary.scope ===
       'all'
@@ -22834,28 +22839,26 @@
             growth,
             summary.focus
           );
+    const row =
+      statGrowthScopedRow(
+        growth,
+        detailsView
+      );
+    const trainingDays =
+      statGrowthScopedTrainingDays(
+        growth,
+        detailsView
+      );
 
     return `
-      <div class="ta-stat-gain-scope" data-ta-stat-gain-summary>
-        <div class="ta-stat-summary-tiles">
-          <div class="ta-metric-card ta-stat-gain-primary">
-            <div class="ta-metric-label">Observed stat gain</div>
-            <div class="ta-metric-value">${escapeActivityHtml(statGrowthFormatGain(summary.gain))}</div>
-            <div class="ta-metric-note">
-              ${escapeActivityHtml(summary.label)}
-            </div>
-          </div>
-
-          <div class="ta-metric-card ta-stat-training-actions-tile">
-            <div class="ta-metric-label">Training actions</div>
-            <div class="ta-metric-value">${summary.actions.toLocaleString()}</div>
-            <div class="ta-metric-note">
-              ${escapeActivityHtml(summary.label)} scope
-            </div>
-          </div>
-        </div>
-
-        ${renderStatGrowthDetailsScope(growth, detailsView)}
+      <div class="ta-stat-gain-scope ta-stat-compact-efficiency" data-ta-stat-gain-summary>
+        <strong>${escapeActivityHtml(statGrowthFormatGain(summary.gain))}</strong>
+        <span>
+          ${summary.actions.toLocaleString()} actions ·
+          ${Number(row?.energy_used || 0).toLocaleString()} E ·
+          ${escapeActivityHtml(statGrowthFormatRate(row?.gain_per_energy || 0))} gain/E ·
+          ${trainingDays.toLocaleString()} days
+        </span>
       </div>
     `;
   }
@@ -22894,18 +22897,17 @@
   ) {
     const safeOptions =
       options &&
-      typeof options === 'object'
+      typeof options ===
+      'object'
         ? options
         : {};
-
     const sectionOpen =
-      safeOptions.open === true;
-
+      safeOptions.open ===
+      true;
     const focus =
       uiSessionTrainingFocus(
         safeOptions.focus
       );
-
     const scope =
       safeOptions.scope ===
       'all'
@@ -22919,14 +22921,6 @@
       uiSessionStatGrowthContext(
         safeOptions.context
       );
-    const focusView =
-      scope ===
-      'all'
-        ? 'all'
-        : statGrowthFocusView(
-            growth,
-            focus
-          );
 
     if (
       !growth?.valid_logs
@@ -22941,20 +22935,11 @@
             <div class="ta-section-intro">
               No valid Torn gym-training logs were found in the stored history.
             </div>
-            ${
-              growth?.rejected_logs
-                ? renderStatGrowthDataQuality(growth)
-                : ''
-            }
+            ${growth?.rejected_logs ? renderStatGrowthDataQuality(growth) : ''}
           </div>
         </details>
       `;
     }
-
-    const timeBasis =
-      statGrowthTimeBasisLabel(
-        growth
-      );
 
     return `
       <details class="ta-section ta-stat-growth-section" ${sectionOpen ? 'open' : ''}>
@@ -22965,36 +22950,20 @@
           </span>
         </summary>
 
-        <div class="ta-section-body">
-          <div class="ta-section-intro">
-            Observed gym-training history. Daily dates use
-            ${escapeActivityHtml(timeBasis)}; all-time totals do not.
-          </div>
-
+        <div class="ta-section-body ta-stat-growth-compact-body">
           ${renderStatGrowthCumulativeChart(growth, focus, context, range, scope)}
-          <details class="ta-stat-subsection ta-stat-recent-growth">
-                <summary>
-                  Recent growth
-                  <span>7d, 14d, 30d &amp; all time</span>
-                </summary>
-                <div class="ta-stat-subsection-body">
-                  ${renderStatGrowthRecentPanel(growth, focusView)}
-                </div>
-              </details>
 
-              <details class="ta-stat-subsection ta-stat-energy-gyms">
-                <summary>
-                  Energy &amp; gyms
-                  <span>Allocation and gym breakdown</span>
-                </summary>
-                <div class="ta-stat-subsection-body">
-                  ${renderStatGrowthEnergyAllocation(growth)}
-
-                  ${renderStatGrowthGymBreakdown(growth)}
-                </div>
-              </details>
-
-          ${renderStatGrowthDataQuality(growth)}
+          <details class="ta-stat-subsection ta-stat-technical-details">
+            <summary>
+              Technical details
+              <span>Energy, gyms &amp; data quality</span>
+            </summary>
+            <div class="ta-stat-subsection-body">
+              ${renderStatGrowthEnergyAllocation(growth)}
+              ${renderStatGrowthGymBreakdown(growth)}
+              ${renderStatGrowthDataQuality(growth)}
+            </div>
+          </details>
         </div>
       </details>
     `;
@@ -24385,7 +24354,8 @@
       ) &&
       Number(
         readiness.energy
-      ) > 0
+      ) >
+      0
         ? Math.floor(
             Number(
               readiness.energy
@@ -24404,7 +24374,7 @@
       projection?.available
         ? `${plannedEnergy.toLocaleString()}E ${trainingReadinessStatLabel(defaultStat)} estimate: ${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}`
         : null;
-    const options = [
+    const periodOptions = [
       ['7d', '1 week'],
       ['14d', '2 weeks'],
       ['30d', '1 month'],
@@ -24418,7 +24388,25 @@
           `<option value="${value}" ${value === period ? 'selected' : ''}>${label}</option>`
       )
       .join('');
-  
+    const planOptions = [
+      [
+        'efficient_training',
+        'Efficient'
+      ],
+      [
+        'happy_jump',
+        'Happy Jump'
+      ]
+    ]
+      .map(
+        ([
+          value,
+          label
+        ]) =>
+          `<option value="${value}" ${value === plan ? 'selected' : ''}>${label}</option>`
+      )
+      .join('');
+
     return `
       <section class="ta-training-compact-summary" data-ta-training-summary>
         <div class="ta-training-summary-header">
@@ -24426,33 +24414,42 @@
             <span class="ta-training-summary-kicker">Training overview</span>
             <strong>${escapeActivityHtml(advice?.title || 'Training history')}</strong>
           </div>
-  
-          <label class="ta-training-summary-period">
-            <span>Period</span>
-            <select data-ta-training-summary-range aria-label="Training summary period">
-              ${options}
-            </select>
-          </label>
+
+          <div class="ta-training-summary-selectors">
+            <label class="ta-training-summary-period">
+              <span>Plan</span>
+              <select data-ta-training-plan aria-label="Training plan">
+                ${planOptions}
+              </select>
+            </label>
+            <label class="ta-training-summary-period">
+              <span>Period</span>
+              <select data-ta-training-summary-range aria-label="Training summary period">
+                ${periodOptions}
+              </select>
+            </label>
+          </div>
         </div>
-  
+
         ${
           advice?.detail
             ? `<p class="ta-training-summary-advice">${escapeActivityHtml(advice.detail)}</p>`
             : ''
         }
-  
+
         <p class="ta-training-summary-growth">
           ${escapeActivityHtml(statGrowthCompactSummarySentence(summary))}
         </p>
-  
+
         ${
           predictionText
             ? `<p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${Number(model?.samples || 0).toLocaleString()} comparable samples</p>`
             : ''
         }
-  
+
         ${
-          summary.actions > 0
+          summary.actions >
+          0
             ? `<div class="ta-training-summary-meta">${summary.energy_used.toLocaleString()} Energy used · ${summary.trains.toLocaleString()} individual trains${summary.most_trained ? ` · Most trained: ${escapeActivityHtml(summary.most_trained.label)}` : ''}</div>`
             : ''
         }
@@ -24545,10 +24542,9 @@
           <details class="ta-stat-subsection ta-training-details-section">
             <summary>
               View detailed analytics
-              <span>Graphs, history &amp; evidence</span>
+              <span>Growth graph &amp; session history</span>
             </summary>
             <div class="ta-stat-subsection-body ta-training-details-body">
-              ${renderTrainingReadinessDashboard(readiness, { open: readinessOpen })}
               ${renderStatGrowthDashboard(growth, {
                 open: statGrowthOpen,
                 focus,
@@ -24608,17 +24604,21 @@
 
     const bindCompactSummary =
       () => {
-        const select =
+        const rangeSelect =
           root?.querySelector?.(
             '[data-ta-training-summary-range]'
           );
+        const planSelect =
+          root?.querySelector?.(
+            '[data-ta-training-plan]'
+          );
 
-        select?.addEventListener(
+        rangeSelect?.addEventListener(
           'change',
           () => {
             const range =
               statGrowthCompactPeriod(
-                select.value
+                rangeSelect.value
               );
 
             root.__taStatGrowthRange =
@@ -24634,25 +24634,24 @@
             );
           }
         );
+
+        planSelect?.addEventListener(
+          'change',
+          () => {
+            writeTrainingReadinessPlan(
+              planSelect.value
+            );
+
+            refreshCompactSummary(
+              root.__taStatGrowthRange ||
+              readUiSessionState()
+                .stat_growth_range
+            );
+          }
+        );
       };
 
     bindCompactSummary();
-
-    const planSelect =
-      root?.querySelector?.(
-        '[data-ta-training-plan]'
-      );
-
-    planSelect?.addEventListener(
-      'change',
-      () => {
-        refreshCompactSummary(
-          root.__taStatGrowthRange ||
-          readUiSessionState()
-            .stat_growth_range
-        );
-      }
-    );
 
     const bindings = [
       [
@@ -26689,123 +26688,7 @@
       );
   }
 
-  function renderResourceDashboardBreakdown(
-    rows,
-    emptyText,
-    tone = 'neutral'
-  ) {
-    const positiveRows =
-      (
-        rows ||
-        []
-      ).filter(
-        row =>
-          Number.isFinite(
-            Number(
-              row?.amount
-            )
-          ) &&
-          Number(
-            row.amount
-          ) > 0
-      );
-
-    if (
-      !positiveRows.length
-    ) {
-      return `
-        <div class="ta-resource-empty">
-          ${escapeResourceDashboardHtml(emptyText)}
-        </div>
-      `;
-    }
-
-    const safeTone =
-      [
-        'gain',
-        'use',
-        'loss'
-      ].includes(
-        tone
-      )
-        ? tone
-        : 'neutral';
-
-    const total =
-      positiveRows.reduce(
-        (
-          sum,
-          row
-        ) =>
-          sum +
-          Number(
-            row.amount
-          ),
-        0
-      );
-
-    const categoryText =
-      positiveRows.length === 1
-        ? 'category'
-        : 'categories';
-
-    return `
-      <div class="ta-resource-breakdown ta-resource-breakdown-${safeTone}">
-        <div class="ta-resource-breakdown-summary">
-          <span>${positiveRows.length} ranked ${categoryText}</span>
-          <b>${resourceDashboardFormatNumber(total)} total</b>
-        </div>
-        <div class="ta-resource-breakdown-list">
-          ${positiveRows.map(
-            (
-              row,
-              index
-            ) => {
-              const share =
-                Math.max(
-                  0,
-                  Math.min(
-                    100,
-                    (
-                      Number(row.amount) /
-                      total
-                    ) *
-                      100
-                  )
-                );
-
-              const eventCount =
-                Number(
-                  row.events
-                ) ||
-                0;
-
-              return `
-                <div class="ta-resource-breakdown-row">
-                  <div class="ta-resource-breakdown-rank">${index + 1}</div>
-                  <div class="ta-resource-breakdown-main">
-                    <div class="ta-resource-breakdown-topline">
-                      <span class="ta-resource-breakdown-label">${escapeResourceDashboardHtml(row.label)}</span>
-                      <span class="ta-resource-breakdown-values">
-                        <b>${resourceDashboardFormatNumber(row.amount)}</b>
-                        <span>${resourceDashboardFormatPercentage(row.amount, total)}</span>
-                      </span>
-                    </div>
-                    <div class="ta-resource-breakdown-track">
-                      <div style="width:${share.toFixed(2)}%"></div>
-                    </div>
-                    <div class="ta-resource-breakdown-events">
-                      ${resourceDashboardFormatNumber(eventCount)} recorded ${eventCount === 1 ? 'event' : 'events'}
-                    </div>
-                  </div>
-                </div>
-              `;
-            }
-          ).join('')}
-        </div>
-      </div>
-    `;
-  }
+  
 
   function renderResourceDashboardLiveCard(
     resource,
@@ -26899,6 +26782,118 @@
     `;
   }
 
+  function renderResourceDashboardCompactBreakdown(
+    rows,
+    label
+  ) {
+    const positiveRows =
+      (
+        rows ||
+        []
+      ).filter(
+        row =>
+          Number(
+            row?.amount ||
+            0
+          ) >
+          0
+      );
+
+    if (
+      !positiveRows.length
+    ) {
+      return `
+        <div class="ta-resource-compact-flow">
+          <b>${escapeResourceDashboardHtml(label)}</b>
+          <span>None recorded</span>
+        </div>
+      `;
+    }
+
+    const visibleRows =
+      positiveRows.slice(
+        0,
+        3
+      );
+    const hiddenCount =
+      Math.max(
+        0,
+        positiveRows.length -
+          visibleRows.length
+      );
+    const text =
+      visibleRows
+        .map(
+          row =>
+            `${escapeResourceDashboardHtml(row.label)} ${resourceDashboardFormatNumber(row.amount)}`
+        )
+        .join(' · ');
+
+    return `
+      <div class="ta-resource-compact-flow">
+        <b>${escapeResourceDashboardHtml(label)}</b>
+        <span>${text}${hiddenCount ? ` · +${hiddenCount} more` : ''}</span>
+      </div>
+    `;
+  }
+
+  function renderResourceDashboardPanelSummary(
+    resource,
+    title,
+    summary,
+    bar,
+    fetchedAt
+  ) {
+    if (
+      !bar
+    ) {
+      return `
+        <span>${title}</span>
+        <span class="ta-resource-compact-status">
+          <b>${resourceDashboardFormatNumber(summary.gain_total)} gained</b>
+          <small>Live value unavailable</small>
+        </span>
+      `;
+    }
+
+    const fullAt =
+      Number(
+        fetchedAt
+      ) +
+      Number(
+        bar.full_time ||
+        0
+      ) *
+        1000;
+    const statusText =
+      resourceDashboardLiveStatusText(
+        bar.current,
+        bar.maximum,
+        fullAt
+      );
+    const stack =
+      resource ===
+      'energy'
+        ? resourceDashboardEnergyStackStatus(
+            bar.current,
+            bar.maximum
+          )
+        : null;
+
+    return `
+      <span>${title}</span>
+      <span class="ta-resource-compact-status">
+        <b>${resourceDashboardFormatNumber(bar.current)} / ${resourceDashboardFormatNumber(bar.maximum)}</b>
+        <small
+          data-ta-resource-full-at="${fullAt}"
+          data-ta-resource-current="${bar.current}"
+          data-ta-resource-maximum="${bar.maximum}"
+        >${escapeResourceDashboardHtml(statusText)}</small>
+        ${stack?.active ? `<small class="is-active">Stacked +${resourceDashboardFormatNumber(stack.amount)}</small>` : ''}
+      </span>
+    `;
+  }
+
   function renderResourceDashboardHistoryCard(
     flow,
     resource
@@ -26908,14 +26903,6 @@
       resourceFlowBlankResource(
         resource
       );
-
-    const title =
-      resource === 'energy'
-        ? 'Energy history'
-        : resource === 'nerve'
-          ? 'Nerve history'
-          : 'Happiness history';
-
     const incoming =
       resourceDashboardBreakdown(
         flow?.events,
@@ -26923,7 +26910,6 @@
         'in',
         'gain'
       );
-
     const outgoing =
       resourceDashboardBreakdown(
         flow?.events,
@@ -26931,7 +26917,6 @@
         'out',
         'use'
       );
-
     const setbacks =
       resourceDashboardBreakdown(
         flow?.events,
@@ -26941,34 +26926,17 @@
       );
 
     return `
-      <div class="ta-resource-history-card">
-        <div class="ta-resource-history-title">
-          ${title}
+      <div class="ta-resource-history-card ta-resource-compact-history">
+        <div class="ta-resource-compact-totals">
+          <span><small>Gained</small><b>${resourceDashboardFormatNumber(summary.gain_total)}</b></span>
+          <span><small>Used</small><b>${resourceDashboardFormatNumber(summary.use_total)}</b></span>
+          <span><small>Setbacks</small><b>${resourceDashboardFormatNumber(summary.loss_total)}</b></span>
         </div>
-        <div class="ta-metric-grid ta-resource-metric-grid">
-          <div class="ta-metric-card ta-resource-metric-gain">
-            <div class="ta-metric-label">Gained</div>
-            <div class="ta-metric-value">${resourceDashboardFormatNumber(summary.gain_total)}</div>
-          </div>
-          <div class="ta-metric-card ta-resource-metric-use">
-            <div class="ta-metric-label">Used</div>
-            <div class="ta-metric-value">${resourceDashboardFormatNumber(summary.use_total)}</div>
-          </div>
-          <div class="ta-metric-card ta-resource-metric-loss">
-            <div class="ta-metric-label">Lost to setbacks</div>
-            <div class="ta-metric-value">${resourceDashboardFormatNumber(summary.loss_total)}</div>
-          </div>
-        </div>
-        <div class="ta-resource-list-heading ta-resource-list-heading-gain">Where it came from</div>
-        ${renderResourceDashboardBreakdown(incoming, `No recorded ${resource} gains yet.`, 'gain')}
-        <div class="ta-resource-list-heading ta-resource-list-heading-use">Where it went</div>
-        ${renderResourceDashboardBreakdown(outgoing, `No recorded ${resource} uses yet.`, 'use')}
+        ${renderResourceDashboardCompactBreakdown(incoming, 'From')}
+        ${renderResourceDashboardCompactBreakdown(outgoing, 'To')}
         ${
           Number(summary.loss_total) > 0
-            ? `
-              <div class="ta-resource-list-heading ta-resource-list-heading-loss">Setbacks</div>
-              ${renderResourceDashboardBreakdown(setbacks, `No recorded ${resource} setbacks yet.`, 'loss')}
-            `
+            ? renderResourceDashboardCompactBreakdown(setbacks, 'Lost')
             : ''
         }
       </div>
@@ -26991,14 +26959,13 @@
         flow?.events?.length ||
         0
       );
-
     const liveAvailable =
       barsSnapshot?.status ===
       'available';
-
     const states =
       options &&
-      typeof options === 'object'
+      typeof options ===
+      'object'
         ? options
         : {};
     const dashboardOpen =
@@ -27016,9 +26983,11 @@
             ? barsSnapshot?.[resource]
             : null;
         const title =
-          resource === 'energy'
+          resource ===
+          'energy'
             ? 'Energy'
-            : resource === 'nerve'
+            : resource ===
+              'nerve'
               ? 'Nerve'
               : 'Happiness';
         const stateKey =
@@ -27026,28 +26995,19 @@
         const open =
           states[stateKey] ===
           true;
-        const summaryText =
-          bar
-            ? `${resourceDashboardFormatNumber(bar.current)} / ${resourceDashboardFormatNumber(bar.maximum)}`
-            : `${resourceDashboardFormatNumber(summary.gain_total)} gained`;
 
         return `
           <details class="ta-resource-panel" data-ta-resource-panel="${resource}" ${open ? 'open' : ''}>
             <summary>
-              <span>${title}</span>
-              <b>${escapeResourceDashboardHtml(summaryText)}</b>
+              ${renderResourceDashboardPanelSummary(
+                resource,
+                title,
+                summary,
+                bar,
+                barsSnapshot?.fetched_at
+              )}
             </summary>
             <div class="ta-resource-panel-body">
-              ${
-                bar
-                  ? renderResourceDashboardLiveCard(resource, bar, barsSnapshot.fetched_at)
-                  : `
-                    <div class="ta-resource-live-unavailable">
-                      <b>Live ${title} unavailable</b>
-                      <span>Historical totals still work. A valid saved API key is needed for current bars and refill times.</span>
-                    </div>
-                  `
-              }
               ${renderResourceDashboardHistoryCard(flow, resource)}
             </div>
           </details>
@@ -27057,33 +27017,20 @@
     return `
       <details class="ta-section ta-resource-section" ${dashboardOpen ? 'open' : ''}>
         <summary class="ta-section-summary-row">
-          <span class="ta-section-title">Energy, Nerve &amp; Happiness</span>
+          <span class="ta-section-title">Resources</span>
           <span class="ta-section-meta">
-            ${resourceDashboardFormatNumber(totalEvents)} recorded events
+            ${resourceDashboardFormatNumber(totalEvents)} events
           </span>
         </summary>
-        <div class="ta-section-body">
-          <div class="ta-section-intro">
-            See what you have now, when it will refill, and how your recorded Energy, Nerve, and Happiness moved over time.
-          </div>
+        <div class="ta-section-body ta-resource-compact-body">
           <div class="ta-resource-panel-list">
             ${resourcePanel('energy')}
             ${resourcePanel('nerve')}
             ${resourcePanel('happiness')}
           </div>
-          ${
-            liveAvailable
-              ? `
-                <div class="ta-resource-freshness">
-                  Refreshed ${escapeResourceDashboardHtml(new Date(barsSnapshot.fetched_at).toLocaleTimeString())}.
-                  Analyze Stored Logs again for a fresh API reading.
-                </div>
-              `
-              : ''
-          }
-          <div class="ta-resource-limit-note">
-            Natural regeneration is not included in historical gains because Torn does not record it in personal log history. Actions without a recorded resource amount are not guessed. Live bars and refill times above come directly from Torn's API.
-          </div>
+          <p class="ta-resource-compact-disclaimer">
+            Natural regeneration is not included in historical gains because Torn does not log it.
+          </p>
         </div>
       </details>
     `;
@@ -32876,6 +32823,151 @@
       #${MODAL_ID} .ta-training-details-body {
         display: grid;
         gap: 10px;
+      }
+
+      /* v2.18.48: compact everyday summaries; keep evidence available on demand. */
+      #${MODAL_ID} .ta-training-summary-selectors {
+        display: flex;
+        flex: 0 0 auto;
+        gap: 7px;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-body,
+      #${MODAL_ID} .ta-activity-compact-body,
+      #${MODAL_ID} .ta-stat-growth-compact-body {
+        gap: 9px;
+      }
+
+      #${MODAL_ID} .ta-resource-panel > summary {
+        min-height: 54px;
+      }
+
+      #${MODAL_ID} .ta-resource-panel > summary > .ta-resource-compact-status {
+        display: grid;
+        justify-items: end;
+        gap: 1px;
+        min-width: 0;
+        color: #cfcfcf;
+        text-align: right;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-status > b {
+        color: #efefef;
+        font-size: 13px;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-status > small {
+        color: #969696;
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1.25;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-status > small.is-active {
+        color: #82c9a0;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-history {
+        display: grid;
+        gap: 7px;
+        padding: 9px;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-totals {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-totals > span {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+        padding: 7px;
+        border: 1px solid #333;
+        border-radius: 7px;
+        background: #151515;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-totals small {
+        color: #8f8f8f;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-totals b {
+        overflow-wrap: anywhere;
+        color: #ececec;
+        font-size: 13px;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-flow {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 7px;
+        align-items: start;
+        padding-top: 6px;
+        border-top: 1px solid #2d2d2d;
+        color: #bdbdbd;
+        font-size: 11px;
+        line-height: 1.4;
+      }
+
+      #${MODAL_ID} .ta-resource-compact-flow b {
+        color: #d1a34b;
+        font-size: 10px;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-activity-compact-summary {
+        display: grid;
+        gap: 6px;
+        padding: 11px;
+        border: 1px solid #384c5e;
+        border-radius: 10px;
+        background: #121a21;
+      }
+
+      #${MODAL_ID} .ta-activity-compact-summary strong {
+        color: #ececec;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      #${MODAL_ID} .ta-activity-compact-summary span,
+      #${MODAL_ID} .ta-activity-compact-note {
+        color: #9f9f9f;
+        font-size: 11px;
+        line-height: 1.4;
+      }
+
+      #${MODAL_ID} .ta-activity-details-body {
+        display: grid;
+        gap: 9px;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-efficiency {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 8px;
+        padding: 9px;
+        border: 1px solid #343434;
+        border-radius: 8px;
+        background: #161616;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-efficiency strong {
+        color: #ececec;
+        font-size: 15px;
+      }
+
+      #${MODAL_ID} .ta-stat-compact-efficiency span {
+        color: #9d9d9d;
+        font-size: 11px;
+        line-height: 1.4;
       }
       @media(max-width:520px) {
         #${MODAL_ID} .ta-training-summary-header {
