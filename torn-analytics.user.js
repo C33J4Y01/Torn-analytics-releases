@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.49
+// @version      2.18.50
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,9 +22,9 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.49';
+  const VERSION = '2.18.50';
 
-  // v2.18.49 makes the compact Stat Growth total follow the active range.
+  // v2.18.50 adds period and stat scoping to the compact training narrative.
   // Collection, chart data, prediction math, storage, synchronization, exports,
   // and TornPDA integration remain unchanged.
 
@@ -13454,12 +13454,18 @@
           uiSessionTrainingFocus(
             parsed?.stat_growth_focus ||
             legacyFocus
+          ),
+        training_summary_stat:
+          uiSessionStatView(
+            parsed?.training_summary_stat
           )
       };
     } catch (_) {
       return {
         stat_growth_focus:
-          'recent'
+          'recent',
+        training_summary_stat:
+          'all'
       };
     }
   }
@@ -13491,6 +13497,18 @@
       next.stat_growth_focus =
         uiSessionTrainingFocus(
           safePatch.stat_growth_focus
+      );
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        safePatch,
+        'training_summary_stat'
+      )
+    ) {
+      next.training_summary_stat =
+        uiSessionStatView(
+          safePatch.training_summary_stat
         );
     }
 
@@ -24245,10 +24263,10 @@
 
   function statGrowthCompactPeriodLabel(value) {
     return {
-      '7d': 'Last 7 days',
-      '14d': 'Last 14 days',
-      '30d': 'Last 30 days',
-      all: 'All retained history'
+      '7d': 'Past week',
+      '14d': 'Past 2 weeks',
+      '30d': 'Past month',
+      all: 'All time'
     }[
       statGrowthCompactPeriod(
         value
@@ -24256,9 +24274,16 @@
     ];
   }
 
+  function statGrowthCompactSummaryStat(value) {
+    return uiSessionStatView(
+      value
+    );
+  }
+
   function statGrowthCompactSummaryModel(
     growth,
-    range = '7d'
+    range = '7d',
+    statValue = 'all'
   ) {
     const period =
       statGrowthCompactPeriod(
@@ -24278,7 +24303,11 @@
       'speed',
       'dexterity'
     ];
-    const stats =
+    const selectedStat =
+      statGrowthCompactSummaryStat(
+        statValue
+      );
+    const statRows =
       statOrder
         .map(
           stat => {
@@ -24298,18 +24327,43 @@
                   item.gain ||
                   0
                 ),
+              actions:
+                Number(
+                  item.actions ||
+                  0
+                ),
               trains:
                 Number(
                   item.trains ||
                   0
+                ),
+              energy_used:
+                Number(
+                  item.energy_used ||
+                  0
                 )
             };
           }
-        )
+        );
+    const stats =
+      statRows
         .filter(
           item =>
             item.gain > 0
         );
+    const selected =
+      selectedStat === 'all'
+        ? null
+        : statRows.find(
+            item =>
+              item.stat ===
+              selectedStat
+          ) ||
+          null;
+    const scoped =
+      selectedStat === 'all'
+        ? row || {}
+        : selected || {};
     const mostTrained =
       stats
         .slice()
@@ -24331,14 +24385,19 @@
         statGrowthCompactPeriodLabel(
           period
         ),
+      stat:
+        selectedStat,
+      stat_label:
+        selected?.label ||
+        'All stats',
       gain:
         Number(
-          row?.gain ||
+          scoped?.gain ||
           0
         ),
       actions:
         Number(
-          row?.actions ??
+          scoped?.actions ??
           (
             period === 'all'
               ? growth?.valid_logs
@@ -24348,17 +24407,24 @@
         ),
       trains:
         Number(
-          row?.trains ||
+          scoped?.trains ||
           0
         ),
       energy_used:
         Number(
-          row?.energy_used ||
+          scoped?.energy_used ||
           0
         ),
-      stats,
+      stats:
+        selectedStat === 'all'
+          ? stats
+          : selected?.gain > 0
+            ? [selected]
+            : [],
       most_trained:
-        mostTrained
+        selectedStat === 'all'
+          ? mostTrained
+          : selected
     };
   }
 
@@ -24369,7 +24435,19 @@
       !model ||
       model.actions <= 0
     ) {
-      return `${model?.period_label || 'Selected period'}: no observed gym training.`;
+      const subject =
+        model?.stat &&
+        model.stat !== 'all'
+          ? `${model.stat_label} training`
+          : 'gym training';
+
+      return `${model?.period_label || 'Selected period'}: no observed ${subject}.`;
+    }
+
+    if (
+      model.stat !== 'all'
+    ) {
+      return `${model.period_label}: ${statGrowthFormatCompactGain(model.gain)} ${model.stat_label} across ${model.actions.toLocaleString()} training ${model.actions === 1 ? 'action' : 'actions'}.`;
     }
   
     const statText =
@@ -24387,7 +24465,8 @@
     readiness,
     growth,
     range = '7d',
-    planValue = null
+    planValue = null,
+    statValue = 'all'
   ) {
     const period =
       statGrowthCompactPeriod(
@@ -24397,7 +24476,8 @@
       statGrowthCompactSummaryModel(
         growth ||
         {},
-        period
+        period,
+        statValue
       );
     const plan =
       trainingReadinessPlan(
@@ -24462,6 +24542,21 @@
           `<option value="${value}" ${value === period ? 'selected' : ''}>${label}</option>`
       )
       .join('');
+    const statOptions = [
+      ['all', 'All stats'],
+      ['strength', 'Strength'],
+      ['defense', 'Defense'],
+      ['speed', 'Speed'],
+      ['dexterity', 'Dexterity']
+    ]
+      .map(
+        ([
+          value,
+          label
+        ]) =>
+          `<option value="${value}" ${value === summary.stat ? 'selected' : ''}>${label}</option>`
+      )
+      .join('');
     const planOptions = [
       [
         'efficient_training',
@@ -24502,6 +24597,12 @@
                 ${periodOptions}
               </select>
             </label>
+            <label class="ta-training-summary-period">
+              <span>Stats</span>
+              <select data-ta-training-summary-stat aria-label="Training summary stat">
+                ${statOptions}
+              </select>
+            </label>
           </div>
         </div>
 
@@ -24524,7 +24625,7 @@
         ${
           summary.actions >
           0
-            ? `<div class="ta-training-summary-meta">${summary.energy_used.toLocaleString()} Energy used · ${summary.trains.toLocaleString()} individual trains${summary.most_trained ? ` · Most trained: ${escapeActivityHtml(summary.most_trained.label)}` : ''}</div>`
+            ? `<div class="ta-training-summary-meta">${summary.energy_used.toLocaleString()} Energy used · ${summary.trains.toLocaleString()} individual trains${summary.stat === 'all' && summary.most_trained ? ` · Most trained: ${escapeActivityHtml(summary.most_trained.label)}` : ''}</div>`
             : ''
         }
       </section>
@@ -24587,6 +24688,10 @@
       uiSessionStatGrowthRange(
         state.stat_growth_range
       );
+    const summaryStat =
+      statGrowthCompactSummaryStat(
+        state.training_summary_stat
+      );
 
     const meta = [
       readiness?.energy === null ||
@@ -24610,7 +24715,8 @@
             readiness,
             growth,
             range,
-            readTrainingReadinessPlan()
+            readTrainingReadinessPlan(),
+            summaryStat
           )}
 
           <details class="ta-stat-subsection ta-training-details-section">
@@ -24648,7 +24754,10 @@
       null;
 
     const refreshCompactSummary =
-      rangeValue => {
+      (
+        rangeValue,
+        statValue = null
+      ) => {
         const current =
           root?.querySelector?.(
             '[data-ta-training-summary]'
@@ -24664,13 +24773,24 @@
           statGrowthCompactPeriod(
             rangeValue
           );
+        const summaryStat =
+          statGrowthCompactSummaryStat(
+            statValue ||
+            root.__taTrainingSummaryStat ||
+            readStatGrowthPreferences()
+              .training_summary_stat
+          );
+
+        root.__taTrainingSummaryStat =
+          summaryStat;
 
         current.outerHTML =
           renderTrainingCompactSummary(
             root.__taTrainingReadiness,
             root.__taTrainingGrowth,
             range,
-            readTrainingReadinessPlan()
+            readTrainingReadinessPlan(),
+            summaryStat
           );
 
         bindCompactSummary();
@@ -24685,6 +24805,10 @@
         const planSelect =
           root?.querySelector?.(
             '[data-ta-training-plan]'
+          );
+        const statSelect =
+          root?.querySelector?.(
+            '[data-ta-training-summary-stat]'
           );
 
         rangeSelect?.addEventListener(
@@ -24704,7 +24828,32 @@
             });
 
             refreshCompactSummary(
-              range
+              range,
+              statSelect?.value
+            );
+          }
+        );
+
+        statSelect?.addEventListener(
+          'change',
+          () => {
+            const summaryStat =
+              statGrowthCompactSummaryStat(
+                statSelect.value
+              );
+
+            root.__taTrainingSummaryStat =
+              summaryStat;
+
+            writeStatGrowthPreferences({
+              training_summary_stat:
+                summaryStat
+            });
+
+            refreshCompactSummary(
+              rangeSelect?.value ||
+              root.__taStatGrowthRange,
+              summaryStat
             );
           }
         );
@@ -24719,7 +24868,8 @@
             refreshCompactSummary(
               root.__taStatGrowthRange ||
               readUiSessionState()
-                .stat_growth_range
+                .stat_growth_range,
+              statSelect?.value
             );
           }
         );
@@ -32902,6 +33052,7 @@
       /* v2.18.48: compact everyday summaries; keep evidence available on demand. */
       #${MODAL_ID} .ta-training-summary-selectors {
         display: flex;
+        flex-wrap: wrap;
         flex: 0 0 auto;
         gap: 7px;
       }
@@ -33053,6 +33204,10 @@
         #${MODAL_ID} .ta-training-summary-period {
           grid-template-columns: auto minmax(0, 1fr);
           align-items: center;
+        }
+
+        #${MODAL_ID} .ta-training-summary-selectors {
+          flex-direction: column;
         }
 
         #${MODAL_ID} .ta-training-summary-period select {
