@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.50
+// @version      2.18.51
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,11 +22,12 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.50';
+  const VERSION = '2.18.51';
 
-  // v2.18.50 adds period and stat scoping to the compact training narrative.
-  // Collection, chart data, prediction math, storage, synchronization, exports,
-  // and TornPDA integration remain unchanged.
+  // v2.18.51 replaces the separate Resources and Overall Activity surfaces
+  // with one compact weekly summary while retaining their detailed evidence.
+  // Collection, API behavior, chart data, prediction math, storage,
+  // synchronization, exports, and TornPDA integration remain unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -24917,20 +24918,13 @@
   function renderStoredAnalysisDashboards(
     analysis
   ) {
-    const state =
-      readUiSessionState();
-
     return (
-      renderResourceDashboard(
-        analysis?.resource_flow,
-        analysis?.resource_bars,
-        state
-      ) +
       renderTrainingWorkspace(
         analysis?.training_readiness,
         analysis?.stat_growth
       ) +
-      renderOverallActivityDashboard(
+      renderWeeklyHighlights(
+        analysis?.resource_flow,
         analysis?.activity
       )
     );
@@ -27255,6 +27249,320 @@
           <p class="ta-resource-compact-disclaimer">
             Natural regeneration is not included in historical gains because Torn does not log it.
           </p>
+        </div>
+      </details>
+    `;
+  }
+
+  function weeklyHighlightsResourceModel(
+    flow,
+    activity,
+    days = 7
+  ) {
+    const dayRows =
+      activityDashboardRecentDays(
+        activity,
+        days
+      );
+    const dayKeys =
+      new Set(
+        dayRows.map(
+          row =>
+            row.date
+        )
+      );
+    const timeBasis =
+      normalizeActivityTimeBasis(
+        activity?.time_basis
+      );
+    const events =
+      (
+        flow?.events ||
+        []
+      ).filter(
+        event => {
+          const timestamp =
+            Number(
+              event?.timestamp
+            );
+
+          return Number.isFinite(
+            timestamp
+          ) &&
+            timestamp > 0 &&
+            dayKeys.has(
+              activityDateKeyForBasis(
+                new Date(
+                  timestamp *
+                  1000
+                ),
+                timeBasis
+              )
+            );
+        }
+      );
+    const activitySummary =
+      activityDashboardCompactModel(
+        activity ||
+        {}
+      );
+    const summarizeResource =
+      resource => {
+        const resourceEvents =
+          events.filter(
+            event =>
+              event?.resource ===
+              resource
+          );
+        const totalForKind =
+          kind =>
+            resourceEvents.reduce(
+              (
+                total,
+                event
+              ) =>
+                total +
+                (
+                  event?.kind ===
+                  kind
+                    ? Number(
+                        event?.amount ||
+                        0
+                      )
+                    : 0
+                ),
+              0
+            );
+
+        return {
+          gained:
+            totalForKind(
+              'gain'
+            ),
+          used:
+            totalForKind(
+              'use'
+            ),
+          setbacks:
+            totalForKind(
+              'loss'
+            ),
+          incoming:
+            resourceDashboardBreakdown(
+              resourceEvents,
+              resource,
+              'in',
+              'gain'
+            ),
+          outgoing:
+            resourceDashboardBreakdown(
+              resourceEvents,
+              resource,
+              'out',
+              'use'
+            ),
+          losses:
+            resourceDashboardBreakdown(
+              resourceEvents,
+              resource,
+              'out',
+              'loss'
+            )
+        };
+      };
+
+    return {
+      days:
+        dayRows.length ||
+        Math.max(
+          1,
+          Number(days) ||
+          7
+        ),
+      activity:
+        activitySummary,
+      energy:
+        summarizeResource(
+          'energy'
+        ),
+      nerve:
+        summarizeResource(
+          'nerve'
+        ),
+      happiness:
+        summarizeResource(
+          'happiness'
+        )
+    };
+  }
+
+  function weeklyHighlightsResourceSentence(
+    model
+  ) {
+    const parts =
+      [];
+    const addResource =
+      (
+        resource,
+        label
+      ) => {
+        const used =
+          Number(
+            resource?.used ||
+            0
+          );
+
+        if (
+          used <= 0
+        ) {
+          return;
+        }
+
+        const destination =
+          resource?.outgoing?.[0]
+            ?.label;
+
+        parts.push(
+          `You used ${resourceDashboardFormatNumber(used)} ${label}${destination ? `, mostly on ${destination}` : ''}.`
+        );
+      };
+
+    addResource(
+      model?.energy,
+      'Energy'
+    );
+    addResource(
+      model?.nerve,
+      'Nerve'
+    );
+    addResource(
+      model?.happiness,
+      'Happiness'
+    );
+
+    return parts.join(
+      ' '
+    ) ||
+      'No recorded resource use was found for this week.';
+  }
+
+  function weeklyHighlightsSetbackSentence(
+    model
+  ) {
+    const resources = [
+      [
+        model?.energy,
+        'Energy'
+      ],
+      [
+        model?.nerve,
+        'Nerve'
+      ],
+      [
+        model?.happiness,
+        'Happiness'
+      ]
+    ];
+    const losses =
+      resources
+        .filter(
+          ([resource]) =>
+            Number(
+              resource?.setbacks ||
+              0
+            ) > 0
+        )
+        .map(
+          ([
+            resource,
+            label
+          ]) => {
+            const source =
+              resource?.losses?.[0]
+                ?.label ||
+              'Setbacks';
+
+            return `${source} cost ${resourceDashboardFormatNumber(resource.setbacks)} ${label}`;
+          }
+        );
+
+    return losses.length
+      ? `Notable: ${losses.join(' and ')}.`
+      : '';
+  }
+
+  function renderWeeklyHighlights(
+    flow,
+    activity
+  ) {
+    if (
+      !flow &&
+      !activity
+    ) {
+      return '';
+    }
+
+    const model =
+      weeklyHighlightsResourceModel(
+        flow,
+        activity,
+        7
+      );
+    const activeDays =
+      Number(
+        model.activity?.active_days ||
+        0
+      );
+    const activityText =
+      activeDays > 0
+        ? `You were active ${activeDays} of ${model.days} days${model.activity?.categories?.length ? `. Most recorded activity: ${model.activity.categories.join(', ')}` : ''}.`
+        : `No recorded activity was found for the last ${model.days} days.`;
+    const setbackText =
+      weeklyHighlightsSetbackSentence(
+        model
+      );
+
+    return `
+      <details class="ta-section ta-weekly-highlights-section">
+        <summary class="ta-section-summary-row">
+          <span class="ta-section-title">Weekly highlights</span>
+          <span class="ta-section-meta">
+            ${activeDays.toLocaleString()} of ${model.days.toLocaleString()} days active
+          </span>
+        </summary>
+
+        <div class="ta-section-body ta-weekly-highlights-body">
+          <section class="ta-weekly-highlight-summary">
+            <p>${escapeResourceDashboardHtml(activityText)}</p>
+            <p>${escapeResourceDashboardHtml(weeklyHighlightsResourceSentence(model))}</p>
+            ${setbackText ? `<p class="is-notable">${escapeResourceDashboardHtml(setbackText)}</p>` : ''}
+          </section>
+
+          <details class="ta-stat-subsection ta-weekly-history-details">
+            <summary>
+              History details
+              <span>Resource totals &amp; recent activity</span>
+            </summary>
+            <div class="ta-stat-subsection-body ta-weekly-history-body">
+              <section>
+                <h4>Energy history</h4>
+                ${renderResourceDashboardHistoryCard(flow, 'energy')}
+              </section>
+              <section>
+                <h4>Nerve history</h4>
+                ${renderResourceDashboardHistoryCard(flow, 'nerve')}
+              </section>
+              <section>
+                <h4>Happiness history</h4>
+                ${renderResourceDashboardHistoryCard(flow, 'happiness')}
+              </section>
+              ${activity?.total_logs ? renderActivityDailyChart(activity) : ''}
+              ${activity?.total_logs ? renderActivityCategoryBars(activity) : ''}
+              <p class="ta-resource-compact-disclaimer">
+                Resource history uses recorded events. Natural regeneration is not included because Torn does not log it.
+              </p>
+            </div>
+          </details>
         </div>
       </details>
     `;
@@ -33166,6 +33474,49 @@
         color: #9f9f9f;
         font-size: 11px;
         line-height: 1.4;
+      }
+
+      /* v2.18.51: one quiet weekly surface replaces two competing dashboards. */
+      #${MODAL_ID} .ta-weekly-highlights-section {
+        border-color: #3d584a;
+        box-shadow: inset 4px 0 #65a77e;
+      }
+
+      #${MODAL_ID} .ta-weekly-highlights-body,
+      #${MODAL_ID} .ta-weekly-history-body {
+        display: grid;
+        gap: 9px;
+      }
+
+      #${MODAL_ID} .ta-weekly-highlight-summary {
+        display: grid;
+        gap: 7px;
+        padding: 11px;
+        border: 1px solid #365143;
+        border-radius: 10px;
+        background: #111a15;
+      }
+
+      #${MODAL_ID} .ta-weekly-highlight-summary p {
+        margin: 0;
+        color: #dedede;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      #${MODAL_ID} .ta-weekly-highlight-summary p.is-notable {
+        color: #d7aa67;
+      }
+
+      #${MODAL_ID} .ta-weekly-history-body > section {
+        display: grid;
+        gap: 6px;
+      }
+
+      #${MODAL_ID} .ta-weekly-history-body h4 {
+        margin: 0;
+        color: #d9d9d9;
+        font-size: 12px;
       }
 
       #${MODAL_ID} .ta-activity-details-body {
