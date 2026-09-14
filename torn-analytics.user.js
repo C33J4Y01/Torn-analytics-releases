@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.51
+// @version      2.18.52
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,12 +22,12 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.51';
+  const VERSION = '2.18.52';
 
-  // v2.18.51 replaces the separate Resources and Overall Activity surfaces
-  // with one compact weekly summary while retaining their detailed evidence.
-  // Collection, API behavior, chart data, prediction math, storage,
-  // synchronization, exports, and TornPDA integration remain unchanged.
+  // v2.18.52 corrects full-E training guidance, removes repeated weekly
+  // activity evidence, and separates nested summaries on narrow screens.
+  // Collection, API behavior, prediction math, storage, synchronization,
+  // exports, and TornPDA integration remain unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -17996,6 +17996,7 @@
         ? Number(value)
         : null;
     const energy = finiteValue(readiness?.energy);
+    const energyMaximum = finiteValue(readiness?.energy_maximum);
     const happiness = finiteValue(readiness?.happiness);
     const happinessMaximum = finiteValue(readiness?.happiness_maximum);
     const cooldownState = readyAtValue => {
@@ -18196,7 +18197,9 @@
           title: 'Train available Energy',
           detail: candySuggestion
             ? 'If you have candy, consider eating some to train at your natural maximum Happiness.'
-            : 'Keep natural Energy regenerating while the Xanax cooldown clears.',
+            : energyMaximum !== null && energy >= energyMaximum
+              ? 'Train now so natural Energy can start regenerating again while the Xanax cooldown clears.'
+              : 'Keep natural Energy regenerating while the Xanax cooldown clears.',
           tone: 'ready'
         };
       }
@@ -27399,51 +27402,48 @@
   function weeklyHighlightsResourceSentence(
     model
   ) {
-    const parts =
-      [];
-    const addResource =
-      (
-        resource,
-        label
-      ) => {
-        const used =
-          Number(
-            resource?.used ||
-            0
-          );
+    const parts = [
+      [model?.energy, 'Energy'],
+      [model?.nerve, 'Nerve'],
+      [model?.happiness, 'Happiness']
+    ]
+      .map(
+        ([resource, label]) => {
+          const used =
+            Number(
+              resource?.used ||
+              0
+            );
 
-        if (
-          used <= 0
-        ) {
-          return;
+          if (
+            used <= 0
+          ) {
+            return '';
+          }
+
+          const destination =
+            resource?.outgoing?.[0]
+              ?.label;
+
+          return `${resourceDashboardFormatNumber(used)} ${label}${destination ? `, mostly on ${destination}` : ''}`;
         }
+      )
+      .filter(Boolean);
 
-        const destination =
-          resource?.outgoing?.[0]
-            ?.label;
+    if (
+      !parts.length
+    ) {
+      return 'No recorded resource use was found for this week.';
+    }
 
-        parts.push(
-          `You used ${resourceDashboardFormatNumber(used)} ${label}${destination ? `, mostly on ${destination}` : ''}.`
-        );
-      };
+    const joined =
+      parts.length === 1
+        ? parts[0]
+        : parts.length === 2
+          ? `${parts[0]} and ${parts[1]}`
+          : `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)}`;
 
-    addResource(
-      model?.energy,
-      'Energy'
-    );
-    addResource(
-      model?.nerve,
-      'Nerve'
-    );
-    addResource(
-      model?.happiness,
-      'Happiness'
-    );
-
-    return parts.join(
-      ' '
-    ) ||
-      'No recorded resource use was found for this week.';
+    return `You used ${joined}.`;
   }
 
   function weeklyHighlightsSetbackSentence(
@@ -27477,17 +27477,33 @@
             resource,
             label
           ]) => {
-            const source =
+            const topLoss =
               resource?.losses?.[0]
-                ?.label ||
-              'Setbacks';
+                || null;
+            const source =
+              topLoss?.label ||
+              'Setback';
+            const amount =
+              Number(
+                topLoss?.amount ||
+                resource.setbacks
+              );
+            const eventCount =
+              Number(
+                topLoss?.events ||
+                0
+              );
+            const subject =
+              eventCount === 1
+                ? `One ${source.toLocaleLowerCase()}`
+                : `${source} setbacks`;
 
-            return `${source} cost ${resourceDashboardFormatNumber(resource.setbacks)} ${label}`;
+            return `${subject} cost ${resourceDashboardFormatNumber(amount)} ${label}`;
           }
         );
 
     return losses.length
-      ? `Notable: ${losses.join(' and ')}.`
+      ? `${losses.join(' and ')}.`
       : '';
   }
 
@@ -27514,9 +27530,11 @@
         0
       );
     const activityText =
-      activeDays > 0
-        ? `You were active ${activeDays} of ${model.days} days${model.activity?.categories?.length ? `. Most recorded activity: ${model.activity.categories.join(', ')}` : ''}.`
-        : `No recorded activity was found for the last ${model.days} days.`;
+      activeDays === model.days
+        ? 'Solid week—you were active every day.'
+        : activeDays > 0
+          ? `You were active ${activeDays} of ${model.days} days this week.`
+          : `No recorded activity was found for the last ${model.days} days.`;
     const setbackText =
       weeklyHighlightsSetbackSentence(
         model
@@ -27527,7 +27545,7 @@
         <summary class="ta-section-summary-row">
           <span class="ta-section-title">Weekly highlights</span>
           <span class="ta-section-meta">
-            ${activeDays.toLocaleString()} of ${model.days.toLocaleString()} days active
+            Past ${model.days.toLocaleString()} days
           </span>
         </summary>
 
@@ -27540,8 +27558,8 @@
 
           <details class="ta-stat-subsection ta-weekly-history-details">
             <summary>
-              History details
-              <span>Resource totals &amp; recent activity</span>
+              All-time history
+              <span>Recorded resource totals</span>
             </summary>
             <div class="ta-stat-subsection-body ta-weekly-history-body">
               <section>
@@ -27556,8 +27574,6 @@
                 <h4>Happiness history</h4>
                 ${renderResourceDashboardHistoryCard(flow, 'happiness')}
               </section>
-              ${activity?.total_logs ? renderActivityDailyChart(activity) : ''}
-              ${activity?.total_logs ? renderActivityCategoryBars(activity) : ''}
               <p class="ta-resource-compact-disclaimer">
                 Resource history uses recorded events. Natural regeneration is not included because Torn does not log it.
               </p>
@@ -33349,7 +33365,7 @@
       }
 
       #${MODAL_ID} .ta-training-details-section {
-        margin-top: 0;
+        margin-top: 12px;
       }
 
       #${MODAL_ID} .ta-training-details-body {
@@ -33488,6 +33504,10 @@
         gap: 9px;
       }
 
+      #${MODAL_ID} .ta-weekly-history-body {
+        padding-top: 12px;
+      }
+
       #${MODAL_ID} .ta-weekly-highlight-summary {
         display: grid;
         gap: 7px;
@@ -33510,7 +33530,12 @@
 
       #${MODAL_ID} .ta-weekly-history-body > section {
         display: grid;
-        gap: 6px;
+        gap: 8px;
+      }
+
+      #${MODAL_ID} .ta-weekly-history-body > section + section {
+        padding-top: 10px;
+        border-top: 1px solid #2e2e2e;
       }
 
       #${MODAL_ID} .ta-weekly-history-body h4 {
