@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.54
+// @version      2.18.55
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,10 +22,10 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.54';
+  const VERSION = '2.18.55';
 
-  // v2.18.54 adds a fail-closed discovery view for possible Army or job-special
-  // stat-gain records without changing trusted gym totals or predictions.
+  // v2.18.55 integrates confirmed Army job-special Strength gains and Job
+  // Points into matching period totals and recaps without changing gym metrics.
   // Collection, API behavior, storage, synchronization, exports, and TornPDA
   // integration remain unchanged.
 
@@ -16250,6 +16250,183 @@
       : null;
   }
 
+  function inspectJobSpecialStrengthLog(
+    log
+  ) {
+    const logId =
+      Number(
+        log?.log ??
+        log?.details?.id
+      );
+
+    if (
+      logId !== 6400
+    ) {
+      return {
+        recognized: false,
+        valid: false,
+        reason: 'not_job_special_strength',
+        record: null
+      };
+    }
+
+    const timestamp =
+      Number(
+        log?.timestamp
+      );
+
+    if (
+      !Number.isSafeInteger(
+        timestamp
+      ) ||
+      timestamp <= 0
+    ) {
+      return {
+        recognized: true,
+        valid: false,
+        reason: 'invalid_timestamp',
+        record: null
+      };
+    }
+
+    const data =
+      log?.data;
+
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      Array.isArray(data)
+    ) {
+      return {
+        recognized: true,
+        valid: false,
+        reason: 'invalid_data',
+        record: null
+      };
+    }
+
+    const jobPointsUsed =
+      statGrowthPositiveInteger(
+        data.job_points_used
+      );
+
+    if (
+      jobPointsUsed === null
+    ) {
+      return {
+        recognized: true,
+        valid: false,
+        reason: 'invalid_job_points_used',
+        record: null
+      };
+    }
+
+    const jobPointsBalance =
+      statGrowthOptionalNonNegativeInteger(
+        data.job_points
+      );
+
+    if (
+      jobPointsBalance === null
+    ) {
+      return {
+        recognized: true,
+        valid: false,
+        reason: 'invalid_job_points_balance',
+        record: null
+      };
+    }
+
+    const strengthBefore =
+      statGrowthFiniteNumber(
+        data.strength_before
+      );
+    const strengthAfter =
+      statGrowthFiniteNumber(
+        data.strength_after
+      );
+    const strengthIncreased =
+      statGrowthFiniteNumber(
+        data.strength_increased
+      );
+
+    if (
+      strengthBefore === null ||
+      strengthBefore < 0
+    ) {
+      return {
+        recognized: true,
+        valid: false,
+        reason: 'invalid_strength_before',
+        record: null
+      };
+    }
+
+    if (
+      strengthAfter === null ||
+      strengthAfter < 0
+    ) {
+      return {
+        recognized: true,
+        valid: false,
+        reason: 'invalid_strength_after',
+        record: null
+      };
+    }
+
+    if (
+      strengthIncreased === null ||
+      strengthIncreased <= 0
+    ) {
+      return {
+        recognized: true,
+        valid: false,
+        reason: 'invalid_strength_increase',
+        record: null
+      };
+    }
+
+    return {
+      recognized: true,
+      valid: true,
+      reason: null,
+      record: {
+        id:
+          String(
+            log?.id ??
+            ''
+          ),
+        log_id:
+          6400,
+        title:
+          String(
+            log?.title ??
+            ''
+          ),
+        category:
+          String(
+            log?.category ??
+            ''
+          ),
+        timestamp,
+        stat:
+          'strength',
+        stat_label:
+          'Strength',
+        job_points_used:
+          jobPointsUsed,
+        job_points_balance:
+          jobPointsBalance,
+        strength_before:
+          strengthBefore,
+        strength_after:
+          strengthAfter,
+        stat_increased:
+          strengthIncreased
+      }
+    };
+  }
+
   function inspectNonGymStatGainCandidate(
     log
   ) {
@@ -16263,6 +16440,7 @@
       !Number.isSafeInteger(
         logId
       ) ||
+      logId === 6400 ||
       gymTrainingSpec(
         logId
       )
@@ -17519,7 +17697,11 @@
     const nonGymStatGainCandidates =
       [];
 
+    const jobSpecialStrengthGains =
+      [];
+
     let recognizedLogs = 0;
+    let jobSpecialRecognizedLogs = 0;
     let historyFirstTimestamp = null;
     let historyLastTimestamp = null;
 
@@ -17597,6 +17779,46 @@
         nonGymStatGainCandidates.push(
           nonGymStatGainCandidate
         );
+      }
+
+      const jobSpecialInspection =
+        inspectJobSpecialStrengthLog(
+          log
+        );
+
+      if (
+        jobSpecialInspection.recognized
+      ) {
+        jobSpecialRecognizedLogs++;
+
+        if (
+          jobSpecialInspection.valid
+        ) {
+          jobSpecialInspection.record.date =
+            activityDateKeyForBasis(
+              new Date(
+                jobSpecialInspection.record.timestamp *
+                1000
+              ),
+              normalizedTimeBasis
+            );
+          jobSpecialStrengthGains.push(
+            jobSpecialInspection.record
+          );
+        } else {
+          const reason =
+            jobSpecialInspection.reason;
+          rejectionReasons[
+            `job_special_${reason}`
+          ] =
+            (
+              rejectionReasons[
+                `job_special_${reason}`
+              ] ||
+              0
+            ) +
+            1;
+        }
       }
 
       const inspection =
@@ -17696,6 +17918,39 @@
           right.id
         )
     );
+
+    jobSpecialStrengthGains.sort(
+      (
+        left,
+        right
+      ) =>
+        left.timestamp -
+          right.timestamp ||
+        left.id.localeCompare(
+          right.id
+        )
+    );
+
+    const jobSpecialStrengthGain =
+      jobSpecialStrengthGains.reduce(
+        (
+          total,
+          record
+        ) =>
+          total +
+          record.stat_increased,
+        0
+      );
+    const jobSpecialJobPointsUsed =
+      jobSpecialStrengthGains.reduce(
+        (
+          total,
+          record
+        ) =>
+          total +
+          record.job_points_used,
+        0
+      );
 
     if (
       typeof trainingSnapshotAttachToActions ===
@@ -18011,6 +18266,19 @@
         rejectionReasons,
       warning_reasons:
         warningReasons,
+      job_special_recognized_logs:
+        jobSpecialRecognizedLogs,
+      job_special_valid_logs:
+        jobSpecialStrengthGains.length,
+      job_special_rejected_logs:
+        jobSpecialRecognizedLogs -
+        jobSpecialStrengthGains.length,
+      job_special_strength_gains:
+        jobSpecialStrengthGains,
+      job_special_strength_gain:
+        jobSpecialStrengthGain,
+      job_special_job_points_used:
+        jobSpecialJobPointsUsed,
       non_gym_stat_gain_candidates:
         nonGymStatGainCandidates,
       actions:
@@ -23024,6 +23292,13 @@
       )
         ? growth.non_gym_stat_gain_candidates
         : [];
+
+    if (
+      candidates.length === 0
+    ) {
+      return '';
+    }
+
     const visibleCandidates =
       candidates
         .slice(
@@ -23129,6 +23404,236 @@
     `;
   }
 
+  function renderJobSpecialStrengthSummary(
+    growth
+  ) {
+    const valid =
+      Number(
+        growth?.job_special_valid_logs ||
+        0
+      );
+    const rejected =
+      Number(
+        growth?.job_special_rejected_logs ||
+        0
+      );
+
+    if (
+      valid === 0 &&
+      rejected === 0
+    ) {
+      return '';
+    }
+
+    const gain =
+      Number(
+        growth?.job_special_strength_gain ||
+        0
+      );
+    const points =
+      Number(
+        growth?.job_special_job_points_used ||
+        0
+      );
+
+    return `
+      <details class="ta-stat-subsection${rejected ? ' ta-stat-quality-warning' : ''}">
+        <summary>
+          Army job specials
+          <span>${escapeActivityHtml(statGrowthFormatGain(gain))} Strength · ${points.toLocaleString()} JP</span>
+        </summary>
+        <div class="ta-stat-subsection-body">
+          <div class="ta-stat-quality-line">
+            ${valid.toLocaleString()} verified ${valid === 1 ? 'use' : 'uses'} of Torn log 6400. Included in matching period totals and shareable recaps; excluded from gym Energy efficiency and predictions.
+          </div>
+          ${
+            rejected
+              ? `<div class="ta-stat-quality-line">${rejected.toLocaleString()} malformed ${rejected === 1 ? 'record was' : 'records were'} excluded.</div>`
+              : ''
+          }
+        </div>
+      </details>
+    `;
+  }
+
+  function statGrowthJobSpecialSummary(
+    growth,
+    stat = 'all',
+    range = 'all',
+    context = 'all',
+    gymSamples = []
+  ) {
+    if (
+      ![
+        'all',
+        'strength'
+      ].includes(
+        stat
+      ) ||
+      uiSessionStatGrowthContext(
+        context
+      ) !== 'all'
+    ) {
+      return {
+        events: 0,
+        gain: 0,
+        job_points_used: 0
+      };
+    }
+
+    const normalizedRange =
+      uiSessionStatGrowthRange(
+        range
+      );
+    const records =
+      Array.isArray(
+        growth?.job_special_strength_gains
+      )
+        ? growth.job_special_strength_gains
+        : [];
+    let selected =
+      records;
+
+    if (
+      /^(?:10|20|30)s$/.test(
+        normalizedRange
+      )
+    ) {
+      const timestamps =
+        (
+          Array.isArray(
+            gymSamples
+          )
+            ? gymSamples
+            : []
+        )
+          .map(
+            sample =>
+              Number(
+                sample?.timestamp
+              )
+          )
+          .filter(
+            timestamp =>
+              Number.isSafeInteger(
+                timestamp
+              ) &&
+              timestamp > 0
+          );
+
+      if (
+        timestamps.length === 0
+      ) {
+        selected =
+          [];
+      } else {
+        const firstTimestamp =
+          Math.min(
+            ...timestamps
+          );
+        const lastTimestamp =
+          Math.max(
+            ...timestamps
+          );
+
+        selected =
+          records.filter(
+            record =>
+              Number(record?.timestamp) >= firstTimestamp &&
+              Number(record?.timestamp) <= lastTimestamp
+          );
+      }
+    } else if (
+      normalizedRange !== 'all'
+    ) {
+      const windowDays = {
+        '7d': 7,
+        '14d': 14,
+        '30d': 30
+      }[
+        normalizedRange
+      ];
+      const fallbackEndDate =
+        records.at(-1)?.date ||
+        null;
+      const endDate =
+        growth?.history_last_date ||
+        fallbackEndDate;
+      const endDay =
+        statGrowthDayNumber(
+          endDate
+        );
+
+      if (
+        !Number.isInteger(
+          windowDays
+        ) ||
+        !Number.isFinite(
+          endDay
+        )
+      ) {
+        selected =
+          [];
+      } else {
+        const startDay =
+          endDay -
+          windowDays +
+          1;
+
+        selected =
+          records.filter(
+            record => {
+              const date =
+                record?.date ||
+                activityDateKeyForBasis(
+                  new Date(
+                    Number(record?.timestamp || 0) *
+                    1000
+                  ),
+                  growth?.time_basis
+                );
+              const day =
+                statGrowthDayNumber(
+                  date
+                );
+
+              return Number.isFinite(
+                day
+              ) &&
+                day >= startDay &&
+                day <= endDay;
+            }
+          );
+      }
+    }
+
+    return selected.reduce(
+      (
+        summary,
+        record
+      ) => {
+        summary.events++;
+        summary.gain +=
+          Number(
+            record?.stat_increased ||
+            0
+          );
+        summary.job_points_used +=
+          Number(
+            record?.job_points_used ||
+            0
+          );
+
+        return summary;
+      },
+      {
+        events: 0,
+        gain: 0,
+        job_points_used: 0
+      }
+    );
+  }
+
   function statGrowthScopedGainSummary(
     growth,
     focus = 'recent',
@@ -23197,7 +23702,7 @@
             normalizedContext
           )
       );
-    const gain =
+    const gymGain =
       samples.reduce(
         (
           total,
@@ -23210,6 +23715,19 @@
           ),
         0
       );
+    const jobSpecial =
+      statGrowthJobSpecialSummary(
+        growth,
+        normalizedScope === 'all'
+          ? 'all'
+          : stat,
+        normalizedRange,
+        normalizedContext,
+        samples
+      );
+    const gain =
+      gymGain +
+      jobSpecial.gain;
     const energyUsed =
       samples.reduce(
         (
@@ -23269,13 +23787,21 @@
           normalizedRange
         ),
       gain,
+      gym_gain:
+        gymGain,
+      job_special_gain:
+        jobSpecial.gain,
+      job_special_events:
+        jobSpecial.events,
+      job_points_used:
+        jobSpecial.job_points_used,
       actions:
         samples.length,
       energy_used:
         energyUsed,
       gain_per_energy:
         energyUsed > 0
-          ? gain /
+          ? gymGain /
             energyUsed
           : 0,
       training_days:
@@ -23306,8 +23832,12 @@
           ${escapeActivityHtml(summary.range_label)} ·
           ${summary.actions.toLocaleString()} actions ·
           ${summary.energy_used.toLocaleString()} E ·
-          ${escapeActivityHtml(statGrowthFormatRate(summary.gain_per_energy))} gain/E ·
-          ${summary.training_days.toLocaleString()} days
+          ${escapeActivityHtml(statGrowthFormatRate(summary.gain_per_energy))} gym gain/E ·
+          ${summary.training_days.toLocaleString()} days${
+            summary.job_special_gain > 0
+              ? ` · ${escapeActivityHtml(statGrowthFormatGain(summary.job_special_gain))} Army Strength / ${summary.job_points_used.toLocaleString()} JP`
+              : ''
+          }
         </span>
       </div>
     `;
@@ -23406,11 +23936,12 @@
           <details class="ta-stat-subsection ta-stat-technical-details">
             <summary>
               Technical details
-              <span>Energy, gyms &amp; data quality</span>
+              <span>Sources &amp; data quality</span>
             </summary>
             <div class="ta-stat-subsection-body">
               ${renderStatGrowthEnergyAllocation(growth)}
               ${renderStatGrowthGymBreakdown(growth)}
+              ${renderJobSpecialStrengthSummary(growth)}
               ${renderNonGymStatGainCandidates(growth)}
               ${renderStatGrowthDataQuality(growth)}
             </div>
@@ -24668,7 +25199,13 @@
       statGrowthCompactSummaryStat(
         statValue
       );
-    const statRows =
+    const jobSpecial =
+      statGrowthJobSpecialSummary(
+        growth,
+        selectedStat,
+        period
+      );
+    const gymStatRows =
       statOrder
         .map(
           stat => {
@@ -24684,6 +25221,11 @@
                   stat
                 ),
               gain:
+                Number(
+                  item.gain ||
+                  0
+                ),
+              gym_gain:
                 Number(
                   item.gain ||
                   0
@@ -24706,6 +25248,23 @@
             };
           }
         );
+    const statRows =
+      gymStatRows.map(
+        item =>
+          item.stat === 'strength'
+            ? {
+                ...item,
+                gain:
+                  item.gym_gain +
+                  jobSpecial.gain,
+                job_special_gain:
+                  jobSpecial.gain
+              }
+            : {
+                ...item,
+                job_special_gain: 0
+              }
+      );
     const stats =
       statRows
         .filter(
@@ -24725,6 +25284,16 @@
       selectedStat === 'all'
         ? row || {}
         : selected || {};
+    const gymGain =
+      selectedStat === 'all'
+        ? Number(
+            row?.gain ||
+            0
+          )
+        : Number(
+            selected?.gym_gain ||
+            0
+          );
     const mostTrained =
       stats
         .slice()
@@ -24752,10 +25321,16 @@
         selected?.label ||
         'All stats',
       gain:
-        Number(
-          scoped?.gain ||
-          0
-        ),
+        gymGain +
+        jobSpecial.gain,
+      gym_gain:
+        gymGain,
+      job_special_gain:
+        jobSpecial.gain,
+      job_special_events:
+        jobSpecial.events,
+      job_points_used:
+        jobSpecial.job_points_used,
       actions:
         Number(
           scoped?.actions ??
@@ -24782,6 +25357,11 @@
           : selected?.gain > 0
             ? [selected]
             : [],
+      gym_stats:
+        gymStatRows.filter(
+          item =>
+            item.gym_gain > 0
+        ),
       most_trained:
         selectedStat === 'all'
           ? mostTrained
@@ -24794,7 +25374,7 @@
   ) {
     if (
       !model ||
-      model.actions <= 0
+      model.gain <= 0
     ) {
       const subject =
         model?.stat &&
@@ -24808,18 +25388,41 @@
     if (
       model.stat !== 'all'
     ) {
+      if (
+        model.job_special_gain > 0
+      ) {
+        const gymPart =
+          model.gym_gain > 0
+            ? `${statGrowthFormatCompactGain(model.gym_gain)} from ${model.actions.toLocaleString()} gym ${model.actions === 1 ? 'session' : 'sessions'} · `
+            : '';
+
+        return `${model.period_label}: ${statGrowthFormatCompactGain(model.gain)} ${model.stat_label} — ${gymPart}${statGrowthFormatCompactGain(model.job_special_gain)} from Army using ${model.job_points_used.toLocaleString()} JP.`;
+      }
+
       return `${model.period_label}: ${statGrowthFormatCompactGain(model.gain)} ${model.stat_label} from ${model.actions.toLocaleString()} gym ${model.actions === 1 ? 'session' : 'sessions'}.`;
     }
   
     const statText =
-      model.stats
+      (
+        model.gym_stats ||
+        model.stats
+      )
         .map(
           item =>
             `${statGrowthFormatCompactGain(item.gain)} ${item.label}`
         )
         .join(' · ');
   
-    return `${model.period_label}: ${statGrowthFormatCompactGain(model.gain)} total stats from ${model.actions.toLocaleString()} gym ${model.actions === 1 ? 'session' : 'sessions'}${statText ? ` — ${statText}` : ''}.`;
+    const sourceText =
+      model.actions > 0
+        ? ` from ${model.actions.toLocaleString()} gym ${model.actions === 1 ? 'session' : 'sessions'}`
+        : '';
+    const armyText =
+      model.job_special_gain > 0
+        ? ` · Army ${statGrowthFormatCompactGain(model.job_special_gain)} Strength / ${model.job_points_used.toLocaleString()} JP`
+        : '';
+
+    return `${model.period_label}: ${statGrowthFormatCompactGain(model.gain)} total stats${sourceText}${statText ? ` — ${statText}` : ''}${armyText}.`;
   }
 
   function statGrowthTrainingRecapSentence(
@@ -24838,7 +25441,7 @@
 
     if (
       !model ||
-      model.actions <= 0
+      model.gain <= 0
     ) {
       const subject =
         model?.stat &&
@@ -24856,15 +25459,30 @@
         ? ` using ${Number(model.energy_used).toLocaleString()} Energy`
         : '';
 
+    const armySentence =
+      model.job_special_gain > 0
+        ? `${model.gym_gain > 0 ? ' You also gained' : `${lead}, you gained`} ${statGrowthFormatNumber(model.job_special_gain, 2)} Strength from ${model.job_special_events.toLocaleString()} Army job ${model.job_special_events === 1 ? 'special' : 'specials'} using ${model.job_points_used.toLocaleString()} Job Points.`
+        : '';
+
     if (
       model.stat !== 'all'
     ) {
-      return `${lead}, you gained ${statGrowthFormatNumber(model.gain, 2)} ${model.stat_label} from ${sessions}${energy}.`;
+      const gymSentence =
+        model.gym_gain > 0
+          ? `${lead}, you gained ${statGrowthFormatNumber(model.gym_gain, 2)} ${model.stat_label} from ${sessions}${energy}.`
+          : '';
+      const totalSentence =
+        model.gym_gain > 0 &&
+        model.job_special_gain > 0
+          ? ` You gained ${statGrowthFormatNumber(model.gain, 2)} ${model.stat_label} in total.`
+          : '';
+
+      return `${gymSentence}${armySentence}${totalSentence}`.trim();
     }
 
     const statParts =
       (
-        model.stats ||
+        model.gym_stats ||
         []
       ).map(
         item =>
@@ -24877,13 +25495,17 @@
           ? `${statParts[0]} and ${statParts[1]}`
           : statParts.length > 2
             ? `${statParts.slice(0, -1).join(', ')}, and ${statParts.at(-1)}`
-            : `${statGrowthFormatNumber(model.gain, 2)} total stats`;
+            : `${statGrowthFormatNumber(model.gym_gain, 2)} total stats`;
     const total =
-      statParts.length
+      model.gain > 0
         ? ` You gained ${statGrowthFormatNumber(model.gain, 2)} total stats.`
         : '';
+    const gymSentence =
+      model.gym_gain > 0
+        ? `${lead}, you gained ${breakdown} from ${sessions}${energy}.`
+        : '';
 
-    return `${lead}, you gained ${breakdown} from ${sessions}${energy}.${total}`;
+    return `${gymSentence}${armySentence}${total}`.trim();
   }
 
   async function copyTrainingRecapText(
