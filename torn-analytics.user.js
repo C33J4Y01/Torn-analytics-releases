@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.53
+// @version      2.18.54
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,12 +22,12 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.53';
+  const VERSION = '2.18.54';
 
-  // v2.18.53 turns the selected training period and stat into one compact,
-  // two-step copyable recap using existing analyzed data only.
-  // Collection, API behavior, prediction math, storage, synchronization,
-  // exports, and TornPDA integration remain unchanged.
+  // v2.18.54 adds a fail-closed discovery view for possible Army or job-special
+  // stat-gain records without changing trusted gym totals or predictions.
+  // Collection, API behavior, storage, synchronization, exports, and TornPDA
+  // integration remain unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -16250,6 +16250,218 @@
       : null;
   }
 
+  function inspectNonGymStatGainCandidate(
+    log
+  ) {
+    const logId =
+      Number(
+        log?.log ??
+        log?.details?.id
+      );
+
+    if (
+      !Number.isSafeInteger(
+        logId
+      ) ||
+      gymTrainingSpec(
+        logId
+      )
+    ) {
+      return null;
+    }
+
+    const timestamp =
+      Number(
+        log?.timestamp
+      );
+
+    if (
+      !Number.isSafeInteger(
+        timestamp
+      ) ||
+      timestamp <= 0
+    ) {
+      return null;
+    }
+
+    const data =
+      log?.data;
+
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      Array.isArray(data)
+    ) {
+      return null;
+    }
+
+    const title =
+      String(
+        log?.title ??
+        ''
+      ).trim();
+    const category =
+      String(
+        log?.category ??
+        ''
+      ).trim();
+    const metadata =
+      `${category} ${title}`;
+    const hasJobMetadata =
+      /\b(?:army|job|special)\b/i.test(
+        metadata
+      );
+    const hasStatMetadata =
+      /\b(?:strength|defen[cs]e|speed|dexterity)\b/i.test(
+        metadata
+      );
+    const fields =
+      [];
+    const dataEntries =
+      Object.entries(
+        data
+      );
+    const hasStatDescriptor =
+      dataEntries.some(
+        ([
+          rawName,
+          rawValue
+        ]) =>
+          (
+            /^(?:stat|battle_stat|stat_type|type|name)$/i.test(
+              String(
+                rawName
+              )
+            ) ||
+            hasJobMetadata
+          ) &&
+          /^(?:strength|defen[cs]e|speed|dexterity)$/i.test(
+            String(
+              rawValue
+            ).trim()
+          )
+      );
+    let hasStatField =
+      hasStatMetadata;
+    let hasJobPointField = false;
+
+    for (
+      const [
+        rawName,
+        rawValue
+      ]
+      of dataEntries
+    ) {
+      const name =
+        String(
+          rawName
+        );
+      const normalizedName =
+        name
+          .toLowerCase()
+          .replace(
+            /[^a-z0-9]+/g,
+            '_'
+          );
+      const isStatField =
+        /(?:^|_)(?:strength|defen[cs]e|speed|dexterity)(?:_|$)/.test(
+          normalizedName
+        ) ||
+        (
+          /^(?:stat|battle_stat|stat_type|type|name)$/.test(
+            normalizedName
+          ) &&
+          /^(?:strength|defen[cs]e|speed|dexterity)$/i.test(
+            String(
+              rawValue
+            ).trim()
+          )
+        );
+      const isRelatedGainField =
+        (
+          hasStatDescriptor ||
+          hasStatMetadata
+        ) &&
+        /(?:^|_)(?:amount|value|result|change|gain|gained|increase|increased|before|after)(?:_|$)/.test(
+          normalizedName
+        );
+      const isJobPointField =
+        /(?:job|army).*points?|points?.*(?:job|army|used|spent|cost)/.test(
+          normalizedName
+        );
+
+      if (
+        !isStatField &&
+        !isJobPointField &&
+        !isRelatedGainField
+      ) {
+        continue;
+      }
+
+      const valueType =
+        typeof rawValue;
+
+      if (
+        ![
+          'number',
+          'string',
+          'boolean'
+        ].includes(
+          valueType
+        ) ||
+        (
+          valueType === 'number' &&
+          !Number.isFinite(
+            rawValue
+          )
+        )
+      ) {
+        continue;
+      }
+
+      hasStatField ||= isStatField;
+      hasJobPointField ||= isJobPointField;
+      fields.push({
+        name,
+        value:
+          String(
+            rawValue
+          ).slice(
+            0,
+            120
+          )
+      });
+    }
+
+    if (
+      !hasStatField ||
+      (
+        !hasJobMetadata &&
+        !hasJobPointField
+      )
+    ) {
+      return null;
+    }
+
+    return {
+      id:
+        String(
+          log?.id ??
+          ''
+        ),
+      log_id:
+        logId,
+      title,
+      category,
+      timestamp,
+      fields:
+        fields.slice(
+          0,
+          12
+        )
+    };
+  }
+
   function statGrowthHappinessBoostSource(
     logId
   ) {
@@ -17304,6 +17516,9 @@
     const energySourceEvents =
       [];
 
+    const nonGymStatGainCandidates =
+      [];
+
     let recognizedLogs = 0;
     let historyFirstTimestamp = null;
     let historyLastTimestamp = null;
@@ -17368,6 +17583,19 @@
       ) {
         energySourceEvents.push(
           energySourceEvent
+        );
+      }
+
+      const nonGymStatGainCandidate =
+        inspectNonGymStatGainCandidate(
+          log
+        );
+
+      if (
+        nonGymStatGainCandidate
+      ) {
+        nonGymStatGainCandidates.push(
+          nonGymStatGainCandidate
         );
       }
 
@@ -17446,6 +17674,18 @@
     );
 
     energySourceEvents.sort(
+      (
+        left,
+        right
+      ) =>
+        left.timestamp -
+          right.timestamp ||
+        left.id.localeCompare(
+          right.id
+        )
+    );
+
+    nonGymStatGainCandidates.sort(
       (
         left,
         right
@@ -17771,6 +18011,8 @@
         rejectionReasons,
       warning_reasons:
         warningReasons,
+      non_gym_stat_gain_candidates:
+        nonGymStatGainCandidates,
       actions:
         actions.length,
       training_actions:
@@ -22773,6 +23015,120 @@
     `;
   }
 
+  function renderNonGymStatGainCandidates(
+    growth
+  ) {
+    const candidates =
+      Array.isArray(
+        growth?.non_gym_stat_gain_candidates
+      )
+        ? growth.non_gym_stat_gain_candidates
+        : [];
+    const visibleCandidates =
+      candidates
+        .slice(
+          -8
+        )
+        .reverse();
+    const rows =
+      visibleCandidates
+        .map(
+          candidate => {
+            const logId =
+              Number.isSafeInteger(
+                Number(
+                  candidate?.log_id
+                )
+              )
+                ? String(
+                    candidate.log_id
+                  )
+                : 'Unknown';
+            const title =
+              String(
+                candidate?.title ||
+                'Untitled record'
+              );
+            const category =
+              String(
+                candidate?.category ||
+                'Uncategorized'
+              );
+            const timestamp =
+              Number(
+                candidate?.timestamp
+              );
+            const observedAt =
+              Number.isSafeInteger(
+                timestamp
+              ) &&
+              timestamp > 0
+                ? new Date(
+                    timestamp *
+                    1000
+                  ).toLocaleString()
+                : 'Unknown time';
+            const fields =
+              (
+                Array.isArray(
+                  candidate?.fields
+                )
+                  ? candidate.fields
+                  : []
+              )
+                .map(
+                  field =>
+                    `${String(field?.name || 'field')}=${String(field?.value ?? '')}`
+                )
+                .join(
+                  ' · '
+                );
+
+            return `
+              <div class="ta-stat-gym-row">
+                <div class="ta-stat-gym-topline">
+                  <strong>Log ${escapeActivityHtml(logId)}</strong>
+                  <span>${escapeActivityHtml(title)}</span>
+                </div>
+                <div class="ta-stat-gym-values">
+                  <span>${escapeActivityHtml(category)}</span>
+                  <span>${escapeActivityHtml(observedAt)}</span>
+                </div>
+                ${
+                  fields
+                    ? `<div class="ta-stat-gym-note">${escapeActivityHtml(fields)}</div>`
+                    : ''
+                }
+              </div>
+            `;
+          }
+        )
+        .join('');
+
+    return `
+      <details class="ta-stat-subsection ta-stat-quality${candidates.length ? ' ta-stat-quality-warning' : ''}">
+        <summary>
+          Non-gym gain discovery
+          <span>${candidates.length.toLocaleString()} possible ${candidates.length === 1 ? 'record' : 'records'}</span>
+        </summary>
+        <div class="ta-stat-subsection-body">
+          <div class="ta-stat-quality-line">
+            Discovery only. These records are excluded from totals and predictions until their log type and fields are confirmed.
+          </div>
+          ${
+            rows ||
+            '<div class="ta-stat-quality-line">No possible Army or job-special stat gains were found in the stored logs.</div>'
+          }
+          ${
+            candidates.length > visibleCandidates.length
+              ? `<div class="ta-stat-quality-line">Showing the ${visibleCandidates.length.toLocaleString()} most recent possible records.</div>`
+              : ''
+          }
+        </div>
+      </details>
+    `;
+  }
+
   function statGrowthScopedGainSummary(
     growth,
     focus = 'recent',
@@ -23055,6 +23411,7 @@
             <div class="ta-stat-subsection-body">
               ${renderStatGrowthEnergyAllocation(growth)}
               ${renderStatGrowthGymBreakdown(growth)}
+              ${renderNonGymStatGainCandidates(growth)}
               ${renderStatGrowthDataQuality(growth)}
             </div>
           </details>
