@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.52
+// @version      2.18.53
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,10 +22,10 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.52';
+  const VERSION = '2.18.53';
 
-  // v2.18.52 corrects full-E training guidance, removes repeated weekly
-  // activity evidence, and separates nested summaries on narrow screens.
+  // v2.18.53 turns the selected training period and stat into one compact,
+  // two-step copyable recap using existing analyzed data only.
   // Collection, API behavior, prediction math, storage, synchronization,
   // exports, and TornPDA integration remain unchanged.
 
@@ -24451,7 +24451,7 @@
     if (
       model.stat !== 'all'
     ) {
-      return `${model.period_label}: ${statGrowthFormatCompactGain(model.gain)} ${model.stat_label} across ${model.actions.toLocaleString()} training ${model.actions === 1 ? 'action' : 'actions'}.`;
+      return `${model.period_label}: ${statGrowthFormatCompactGain(model.gain)} ${model.stat_label} from ${model.actions.toLocaleString()} gym ${model.actions === 1 ? 'session' : 'sessions'}.`;
     }
   
     const statText =
@@ -24462,7 +24462,147 @@
         )
         .join(' · ');
   
-    return `${model.period_label}: ${statGrowthFormatCompactGain(model.gain)} total stats across ${model.actions.toLocaleString()} training actions${statText ? ` — ${statText}` : ''}.`;
+    return `${model.period_label}: ${statGrowthFormatCompactGain(model.gain)} total stats from ${model.actions.toLocaleString()} gym ${model.actions === 1 ? 'session' : 'sessions'}${statText ? ` — ${statText}` : ''}.`;
+  }
+
+  function statGrowthTrainingRecapSentence(
+    model
+  ) {
+    const lead = {
+      '7d': 'Over the past week',
+      '14d': 'Over the past 2 weeks',
+      '30d': 'Over the past month',
+      all: 'Across all recorded training'
+    }[
+      statGrowthCompactPeriod(
+        model?.period
+      )
+    ];
+
+    if (
+      !model ||
+      model.actions <= 0
+    ) {
+      const subject =
+        model?.stat &&
+        model.stat !== 'all'
+          ? ` for ${model.stat_label}`
+          : '';
+
+      return `${lead}, no gym gains were recorded${subject}.`;
+    }
+
+    const sessions =
+      `${model.actions.toLocaleString()} gym ${model.actions === 1 ? 'session' : 'sessions'}`;
+    const energy =
+      Number(model.energy_used) > 0
+        ? ` using ${Number(model.energy_used).toLocaleString()} Energy`
+        : '';
+
+    if (
+      model.stat !== 'all'
+    ) {
+      return `${lead}, you gained ${statGrowthFormatNumber(model.gain, 2)} ${model.stat_label} from ${sessions}${energy}.`;
+    }
+
+    const statParts =
+      (
+        model.stats ||
+        []
+      ).map(
+        item =>
+          `${statGrowthFormatNumber(item.gain, 2)} ${item.label}`
+      );
+    const breakdown =
+      statParts.length === 1
+        ? statParts[0]
+        : statParts.length === 2
+          ? `${statParts[0]} and ${statParts[1]}`
+          : statParts.length > 2
+            ? `${statParts.slice(0, -1).join(', ')}, and ${statParts.at(-1)}`
+            : `${statGrowthFormatNumber(model.gain, 2)} total stats`;
+    const total =
+      statParts.length
+        ? ` You gained ${statGrowthFormatNumber(model.gain, 2)} total stats.`
+        : '';
+
+    return `${lead}, you gained ${breakdown} from ${sessions}${energy}.${total}`;
+  }
+
+  async function copyTrainingRecapText(
+    value
+  ) {
+    const text =
+      String(
+        value ||
+        ''
+      ).trim();
+
+    if (
+      !text
+    ) {
+      return false;
+    }
+
+    try {
+      const writeText =
+        globalThis.navigator
+          ?.clipboard
+          ?.writeText;
+
+      if (
+        typeof writeText ===
+        'function'
+      ) {
+        await writeText.call(
+          globalThis.navigator.clipboard,
+          text
+        );
+
+        return true;
+      }
+    } catch {
+      // TornPDA WebViews may expose Clipboard without allowing the call.
+    }
+
+    let textarea =
+      null;
+
+    try {
+      textarea =
+        document.createElement(
+          'textarea'
+        );
+      textarea.value =
+        text;
+      textarea.setAttribute(
+        'readonly',
+        ''
+      );
+      textarea.style.position =
+        'fixed';
+      textarea.style.top =
+        '-1000px';
+      textarea.style.fontSize =
+        '16px';
+      document.body.appendChild(
+        textarea
+      );
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(
+        0,
+        text.length
+      );
+
+      return document.execCommand(
+        'copy'
+      ) === true;
+    } catch {
+      return false;
+    } finally {
+      textarea?.remove?.();
+    }
   }
 
   function renderTrainingCompactSummary(
@@ -24616,9 +24756,18 @@
             : ''
         }
 
-        <p class="ta-training-summary-growth">
-          ${escapeActivityHtml(statGrowthCompactSummarySentence(summary))}
-        </p>
+        <button
+          type="button"
+          class="ta-training-recap"
+          data-ta-training-recap
+          data-ta-training-recap-text="${escapeActivityHtml(statGrowthTrainingRecapSentence(summary))}"
+          data-ta-copy-state="idle"
+          aria-label="Prepare training recap copy"
+        >
+          <span>Training recap</span>
+          <b>${escapeActivityHtml(statGrowthTrainingRecapSentence(summary))}</b>
+          <small data-ta-training-recap-copy-label aria-live="polite"></small>
+        </button>
 
         ${
           predictionText
@@ -24626,12 +24775,6 @@
             : ''
         }
 
-        ${
-          summary.actions >
-          0
-            ? `<div class="ta-training-summary-meta">${summary.energy_used.toLocaleString()} Energy used · ${summary.trains.toLocaleString()} individual trains${summary.stat === 'all' && summary.most_trained ? ` · Most trained: ${escapeActivityHtml(summary.most_trained.label)}` : ''}</div>`
-            : ''
-        }
       </section>
     `;
   }
@@ -24814,6 +24957,134 @@
           root?.querySelector?.(
             '[data-ta-training-summary-stat]'
           );
+        const recap =
+          root?.querySelector?.(
+            '[data-ta-training-recap]'
+          );
+
+        recap?.addEventListener(
+          'click',
+          async () => {
+            const state =
+              recap.getAttribute(
+                'data-ta-copy-state'
+              ) ||
+              'idle';
+            const label =
+              recap.querySelector(
+                '[data-ta-training-recap-copy-label]'
+              );
+
+            clearTimeout(
+              root.__taTrainingRecapCopyTimer
+            );
+
+            if (
+              state !== 'armed'
+            ) {
+              recap.setAttribute(
+                'data-ta-copy-state',
+                'armed'
+              );
+              recap.setAttribute(
+                'aria-label',
+                'Copy training recap'
+              );
+
+              if (
+                label
+              ) {
+                label.textContent =
+                  'Copy';
+              }
+
+              root.__taTrainingRecapCopyTimer =
+                setTimeout(
+                  () => {
+                    if (
+                      recap.isConnected
+                    ) {
+                      recap.setAttribute(
+                        'data-ta-copy-state',
+                        'idle'
+                      );
+                      recap.setAttribute(
+                        'aria-label',
+                        'Prepare training recap copy'
+                      );
+
+                      if (
+                        label
+                      ) {
+                        label.textContent =
+                          '';
+                      }
+                    }
+                  },
+                  4000
+                );
+
+              return;
+            }
+
+            const copied =
+              await copyTrainingRecapText(
+                recap.getAttribute(
+                  'data-ta-training-recap-text'
+                )
+              );
+            const nextState =
+              copied
+                ? 'copied'
+                : 'error';
+
+            recap.setAttribute(
+              'data-ta-copy-state',
+              nextState
+            );
+            recap.setAttribute(
+              'aria-label',
+              copied
+                ? 'Training recap copied'
+                : 'Training recap copy failed'
+            );
+
+            if (
+              label
+            ) {
+              label.textContent =
+                copied
+                  ? 'Copied'
+                  : 'Copy failed';
+            }
+
+            root.__taTrainingRecapCopyTimer =
+              setTimeout(
+                () => {
+                  if (
+                    recap.isConnected
+                  ) {
+                    recap.setAttribute(
+                      'data-ta-copy-state',
+                      'idle'
+                    );
+                    recap.setAttribute(
+                      'aria-label',
+                      'Prepare training recap copy'
+                    );
+
+                    if (
+                      label
+                    ) {
+                      label.textContent =
+                        '';
+                    }
+                  }
+                },
+                2500
+              );
+          }
+        );
 
         rangeSelect?.addEventListener(
           'change',
@@ -33338,17 +33609,11 @@
       }
 
       #${MODAL_ID} .ta-training-summary-advice,
-      #${MODAL_ID} .ta-training-summary-growth,
       #${MODAL_ID} .ta-training-summary-prediction {
         margin: 0;
         color: #dedede;
         font-size: 14px;
         line-height: 1.45;
-      }
-
-      #${MODAL_ID} .ta-training-summary-growth {
-        padding-top: 9px;
-        border-top: 1px solid #383838;
       }
 
       #${MODAL_ID} .ta-training-summary-prediction {
@@ -33362,6 +33627,70 @@
         color: #9d9d9d;
         font-size: 12px;
         line-height: 1.35;
+      }
+
+      #${MODAL_ID} .ta-training-recap {
+        position: relative;
+        display: grid;
+        gap: 5px;
+        width: 100%;
+        margin: 0;
+        padding: 10px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: #121212;
+        color: #dedede;
+        text-align: left;
+        font: inherit;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      #${MODAL_ID} .ta-training-recap > span,
+      #${MODAL_ID} .ta-training-recap > small {
+        color: #a3a3a3;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-training-recap > b {
+        color: #e1e1e1;
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 1.45;
+      }
+
+      #${MODAL_ID} .ta-training-recap > small:empty {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-training-recap[data-ta-copy-state="armed"] {
+        border-color: #d1a34b;
+        background: #1a160f;
+      }
+
+      #${MODAL_ID} .ta-training-recap[data-ta-copy-state="armed"] > small {
+        color: #d9b565;
+      }
+
+      #${MODAL_ID} .ta-training-recap[data-ta-copy-state="copied"] {
+        border-color: #65a77e;
+        background: #111a15;
+      }
+
+      #${MODAL_ID} .ta-training-recap[data-ta-copy-state="copied"] > small {
+        color: #7fc696;
+      }
+
+      #${MODAL_ID} .ta-training-recap[data-ta-copy-state="error"] {
+        border-color: #b96060;
+      }
+
+      #${MODAL_ID} .ta-training-recap:focus-visible {
+        outline: 2px solid #d1a34b;
+        outline-offset: 2px;
       }
 
       #${MODAL_ID} .ta-training-details-section {
