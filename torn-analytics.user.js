@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.55
+// @version      2.18.56
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,12 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.55';
+  const VERSION = '2.18.56';
 
-  // v2.18.55 integrates confirmed Army job-special Strength gains and Job
-  // Points into matching period totals and recaps without changing gym metrics.
-  // Collection, API behavior, storage, synchronization, exports, and TornPDA
-  // integration remain unchanged.
+  // v2.18.56 flattens Stats into persistent Overview, Charts, and Data views.
+  // Calculations, prediction math, log parsing, storage, synchronization,
+  // exports, API behavior, and v2.18.55 Army job-special handling are unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -13421,6 +13420,20 @@
       : 'all';
   }
 
+  function uiSessionStatsWorkspaceView(
+    value
+  ) {
+    return [
+      'overview',
+      'charts',
+      'data'
+    ].includes(
+      value
+    )
+      ? value
+      : 'overview';
+  }
+
   function readStatGrowthPreferences() {
     try {
       const raw =
@@ -13459,6 +13472,10 @@
         training_summary_stat:
           uiSessionStatView(
             parsed?.training_summary_stat
+          ),
+        stats_workspace_view:
+          uiSessionStatsWorkspaceView(
+            parsed?.stats_workspace_view
           )
       };
     } catch (_) {
@@ -13466,7 +13483,9 @@
         stat_growth_focus:
           'recent',
         training_summary_stat:
-          'all'
+          'all',
+        stats_workspace_view:
+          'overview'
       };
     }
   }
@@ -13510,6 +13529,18 @@
       next.training_summary_stat =
         uiSessionStatView(
           safePatch.training_summary_stat
+        );
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        safePatch,
+        'stats_workspace_view'
+      )
+    ) {
+      next.stats_workspace_view =
+        uiSessionStatsWorkspaceView(
+          safePatch.stats_workspace_view
         );
     }
 
@@ -23087,8 +23118,8 @@
         );
 
     return `
-      <div class="ta-chart-card">
-        <div class="ta-chart-heading">
+      <section class="ta-stat-data-block ta-stat-energy-allocation">
+        <div class="ta-stat-data-heading">
           <span>Energy allocation</span>
           <span>Share of observed gym energy</span>
         </div>
@@ -23128,7 +23159,7 @@
               .join('')
           }
         </div>
-      </div>
+      </section>
     `;
   }
 
@@ -23215,15 +23246,15 @@
         .join('');
 
     return `
-      <details class="ta-stat-subsection">
-        <summary>
+      <section class="ta-stat-data-block">
+        <div class="ta-stat-data-heading">
           Growth by gym
           <span>${gyms.length.toLocaleString()} gyms observed</span>
-        </summary>
-        <div class="ta-stat-subsection-body">
+        </div>
+        <div class="ta-stat-data-body">
           ${rows}
         </div>
-      </details>
+      </section>
     `;
   }
 
@@ -23259,12 +23290,12 @@
         : 'All recognized gym training logs passed defensive validation';
 
     return `
-      <details class="ta-stat-subsection ta-stat-quality${rejected ? ' ta-stat-quality-warning' : ''}">
-        <summary>
+      <section class="ta-stat-data-block ta-stat-quality${rejected ? ' ta-stat-quality-warning' : ''}">
+        <div class="ta-stat-data-heading">
           Data quality
           <span>${Number(growth?.valid_logs || 0).toLocaleString()} / ${Number(growth?.recognized_logs || 0).toLocaleString()} parsed</span>
-        </summary>
-        <div class="ta-stat-subsection-body">
+        </div>
+        <div class="ta-stat-data-body">
           <div class="ta-stat-quality-line">
             ${escapeActivityHtml(status)}.
           </div>
@@ -23279,7 +23310,7 @@
               : ''
           }
         </div>
-      </details>
+      </section>
     `;
   }
 
@@ -23381,12 +23412,12 @@
         .join('');
 
     return `
-      <details class="ta-stat-subsection ta-stat-quality${candidates.length ? ' ta-stat-quality-warning' : ''}">
-        <summary>
+      <section class="ta-stat-data-block ta-stat-quality${candidates.length ? ' ta-stat-quality-warning' : ''}">
+        <div class="ta-stat-data-heading">
           Non-gym gain discovery
           <span>${candidates.length.toLocaleString()} possible ${candidates.length === 1 ? 'record' : 'records'}</span>
-        </summary>
-        <div class="ta-stat-subsection-body">
+        </div>
+        <div class="ta-stat-data-body">
           <div class="ta-stat-quality-line">
             Discovery only. These records are excluded from totals and predictions until their log type and fields are confirmed.
           </div>
@@ -23400,7 +23431,7 @@
               : ''
           }
         </div>
-      </details>
+      </section>
     `;
   }
 
@@ -23437,12 +23468,12 @@
       );
 
     return `
-      <details class="ta-stat-subsection${rejected ? ' ta-stat-quality-warning' : ''}">
-        <summary>
+      <section class="ta-stat-data-block${rejected ? ' ta-stat-quality-warning' : ''}">
+        <div class="ta-stat-data-heading">
           Army job specials
           <span>${escapeActivityHtml(statGrowthFormatGain(gain))} Strength · ${points.toLocaleString()} JP</span>
-        </summary>
-        <div class="ta-stat-subsection-body">
+        </div>
+        <div class="ta-stat-data-body">
           <div class="ta-stat-quality-line">
             ${valid.toLocaleString()} verified ${valid === 1 ? 'use' : 'uses'} of Torn log 6400. Included in matching period totals and shareable recaps; excluded from gym Energy efficiency and predictions.
           </div>
@@ -23452,7 +23483,7 @@
               : ''
           }
         </div>
-      </details>
+      </section>
     `;
   }
 
@@ -23881,9 +23912,6 @@
       'object'
         ? options
         : {};
-    const sectionOpen =
-      safeOptions.open ===
-      true;
     const focus =
       uiSessionTrainingFocus(
         safeOptions.focus
@@ -23906,48 +23934,44 @@
       !growth?.valid_logs
     ) {
       return `
-        <details class="ta-section ta-stat-growth-section" ${sectionOpen ? 'open' : ''}>
-          <summary class="ta-section-summary-row">
-            <span class="ta-section-title">Stat Growth</span>
-            <span class="ta-section-meta">No gym training data</span>
-          </summary>
-          <div class="ta-section-body">
-            <div class="ta-section-intro">
-              No valid Torn gym-training logs were found in the stored history.
-            </div>
-            ${growth?.rejected_logs ? renderStatGrowthDataQuality(growth) : ''}
-          </div>
-        </details>
+        <div class="ta-stats-empty-state">
+          No valid Torn gym-training logs were found in the stored history.
+        </div>
       `;
     }
 
     return `
-      <details class="ta-section ta-stat-growth-section" ${sectionOpen ? 'open' : ''}>
-        <summary class="ta-section-summary-row">
-          <span class="ta-section-title">Stat Growth</span>
-          <span class="ta-section-meta">
-            ${escapeActivityHtml(statGrowthFormatGain(growth.gain))} · ${Number(growth.energy_used).toLocaleString()} E
-          </span>
-        </summary>
+      <div class="ta-stat-growth-compact-body">
+        ${renderStatGrowthCumulativeChart(growth, focus, context, range, scope)}
+      </div>
+    `;
+  }
 
-        <div class="ta-section-body ta-stat-growth-compact-body">
-          ${renderStatGrowthCumulativeChart(growth, focus, context, range, scope)}
-
-          <details class="ta-stat-subsection ta-stat-technical-details">
-            <summary>
-              Technical details
-              <span>Sources &amp; data quality</span>
-            </summary>
-            <div class="ta-stat-subsection-body">
-              ${renderStatGrowthEnergyAllocation(growth)}
-              ${renderStatGrowthGymBreakdown(growth)}
-              ${renderJobSpecialStrengthSummary(growth)}
-              ${renderNonGymStatGainCandidates(growth)}
-              ${renderStatGrowthDataQuality(growth)}
-            </div>
-          </details>
+  function renderStatGrowthDataView(
+    growth
+  ) {
+    if (
+      !growth
+    ) {
+      return `
+        <div class="ta-stats-empty-state">
+          No stored training data is available yet.
         </div>
-      </details>
+      `;
+    }
+
+    const sections = [
+      renderStatGrowthEnergyAllocation(growth),
+      renderStatGrowthGymBreakdown(growth),
+      renderJobSpecialStrengthSummary(growth),
+      renderNonGymStatGainCandidates(growth),
+      renderStatGrowthDataQuality(growth)
+    ].filter(Boolean);
+
+    return `
+      <div class="ta-stats-data-list">
+        ${sections.join('')}
+      </div>
     `;
   }
 
@@ -25703,7 +25727,7 @@
       <section class="ta-training-compact-summary" data-ta-training-summary>
         <div class="ta-training-summary-header">
           <div>
-            <span class="ta-training-summary-kicker">Training overview</span>
+            <span class="ta-training-summary-kicker">Train now</span>
             <strong>${escapeActivityHtml(advice?.title || 'Training history')}</strong>
           </div>
 
@@ -25758,6 +25782,93 @@
     `;
   }
 
+  function renderStatsWorkspaceNavigation(
+    view = 'overview'
+  ) {
+    const activeView =
+      uiSessionStatsWorkspaceView(
+        view
+      );
+    const views = [
+      ['overview', 'Overview'],
+      ['charts', 'Charts'],
+      ['data', 'Data']
+    ];
+
+    return `
+      <div class="ta-stats-view-nav" role="tablist" aria-label="Stats views">
+        ${views.map(
+          ([value, label]) => `
+            <button
+              type="button"
+              id="ta-stats-view-${value}-tab"
+              role="tab"
+              data-ta-stats-view-option="${value}"
+              aria-controls="ta-stats-view-${value}"
+              aria-selected="${value === activeView ? 'true' : 'false'}"
+              tabindex="${value === activeView ? '0' : '-1'}"
+              class="${value === activeView ? 'ta-stats-view-active' : ''}"
+            >${label}</button>
+          `
+        ).join('')}
+      </div>
+    `;
+  }
+
+  function renderStatsWorkspaceView(
+    view,
+    readiness,
+    growth,
+    options = {}
+  ) {
+    const activeView =
+      uiSessionStatsWorkspaceView(
+        view
+      );
+    let content = '';
+
+    if (
+      activeView ===
+      'charts'
+    ) {
+      content =
+        renderStatGrowthDashboard(
+          growth,
+          options
+        );
+    } else if (
+      activeView ===
+      'data'
+    ) {
+      content =
+        renderStatGrowthDataView(
+          growth
+        );
+    } else {
+      content =
+        renderTrainingCompactSummary(
+          readiness,
+          growth,
+          options.range,
+          options.plan,
+          options.summary_stat
+        );
+    }
+
+    return `
+      <div
+        id="ta-stats-view-${activeView}"
+        class="ta-stats-view-panel ta-stats-${activeView}-view"
+        data-ta-stats-view-host
+        data-ta-stats-view="${activeView}"
+        role="tabpanel"
+        aria-labelledby="ta-stats-view-${activeView}-tab"
+      >
+        ${content}
+      </div>
+    `;
+  }
+
   function renderTrainingWorkspace(
     readiness,
     growth
@@ -25792,10 +25903,6 @@
         ? defaultOpen
         : state.training_readiness_open;
 
-    const statGrowthOpen =
-      state.stat_growth_open ===
-      true;
-
     const focus =
       uiSessionTrainingFocus(
         state.stat_growth_focus
@@ -25818,6 +25925,10 @@
       statGrowthCompactSummaryStat(
         state.training_summary_stat
       );
+    const activeView =
+      uiSessionStatsWorkspaceView(
+        state.stats_workspace_view
+      );
 
     const meta = [
       readiness?.energy === null ||
@@ -25837,29 +25948,20 @@
         </summary>
 
         <div class="ta-section-body ta-training-workspace-body">
-          ${renderTrainingCompactSummary(
+          ${renderStatsWorkspaceNavigation(activeView)}
+          ${renderStatsWorkspaceView(
+            activeView,
             readiness,
             growth,
-            range,
-            readTrainingReadinessPlan(),
-            summaryStat
+            {
+              focus,
+              scope,
+              context,
+              range,
+              plan: readTrainingReadinessPlan(),
+              summary_stat: summaryStat
+            }
           )}
-
-          <details class="ta-stat-subsection ta-training-details-section">
-            <summary>
-              View detailed analytics
-              <span>Growth graph &amp; session history</span>
-            </summary>
-            <div class="ta-stat-subsection-body ta-training-details-body">
-              ${renderStatGrowthDashboard(growth, {
-                open: statGrowthOpen,
-                focus,
-                scope,
-                context,
-                range
-              })}
-            </div>
-          </details>
         </div>
       </details>
     `;
@@ -25878,6 +25980,12 @@
       growth ||
       root.__taTrainingGrowth ||
       null;
+
+    root.__taStatsWorkspaceView =
+      uiSessionStatsWorkspaceView(
+        readStatGrowthPreferences()
+          .stats_workspace_view
+      );
 
     const refreshCompactSummary =
       (
@@ -26131,6 +26239,151 @@
 
     bindCompactSummary();
 
+    const viewButtons =
+      Array.from(
+        root?.querySelectorAll?.(
+          '[data-ta-stats-view-option]'
+        ) ||
+        []
+      );
+
+    const activateStatsView =
+      viewValue => {
+        const nextView =
+          uiSessionStatsWorkspaceView(
+            viewValue
+          );
+
+        root.__taStatsWorkspaceView =
+          nextView;
+
+        writeStatGrowthPreferences({
+          stats_workspace_view:
+            nextView
+        });
+
+        for (
+          const button
+          of viewButtons
+        ) {
+          const active =
+            button.getAttribute(
+              'data-ta-stats-view-option'
+            ) ===
+            nextView;
+
+          button.classList.toggle(
+            'ta-stats-view-active',
+            active
+          );
+          button.setAttribute(
+            'aria-selected',
+            active
+              ? 'true'
+              : 'false'
+          );
+          button.tabIndex =
+            active
+              ? 0
+              : -1;
+        }
+
+        const host =
+          root.querySelector(
+            '[data-ta-stats-view-host]'
+          );
+
+        if (
+          host
+        ) {
+          const currentState =
+            readUiSessionState();
+          const preferences =
+            readStatGrowthPreferences();
+
+          host.outerHTML =
+            renderStatsWorkspaceView(
+              nextView,
+              root.__taTrainingReadiness,
+              root.__taTrainingGrowth,
+              {
+                focus:
+                  root.__taStatGrowthFocus ||
+                  preferences.stat_growth_focus ||
+                  currentState.stat_growth_focus,
+                scope:
+                  root.__taStatGrowthScope ||
+                  currentState.stat_growth_scope,
+                context:
+                  root.__taStatGrowthContext ||
+                  currentState.stat_growth_context,
+                range:
+                  root.__taStatGrowthRange ||
+                  currentState.stat_growth_range,
+                plan:
+                  readTrainingReadinessPlan(),
+                summary_stat:
+                  root.__taTrainingSummaryStat ||
+                  preferences.training_summary_stat
+              }
+            );
+        }
+
+        bindCompactSummary();
+        bindStatGrowthDashboardInteractions(
+          root,
+          root.__taTrainingGrowth
+        );
+      };
+
+    for (
+      const [index, button]
+      of viewButtons.entries()
+    ) {
+      button.addEventListener(
+        'click',
+        () =>
+          activateStatsView(
+            button.getAttribute(
+              'data-ta-stats-view-option'
+            )
+          )
+      );
+
+      button.addEventListener(
+        'keydown',
+        event => {
+          if (
+            event.key !==
+              'ArrowLeft' &&
+            event.key !==
+              'ArrowRight'
+          ) {
+            return;
+          }
+
+          event.preventDefault();
+          const direction =
+            event.key ===
+            'ArrowRight'
+              ? 1
+              : -1;
+          const nextButton =
+            viewButtons[
+              (
+                index +
+                direction +
+                viewButtons.length
+              ) %
+              viewButtons.length
+            ];
+
+          nextButton?.focus?.();
+          nextButton?.click?.();
+        }
+      );
+    }
+
     const bindings = [
       [
         '.ta-training-workspace-section',
@@ -26139,10 +26392,6 @@
       [
         '.ta-training-readiness-section',
         'training_readiness_open'
-      ],
-      [
-        '.ta-stat-growth-section',
-        'stat_growth_open'
       ]
     ];
 
@@ -34878,6 +35127,111 @@
         font-size: 11px;
         line-height: 1.4;
       }
+
+      /* v2.18.56: direct Stats views replace nested analytics drawers. */
+      #${MODAL_ID} .ta-training-workspace-body {
+        display: grid;
+        gap: 11px;
+      }
+
+      #${MODAL_ID} .ta-stats-view-nav {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 3px;
+        padding: 3px;
+        border: 1px solid #453a28;
+        border-radius: 9px;
+        background: #15130f;
+      }
+
+      #${MODAL_ID} .ta-stats-view-nav button {
+        min-width: 0;
+        min-height: 40px;
+        padding: 7px 8px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: #9f9a90;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      #${MODAL_ID} .ta-stats-view-nav button.ta-stats-view-active {
+        background: #332817;
+        color: #f0cf87;
+        box-shadow: inset 0 0 0 1px rgba(209, 163, 75, .35);
+      }
+
+      #${MODAL_ID} .ta-stats-view-nav button:focus-visible {
+        outline: 2px solid #d1a34b;
+        outline-offset: 1px;
+      }
+
+      #${MODAL_ID} .ta-stats-view-panel {
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-stats-empty-state {
+        padding: 14px 10px;
+        border-top: 1px solid #34302a;
+        border-bottom: 1px solid #34302a;
+        color: #aaa49a;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      #${MODAL_ID} .ta-stats-data-list {
+        display: grid;
+        border-top: 1px solid #34302a;
+        border-bottom: 1px solid #34302a;
+      }
+
+      #${MODAL_ID} .ta-stat-data-block {
+        display: grid;
+        gap: 9px;
+        min-width: 0;
+        padding: 12px 4px;
+      }
+
+      #${MODAL_ID} .ta-stat-data-block + .ta-stat-data-block {
+        border-top: 1px solid #302c25;
+      }
+
+      #${MODAL_ID} .ta-stat-data-heading {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 9px;
+        color: #e7e1d7;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-stat-data-heading > span:last-child {
+        color: #918b82;
+        font-size: 10px;
+        font-weight: 700;
+        text-align: right;
+      }
+
+      #${MODAL_ID} .ta-stat-data-body {
+        display: grid;
+        gap: 8px;
+      }
+
+      #${MODAL_ID} .ta-stat-data-block.ta-stat-quality-warning {
+        box-shadow: inset 3px 0 0 #a66b43;
+        padding-left: 10px;
+      }
+
+      #${MODAL_ID} .ta-stat-energy-allocation .ta-category-list {
+        padding: 0;
+        border: 0;
+        background: transparent;
+      }
+
       @media(max-width:520px) {
         #${MODAL_ID} .ta-training-summary-header {
           align-items: stretch;
@@ -34941,6 +35295,21 @@
         #${MODAL_ID} .ta-stat-total-controls select {
           padding-right: 17px;
           font-size: 9px;
+        }
+
+        #${MODAL_ID} .ta-stats-view-nav button {
+          min-height: 38px;
+          padding-inline: 5px;
+        }
+
+        #${MODAL_ID} .ta-stat-data-heading {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        #${MODAL_ID} .ta-stat-data-heading > span:last-child {
+          text-align: left;
         }
       }
 
