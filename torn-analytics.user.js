@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.56
+// @version      2.18.57
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.56';
+  const VERSION = '2.18.57';
 
-  // v2.18.56 flattens Stats into persistent Overview, Charts, and Data views.
-  // Calculations, prediction math, log parsing, storage, synchronization,
-  // exports, API behavior, and v2.18.55 Army job-special handling are unchanged.
+  // v2.18.57 preserves the user-chosen launcher anchor across TornPDA viewport
+  // changes and keeps the long gym breakdown collapsed until requested.
+  // Analytics, storage, API behavior, and training calculations are unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -1006,9 +1006,11 @@
     button.dataset.movableReady = '1';
 
     const DRAG_THRESHOLD = 7;
+    const POSITION_SCHEMA_VERSION = 2;
 
     let pointerDown = false;
     let dragging = false;
+    let savedAnchor = null;
 
     let startX = 0;
     let startY = 0;
@@ -1107,7 +1109,7 @@
     function scheduleVisiblePosition(
       left,
       top,
-      persist = false
+      afterApply = null
     ) {
       const apply =
         () => {
@@ -1116,9 +1118,10 @@
               left,
               top
             ) &&
-            persist
+            typeof afterApply ===
+              'function'
           ) {
-            savePosition();
+            afterApply();
           }
         };
 
@@ -1134,16 +1137,135 @@
       }
     }
 
+    function launcherAnchorFromRect(
+      rect
+    ) {
+      const viewportWidth =
+        Number(window.innerWidth);
+      const viewportHeight =
+        Number(window.innerHeight);
+      const width =
+        Math.max(
+          0,
+          Number(rect?.width) ||
+            0
+        );
+      const height =
+        Math.max(
+          0,
+          Number(rect?.height) ||
+            0
+        );
+      const maxLeft =
+        Math.max(
+          0,
+          viewportWidth -
+            width
+        );
+      const maxTop =
+        Math.max(
+          0,
+          viewportHeight -
+            height
+        );
+
+      if (
+        !Number.isFinite(
+          viewportWidth
+        ) ||
+        viewportWidth <= 0 ||
+        !Number.isFinite(
+          viewportHeight
+        ) ||
+        viewportHeight <= 0
+      ) {
+        return null;
+      }
+
+      return {
+        schema_version:
+          POSITION_SCHEMA_VERSION,
+        x_ratio:
+          maxLeft > 0
+            ? clamp(
+                Number(rect?.left) /
+                  maxLeft,
+                0,
+                1
+              )
+            : 0.5,
+        y_ratio:
+          maxTop > 0
+            ? clamp(
+                Number(rect?.top) /
+                  maxTop,
+                0,
+                1
+              )
+            : 0
+      };
+    }
+
+    function applySavedAnchor() {
+      if (
+        !savedAnchor
+      ) {
+        return;
+      }
+
+      const rect =
+        button.getBoundingClientRect();
+      const maxLeft =
+        Math.max(
+          0,
+          Number(window.innerWidth) -
+            Math.max(
+              0,
+              Number(rect.width) ||
+                0
+            )
+        );
+      const maxTop =
+        Math.max(
+          0,
+          Number(window.innerHeight) -
+            Math.max(
+              0,
+              Number(rect.height) ||
+                0
+            )
+        );
+
+      scheduleVisiblePosition(
+        savedAnchor.x_ratio *
+          maxLeft,
+        savedAnchor.y_ratio *
+          maxTop
+      );
+    }
+
     function savePosition() {
       const rect =
         button.getBoundingClientRect();
+      const anchor =
+        launcherAnchorFromRect(
+          rect
+        );
+
+      if (
+        !anchor
+      ) {
+        return;
+      }
+
+      savedAnchor =
+        anchor;
 
       try {
         localStorage.setItem(
           storageKey,
           JSON.stringify({
-            left: rect.left,
-            top: rect.top
+            ...anchor
           })
         );
       } catch (error) {
@@ -1168,6 +1290,34 @@
         const saved =
           JSON.parse(raw);
 
+        const xRatio =
+          Number(saved?.x_ratio);
+        const yRatio =
+          Number(saved?.y_ratio);
+
+        if (
+          saved?.schema_version ===
+            POSITION_SCHEMA_VERSION &&
+          Number.isFinite(xRatio) &&
+          xRatio >= 0 &&
+          xRatio <= 1 &&
+          Number.isFinite(yRatio) &&
+          yRatio >= 0 &&
+          yRatio <= 1
+        ) {
+          savedAnchor = {
+            schema_version:
+              POSITION_SCHEMA_VERSION,
+            x_ratio:
+              xRatio,
+            y_ratio:
+              yRatio
+          };
+
+          applySavedAnchor();
+          return;
+        }
+
         const left =
           Number(saved?.left);
 
@@ -1181,7 +1331,7 @@
           scheduleVisiblePosition(
             left,
             top,
-            true
+            savePosition
           );
         } else {
           localStorage.removeItem(
@@ -1339,14 +1489,10 @@
 
     const keepButtonVisible =
       () => {
-        const rect =
-          button.getBoundingClientRect();
-
-        scheduleVisiblePosition(
-          rect.left,
-          rect.top,
-          true
-        );
+        // Reapply the last user-chosen proportional anchor after TornPDA
+        // settles a new viewport. Never persist transient rotation, resize,
+        // page-show, or WebView replacement coordinates.
+        applySavedAnchor();
       };
 
     for (
@@ -23246,15 +23392,15 @@
         .join('');
 
     return `
-      <section class="ta-stat-data-block">
-        <div class="ta-stat-data-heading">
+      <details class="ta-stat-data-block ta-stat-gym-breakdown">
+        <summary class="ta-stat-data-heading">
           Growth by gym
           <span>${gyms.length.toLocaleString()} gyms observed</span>
-        </div>
+        </summary>
         <div class="ta-stat-data-body">
           ${rows}
         </div>
-      </section>
+      </details>
     `;
   }
 
@@ -35214,6 +35360,32 @@
         font-size: 10px;
         font-weight: 700;
         text-align: right;
+      }
+
+      #${MODAL_ID} summary.ta-stat-data-heading {
+        cursor: pointer;
+        list-style: none;
+      }
+
+      #${MODAL_ID} summary.ta-stat-data-heading::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-stat-gym-breakdown > summary::after {
+        content: '›';
+        color: #a79d8a;
+        font-size: 18px;
+        line-height: 1;
+        transform: rotate(90deg);
+        transition: transform .15s ease;
+      }
+
+      #${MODAL_ID} .ta-stat-gym-breakdown[open] > summary::after {
+        transform: rotate(-90deg);
+      }
+
+      #${MODAL_ID} .ta-stat-gym-breakdown:not([open]) {
+        gap: 0;
       }
 
       #${MODAL_ID} .ta-stat-data-body {
