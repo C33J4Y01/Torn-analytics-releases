@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.57
+// @version      2.18.58
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.57';
+  const VERSION = '2.18.58';
 
-  // v2.18.57 preserves the user-chosen launcher anchor across TornPDA viewport
-  // changes and keeps the long gym breakdown collapsed until requested.
-  // Analytics, storage, API behavior, and training calculations are unchanged.
+  // v2.18.58 audits predictions chronologically, keeps gym and Happiness
+  // cohorts separate, and exposes the evidence behind every available range.
+  // Logging, stored history, API behavior, charts, and Army gains are unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -19076,14 +19076,43 @@
   function trainingReadinessModel(
     actions,
     stat,
-    gymId
+    gymId,
+    trainingContext = null
   ) {
+    const knownContexts = [
+      'happiness_boost_observed',
+      'no_happiness_boost_observed'
+    ];
+    const requestedContext = knownContexts.includes(trainingContext)
+      ? trainingContext
+      : null;
+    const sameStatAndGym = (actions || [])
+      .filter(action =>
+        action?.stat === stat &&
+        Number.isSafeInteger(Number(gymId)) &&
+        Number(gymId) > 0 &&
+        Number(action?.gym) === Number(gymId) &&
+        Number.isFinite(Number(action?.gain_per_energy)) &&
+        Number(action.gain_per_energy) > 0
+      );
+    const inferredContext = requestedContext ||
+      sameStatAndGym
+        .slice()
+        .sort((left, right) =>
+          Number(right.timestamp || 0) - Number(left.timestamp || 0)
+        )
+        .map(action => action?.training_context?.status)
+        .find(status => knownContexts.includes(status)) ||
+      null;
     const comparable = (actions || [])
       .filter(action =>
         action?.stat === stat &&
+        Number.isSafeInteger(Number(gymId)) &&
+        Number(gymId) > 0 &&
+        Number(action?.gym) === Number(gymId) &&
         (
-          gymId === null ||
-          Number(action?.gym) === Number(gymId)
+          inferredContext === null ||
+          action?.training_context?.status === inferredContext
         ) &&
         Number.isFinite(Number(action?.gain_per_energy)) &&
         Number(action.gain_per_energy) > 0
@@ -19102,20 +19131,45 @@
         rate: Number(action.gain_per_energy)
       }));
     const samples = rates.length;
+    const backtest = trainingReadinessBacktest(
+      actions,
+      stat,
+      gymId,
+      inferredContext
+    );
+    const typicalError = backtest.typical_error_percent;
+    const confidence = samples < 2
+      ? 'Insufficient'
+      : samples >= 8 &&
+          backtest.predictions >= 4 &&
+          Number.isFinite(typicalError) &&
+          typicalError <= 10
+        ? 'High'
+        : samples >= 4 &&
+            backtest.predictions >= 2 &&
+            Number.isFinite(typicalError) &&
+            typicalError <= 25
+          ? 'Medium'
+          : 'Low';
 
     return {
       stat,
       gym_id: gymId,
+      gym_source:
+        Number.isSafeInteger(Number(gymId)) && Number(gymId) > 0
+          ? 'last_observed'
+          : 'unknown',
+      training_context: inferredContext,
+      training_context_source: requestedContext
+        ? 'live_snapshot'
+        : inferredContext
+          ? 'last_observed'
+          : 'unknown',
       samples,
       observations,
-      confidence:
-        samples >= 8
-          ? 'High'
-          : samples >= 4
-            ? 'Medium'
-            : samples >= 2
-              ? 'Low'
-              : 'Insufficient',
+      confidence,
+      backtest_predictions: backtest.predictions,
+      typical_error_percent: typicalError,
       rate_low:
         samples >= 2
           ? trainingReadinessQuantile(rates, 0.25)
@@ -19128,6 +19182,64 @@
         samples >= 2
           ? trainingReadinessQuantile(rates, 0.75)
           : null
+    };
+  }
+
+  function trainingReadinessBacktest(
+    actions,
+    stat,
+    gymId,
+    trainingContext = null
+  ) {
+    const knownContexts = [
+      'happiness_boost_observed',
+      'no_happiness_boost_observed'
+    ];
+    const context = knownContexts.includes(trainingContext)
+      ? trainingContext
+      : null;
+    const comparable = (actions || [])
+      .filter(action =>
+        action?.stat === stat &&
+        Number.isSafeInteger(Number(gymId)) &&
+        Number(gymId) > 0 &&
+        Number(action?.gym) === Number(gymId) &&
+        (
+          context === null ||
+          action?.training_context?.status === context
+        ) &&
+        Number.isFinite(Number(action?.gain_per_energy)) &&
+        Number(action.gain_per_energy) > 0
+      )
+      .sort((left, right) =>
+        Number(left.timestamp || 0) - Number(right.timestamp || 0) ||
+        String(left.id || '').localeCompare(String(right.id || ''))
+      );
+    const errors = [];
+
+    for (let index = 2; index < comparable.length; index++) {
+      const priorRates = comparable
+        .slice(Math.max(0, index - 12), index)
+        .map(action => Number(action.gain_per_energy));
+      const predictedRate = trainingReadinessQuantile(priorRates, 0.5);
+      const actualRate = Number(comparable[index].gain_per_energy);
+
+      if (
+        Number.isFinite(predictedRate) &&
+        predictedRate > 0 &&
+        Number.isFinite(actualRate) &&
+        actualRate > 0
+      ) {
+        errors.push(Math.abs(predictedRate - actualRate) / actualRate * 100);
+      }
+    }
+
+    return {
+      predictions: errors.length,
+      errors_percent: errors,
+      typical_error_percent: errors.length
+        ? trainingReadinessQuantile(errors, 0.5)
+        : null
     };
   }
 
@@ -19186,10 +19298,22 @@
     const happinessMaximum = bars?.status === 'available'
       ? Number(bars?.happiness?.maximum)
       : null;
+    const targetTrainingContext =
+      Number.isFinite(happiness) &&
+      Number.isFinite(happinessMaximum)
+        ? happiness > happinessMaximum
+          ? 'happiness_boost_observed'
+          : 'no_happiness_boost_observed'
+        : null;
     const models = {};
 
     for (const stat of ['strength', 'defense', 'speed', 'dexterity']) {
-      models[stat] = trainingReadinessModel(actions, stat, gymId);
+      models[stat] = trainingReadinessModel(
+        actions,
+        stat,
+        gymId,
+        targetTrainingContext
+      );
     }
 
     return {
@@ -19256,12 +19380,77 @@
       };
     }
 
+    const typicalError =
+      model?.typical_error_percent !== null &&
+      model?.typical_error_percent !== undefined &&
+      model?.typical_error_percent !== '' &&
+      Number.isFinite(Number(model.typical_error_percent))
+        ? Number(model.typical_error_percent)
+        : null;
+
     return {
       energy,
       available: true,
-      low: Number(model.rate_low) * energy,
-      high: Number(model.rate_high) * energy
+      low: Math.min(
+        Number(model.rate_low) * energy,
+        typicalError !== null &&
+          Number.isFinite(Number(model.rate_mid))
+          ? Number(model.rate_mid) *
+              Math.max(0, 1 - typicalError / 100) *
+              energy
+          : Number(model.rate_low) * energy
+      ),
+      high: Math.max(
+        Number(model.rate_high) * energy,
+        typicalError !== null &&
+          Number.isFinite(Number(model.rate_mid))
+          ? Number(model.rate_mid) *
+              (1 + typicalError / 100) *
+              energy
+          : Number(model.rate_high) * energy
+      )
     };
+  }
+
+  function trainingReadinessEvidenceText(
+    model
+  ) {
+    const samples = Number(model?.samples || 0);
+    const error =
+      model?.typical_error_percent !== null &&
+      model?.typical_error_percent !== undefined &&
+      model?.typical_error_percent !== '' &&
+      Number.isFinite(Number(model.typical_error_percent))
+        ? Number(model.typical_error_percent)
+        : null;
+    const gymSource = model?.gym_source === 'last_observed'
+      ? 'last observed'
+      : model?.gym_source === 'confirmed'
+        ? 'confirmed'
+        : 'unknown';
+    const context = model?.training_context === 'happiness_boost_observed'
+      ? 'boosted Happiness'
+      : model?.training_context === 'no_happiness_boost_observed'
+        ? 'no Happiness boost observed'
+        : 'Happiness context unknown';
+    const parts = [
+      `${samples.toLocaleString()} matching ${samples === 1 ? 'session' : 'sessions'}`
+    ];
+
+    if (error !== null) {
+      parts.push(`typical historical error ±${statGrowthFormatNumber(error, 1)}%`);
+    } else {
+      parts.push('historical error pending');
+    }
+
+    parts.push(`${context}`);
+    parts.push(
+      model?.gym_source === 'unknown'
+        ? 'gym unknown'
+        : `${statGrowthGymName(model?.gym_id)} · ${gymSource}`
+    );
+
+    return parts.join(' · ');
   }
 
   function trainingReadinessStatLabel(
@@ -19414,6 +19603,13 @@
       planAdvice,
       advisorNow
     );
+    const optionNumber = value =>
+      value !== null &&
+      value !== undefined &&
+      value !== '' &&
+      Number.isFinite(Number(value))
+        ? Number(value)
+        : '';
 
     const options = ['strength', 'defense', 'speed', 'dexterity']
       .map(stat => {
@@ -19421,15 +19617,17 @@
         const encodedObservations = encodeURIComponent(
           JSON.stringify(model.observations || [])
         );
-        return `<option value="${stat}" ${stat === readiness.default_stat ? 'selected' : ''} data-samples="${Number(model.samples || 0)}" data-confidence="${escapeActivityHtml(model.confidence || 'Insufficient')}" data-rate-low="${Number.isFinite(Number(model.rate_low)) ? Number(model.rate_low) : ''}" data-rate-high="${Number.isFinite(Number(model.rate_high)) ? Number(model.rate_high) : ''}" data-observations="${encodedObservations}">${trainingReadinessStatLabel(stat)}</option>`;
+        return `<option value="${stat}" ${stat === readiness.default_stat ? 'selected' : ''} data-samples="${Number(model.samples || 0)}" data-confidence="${escapeActivityHtml(model.confidence || 'Insufficient')}" data-rate-low="${optionNumber(model.rate_low)}" data-rate-mid="${optionNumber(model.rate_mid)}" data-rate-high="${optionNumber(model.rate_high)}" data-typical-error-percent="${optionNumber(model.typical_error_percent)}" data-backtest-predictions="${Number(model.backtest_predictions || 0)}" data-gym-id="${optionNumber(model.gym_id)}" data-gym-source="${escapeActivityHtml(model.gym_source || 'unknown')}" data-training-context="${escapeActivityHtml(model.training_context || '')}" data-observations="${encodedObservations}">${trainingReadinessStatLabel(stat)}</option>`;
       })
       .join('');
 
     const projectionText = projection.available
       ? `Predicted ${trainingReadinessStatLabel(readiness.default_stat)} gain: ${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}`
-      : 'Not enough comparable training samples yet';
+      : defaultModel?.gym_source === 'unknown'
+        ? 'Prediction unavailable — gym unknown'
+        : 'Not enough matching training sessions yet';
     const sampleText =
-      `${Number(defaultModel?.samples || 0)} comparable samples · ${trainingReadinessConfidenceLabel(defaultModel?.confidence)}`;
+      `${trainingReadinessEvidenceText(defaultModel)} · ${trainingReadinessConfidenceLabel(defaultModel?.confidence)}`;
     const resetDuration = trainingReadinessFormatDuration(
       readiness.quarter_hour?.seconds_until
     );
@@ -19779,9 +19977,21 @@
         rate_low: option?.dataset?.rateLow
           ? Number(option.dataset.rateLow)
           : null,
+        rate_mid: option?.dataset?.rateMid
+          ? Number(option.dataset.rateMid)
+          : null,
         rate_high: option?.dataset?.rateHigh
           ? Number(option.dataset.rateHigh)
           : null,
+        typical_error_percent: option?.dataset?.typicalErrorPercent
+          ? Number(option.dataset.typicalErrorPercent)
+          : null,
+        backtest_predictions: Number(option?.dataset?.backtestPredictions || 0),
+        gym_id: option?.dataset?.gymId
+          ? Number(option.dataset.gymId)
+          : null,
+        gym_source: option?.dataset?.gymSource || 'unknown',
+        training_context: option?.dataset?.trainingContext || null,
         observations
       };
       const projection = trainingReadinessProjection(model, input?.value);
@@ -19789,11 +19999,13 @@
       if (output) {
         output.textContent = projection.available
           ? `Predicted ${trainingReadinessStatLabel(option?.value || 'strength')} gain: ${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}`
-          : 'Not enough comparable training samples yet';
+          : model.gym_source === 'unknown'
+            ? 'Prediction unavailable — gym unknown'
+            : 'Not enough matching training sessions yet';
       }
 
       if (samples) {
-        samples.textContent = `${model.samples} comparable samples · ${trainingReadinessConfidenceLabel(model.confidence)}`;
+        samples.textContent = `${trainingReadinessEvidenceText(model)} · ${trainingReadinessConfidenceLabel(model.confidence)}`;
       }
 
       if (history) {
@@ -24094,7 +24306,8 @@
   }
 
   function renderStatGrowthDataView(
-    growth
+    growth,
+    readiness = null
   ) {
     if (
       !growth
@@ -24107,6 +24320,7 @@
     }
 
     const sections = [
+      renderPredictionReliabilityData(readiness),
       renderStatGrowthEnergyAllocation(growth),
       renderStatGrowthGymBreakdown(growth),
       renderJobSpecialStrengthSummary(growth),
@@ -24118,6 +24332,41 @@
       <div class="ta-stats-data-list">
         ${sections.join('')}
       </div>
+    `;
+  }
+
+  function renderPredictionReliabilityData(
+    readiness
+  ) {
+    const stat = readiness?.default_stat || 'strength';
+    const model = readiness?.models?.[stat] || null;
+    const predictions = Number(model?.backtest_predictions || 0);
+    const error =
+      model?.typical_error_percent !== null &&
+      model?.typical_error_percent !== undefined &&
+      model?.typical_error_percent !== '' &&
+      Number.isFinite(Number(model.typical_error_percent))
+        ? Number(model.typical_error_percent)
+        : null;
+    const errorText = error !== null
+      ? `±${statGrowthFormatNumber(error, 1)}% typical error`
+      : 'Historical error pending';
+    const method = predictions > 0
+      ? `${predictions.toLocaleString()} chronological ${predictions === 1 ? 'prediction' : 'predictions'} checked without future-session lookahead.`
+      : 'At least three matching sessions are needed before historical error can be measured.';
+
+    return `
+      <section class="ta-stat-data-block" data-ta-prediction-reliability>
+        <div class="ta-stat-data-heading">
+          Prediction evidence
+          <span>${escapeActivityHtml(trainingReadinessStatLabel(stat))} · ${escapeActivityHtml(errorText)}</span>
+        </div>
+        <div class="ta-stat-data-body">
+          <div class="ta-stat-quality-line">${escapeActivityHtml(trainingReadinessEvidenceText(model))}</div>
+          <div class="ta-stat-quality-line">${escapeActivityHtml(method)}</div>
+          <div class="ta-stat-quality-line">Only matching stat, known gym, and observed Happiness context sessions are compared.</div>
+        </div>
+      </section>
     `;
   }
 
@@ -25820,7 +26069,13 @@
     const predictionText =
       projection?.available
         ? `${plannedEnergy.toLocaleString()}E ${trainingReadinessStatLabel(defaultStat)} estimate: ${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}`
-        : null;
+        : model?.gym_source === 'unknown'
+          ? 'Prediction unavailable — gym unknown'
+          : 'Prediction unavailable — not enough matching sessions';
+    const predictionEvidence =
+      model
+        ? trainingReadinessEvidenceText(model)
+        : '0 matching sessions · historical error pending · Happiness context unknown · gym unknown';
     const periodOptions = [
       ['7d', '1 week'],
       ['14d', '2 weeks'],
@@ -25919,9 +26174,7 @@
         </button>
 
         ${
-          predictionText
-            ? `<p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${Number(model?.samples || 0).toLocaleString()} comparable samples</p>`
-            : ''
+          `<p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${escapeActivityHtml(predictionEvidence)}</p>`
         }
 
       </section>
@@ -25988,7 +26241,8 @@
     ) {
       content =
         renderStatGrowthDataView(
-          growth
+          growth,
+          readiness
         );
     } else {
       content =
