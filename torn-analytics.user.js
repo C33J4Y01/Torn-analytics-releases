@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.60
+// @version      2.18.61
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,11 +22,10 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.60';
+  const VERSION = '2.18.61';
 
-  // v2.18.60 makes training plans guidance-first: Happy Jump receives a live
-  // preparation checklist and supply foundation, while Efficient training
-  // explains Energy preservation. Predictions and recaps remain secondary.
+  // v2.18.61 corrects zero-second cooldown readiness, tightens Happy Jump
+  // wording, and moves recap/prediction controls beside the results they affect.
   // Logging, stored history, API behavior, charts, and Army gains are unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -18566,8 +18565,12 @@
     return {
       status: 'available',
       fetched_at: safeFetchedAt,
-      drug_ready_at: Math.ceil(safeFetchedAt / 1000) + drug,
-      booster_ready_at: Math.ceil(safeFetchedAt / 1000) + booster
+      drug_ready_at: drug === 0
+        ? Math.floor(safeFetchedAt / 1000)
+        : Math.ceil(safeFetchedAt / 1000) + drug,
+      booster_ready_at: booster === 0
+        ? Math.floor(safeFetchedAt / 1000)
+        : Math.ceil(safeFetchedAt / 1000) + booster
     };
   }
 
@@ -18807,17 +18810,13 @@
 
     return `
       <div class="ta-training-guide ta-training-happy-guide" data-ta-training-guide>
-        <p class="ta-training-guide-purpose">
-          <strong>Prepare first; predict second.</strong>
-          Finish the stack and cooldowns before starting the timed Happiness boost.
-        </p>
         <ul class="ta-training-guide-list">
           ${statusRow('Energy stack', stackValue, stackState)}
           ${statusRow('Drug cooldown', drug.label, drug.state)}
           ${statusRow('Booster cooldown', booster.label, booster.state)}
           <li class="ta-training-guide-row ta-training-guide-waiting">
-            <span>Next TCT reset</span>
-            <b data-ta-training-jump-countdown>Begin just after reset · ${escapeActivityHtml(trainingReadinessFormatDuration(quarter.seconds_until))}</b>
+            <span>Begin just after reset</span>
+            <b data-ta-training-jump-countdown>Next TCT reset · ${escapeActivityHtml(trainingReadinessFormatDuration(quarter.seconds_until))}</b>
           </li>
         </ul>
         <div class="ta-training-jump-sequence">
@@ -18825,7 +18824,7 @@
           <ol>
             <li>Just after a TCT Happiness reset, use the planned Happiness boosters.</li>
             <li>Take Ecstasy to double current Happiness.</li>
-            <li>Train the stacked Energy before the next Happiness reset.</li>
+            <li>Train your stacked Energy before your Happiness resets.</li>
             <li>Optional: use the 30-point Energy refill and train again.</li>
           </ol>
         </div>
@@ -26338,6 +26337,20 @@
           `<option value="${value}" ${value === summary.stat ? 'selected' : ''}>${label}</option>`
       )
       .join('');
+    const predictionStatOptions = [
+      ['strength', 'Strength'],
+      ['defense', 'Defense'],
+      ['speed', 'Speed'],
+      ['dexterity', 'Dexterity']
+    ]
+      .map(
+        ([
+          value,
+          label
+        ]) =>
+          `<option value="${value}" ${value === selectedPredictionStat ? 'selected' : ''}>${label}</option>`
+      )
+      .join('');
     const planOptions = [
       [
         'efficient_training',
@@ -26372,18 +26385,6 @@
                 ${planOptions}
               </select>
             </label>
-            <label class="ta-training-summary-period">
-              <span>Period</span>
-              <select data-ta-training-summary-range aria-label="Training summary period">
-                ${periodOptions}
-              </select>
-            </label>
-            <label class="ta-training-summary-period">
-              <span>Stats</span>
-              <select data-ta-training-summary-stat aria-label="Training summary stat">
-                ${statOptions}
-              </select>
-            </label>
           </div>
         </div>
 
@@ -26405,6 +26406,20 @@
             <span>Training recap</span>
             <b>${escapeActivityHtml(summary.period_label)}</b>
           </summary>
+          <div class="ta-training-support-controls">
+            <label class="ta-training-summary-period">
+              <span>Period</span>
+              <select data-ta-training-summary-range aria-label="Training summary period">
+                ${periodOptions}
+              </select>
+            </label>
+            <label class="ta-training-summary-period">
+              <span>Stats</span>
+              <select data-ta-training-summary-stat aria-label="Training summary stat">
+                ${statOptions}
+              </select>
+            </label>
+          </div>
           <button
             type="button"
             class="ta-training-recap"
@@ -26424,6 +26439,14 @@
             <span>Estimated gain</span>
             <b>${projection?.available ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}` : 'Not enough evidence'}</b>
           </summary>
+          <div class="ta-training-support-controls ta-training-prediction-controls">
+            <label class="ta-training-summary-period">
+              <span>Stat</span>
+              <select data-ta-training-prediction-stat aria-label="Prediction stat">
+                ${predictionStatOptions}
+              </select>
+            </label>
+          </div>
           <p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${escapeActivityHtml(predictionEvidence)}<small class="ta-training-summary-prediction-context">${escapeActivityHtml(predictionContextText)}</small></p>
         </details>
 
@@ -26666,7 +26689,7 @@
               );
 
             countdown.textContent =
-              `Begin just after reset · ${trainingReadinessFormatDuration(quarter.seconds_until)}`;
+              `Next TCT reset · ${trainingReadinessFormatDuration(quarter.seconds_until)}`;
 
             root.__taTrainingJumpCountdownTimer =
               setTimeout(
@@ -26735,6 +26758,10 @@
         const statSelect =
           root?.querySelector?.(
             '[data-ta-training-summary-stat]'
+          );
+        const predictionStatSelect =
+          root?.querySelector?.(
+            '[data-ta-training-prediction-stat]'
           );
         const recap =
           root?.querySelector?.(
@@ -26894,6 +26921,30 @@
             const summaryStat =
               statGrowthCompactSummaryStat(
                 statSelect.value
+              );
+
+            root.__taTrainingSummaryStat =
+              summaryStat;
+
+            writeStatGrowthPreferences({
+              training_summary_stat:
+                summaryStat
+            });
+
+            refreshCompactSummary(
+              rangeSelect?.value ||
+              root.__taStatGrowthRange,
+              summaryStat
+            );
+          }
+        );
+
+        predictionStatSelect?.addEventListener(
+          'change',
+          () => {
+            const summaryStat =
+              statGrowthCompactSummaryStat(
+                predictionStatSelect.value
               );
 
             root.__taTrainingSummaryStat =
@@ -35734,6 +35785,18 @@
         padding: 0 10px;
       }
 
+      #${MODAL_ID} .ta-training-support-controls {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 10px;
+        border-top: 1px solid #303030;
+      }
+
+      #${MODAL_ID} .ta-training-prediction-controls {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
       #${MODAL_ID} .ta-training-support-section > .ta-training-recap,
       #${MODAL_ID} .ta-training-support-section > .ta-training-summary-prediction {
         border-top: 1px solid #303030;
@@ -36159,6 +36222,10 @@
 
         #${MODAL_ID} .ta-training-summary-selectors {
           flex-direction: column;
+        }
+
+        #${MODAL_ID} .ta-training-support-controls {
+          grid-template-columns: minmax(0, 1fr);
         }
 
         #${MODAL_ID} .ta-training-summary-period select {
