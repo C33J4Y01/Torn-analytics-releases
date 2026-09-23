@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.58
+// @version      2.18.59
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,10 +22,10 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.58';
+  const VERSION = '2.18.59';
 
-  // v2.18.58 audits predictions chronologically, keeps gym and Happiness
-  // cohorts separate, and exposes the evidence behind every available range.
+  // v2.18.59 makes predictions plan-aware so Happy Jump guidance can never
+  // reuse no-boost evidence while the player is still preparing the jump.
   // Logging, stored history, API behavior, charts, and Army gains are unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -19243,6 +19243,33 @@
     };
   }
 
+  function trainingReadinessPredictionContext(
+    planValue
+  ) {
+    return trainingReadinessPlan(planValue) === 'happy_jump'
+      ? 'happiness_boost_observed'
+      : 'no_happiness_boost_observed';
+  }
+
+  function trainingReadinessPredictionModel(
+    readiness,
+    stat,
+    planValue
+  ) {
+    const context = trainingReadinessPredictionContext(planValue);
+    const direct = readiness?.models_by_context?.[context]?.[stat];
+
+    if (direct) {
+      return direct;
+    }
+
+    const legacy = readiness?.models?.[stat];
+
+    return legacy?.training_context === context
+      ? legacy
+      : null;
+  }
+
   function buildTrainingReadiness(
     growth,
     bars,
@@ -19306,6 +19333,10 @@
           : 'no_happiness_boost_observed'
         : null;
     const models = {};
+    const modelsByContext = {
+      happiness_boost_observed: {},
+      no_happiness_boost_observed: {}
+    };
 
     for (const stat of ['strength', 'defense', 'speed', 'dexterity']) {
       models[stat] = trainingReadinessModel(
@@ -19314,6 +19345,18 @@
         gymId,
         targetTrainingContext
       );
+
+      for (const context of [
+        'happiness_boost_observed',
+        'no_happiness_boost_observed'
+      ]) {
+        modelsByContext[context][stat] = trainingReadinessModel(
+          actions,
+          stat,
+          gymId,
+          context
+        );
+      }
     }
 
     return {
@@ -19353,7 +19396,8 @@
           ? Number(cooldowns.booster_ready_at)
           : null,
       quarter_hour: trainingReadinessQuarterHour(nowMs),
-      models
+      models,
+      models_by_context: modelsByContext
     };
   }
 
@@ -24307,7 +24351,9 @@
 
   function renderStatGrowthDataView(
     growth,
-    readiness = null
+    readiness = null,
+    planValue = null,
+    statValue = null
   ) {
     if (
       !growth
@@ -24320,7 +24366,7 @@
     }
 
     const sections = [
-      renderPredictionReliabilityData(readiness),
+      renderPredictionReliabilityData(readiness, planValue, statValue),
       renderStatGrowthEnergyAllocation(growth),
       renderStatGrowthGymBreakdown(growth),
       renderJobSpecialStrengthSummary(growth),
@@ -24336,10 +24382,18 @@
   }
 
   function renderPredictionReliabilityData(
-    readiness
+    readiness,
+    planValue = null,
+    statValue = null
   ) {
-    const stat = readiness?.default_stat || 'strength';
-    const model = readiness?.models?.[stat] || null;
+    const plan = trainingReadinessPlan(
+      planValue || readTrainingReadinessPlan()
+    );
+    const requestedStat = statGrowthCompactSummaryStat(statValue);
+    const stat = ['strength', 'defense', 'speed', 'dexterity'].includes(requestedStat)
+      ? requestedStat
+      : readiness?.default_stat || 'strength';
+    const model = trainingReadinessPredictionModel(readiness, stat, plan);
     const predictions = Number(model?.backtest_predictions || 0);
     const error =
       model?.typical_error_percent !== null &&
@@ -24359,7 +24413,7 @@
       <section class="ta-stat-data-block" data-ta-prediction-reliability>
         <div class="ta-stat-data-heading">
           Prediction evidence
-          <span>${escapeActivityHtml(trainingReadinessStatLabel(stat))} · ${escapeActivityHtml(errorText)}</span>
+          <span>${escapeActivityHtml(trainingReadinessStatLabel(stat))} · ${plan === 'happy_jump' ? 'Happy Jump' : 'Efficient'} · ${escapeActivityHtml(errorText)}</span>
         </div>
         <div class="ta-stat-data-body">
           <div class="ta-stat-quality-line">${escapeActivityHtml(trainingReadinessEvidenceText(model))}</div>
@@ -26033,14 +26087,17 @@
             plan
           )
         : null;
-    const defaultStat =
-      readiness?.default_stat ||
-      null;
+    const selectedPredictionStat =
+      ['strength', 'defense', 'speed', 'dexterity'].includes(summary.stat)
+        ? summary.stat
+        : readiness?.default_stat || null;
     const model =
-      defaultStat
-        ? readiness?.models?.[
-            defaultStat
-          ]
+      selectedPredictionStat
+        ? trainingReadinessPredictionModel(
+            readiness,
+            selectedPredictionStat,
+            plan
+          )
         : null;
     const plannedEnergy =
       Number.isFinite(
@@ -26068,7 +26125,7 @@
           );
     const predictionText =
       projection?.available
-        ? `${plannedEnergy.toLocaleString()}E ${trainingReadinessStatLabel(defaultStat)} estimate: ${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}`
+        ? `${plannedEnergy.toLocaleString()}E ${trainingReadinessStatLabel(selectedPredictionStat)} estimate: ${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}`
         : model?.gym_source === 'unknown'
           ? 'Prediction unavailable — gym unknown'
           : 'Prediction unavailable — not enough matching sessions';
@@ -26076,6 +26133,17 @@
       model
         ? trainingReadinessEvidenceText(model)
         : '0 matching sessions · historical error pending · Happiness context unknown · gym unknown';
+    const currentHappinessState =
+      readiness?.happiness === null ||
+      readiness?.happiness === undefined
+        ? 'current Happiness unavailable'
+        : readiness?.over_happiness
+          ? 'boost detected now'
+          : 'boost not detected yet';
+    const predictionContextText =
+      plan === 'happy_jump'
+        ? `Planned context: boosted Happiness · Now: ${currentHappinessState}`
+        : 'Planned context: no Happiness boost observed';
     const periodOptions = [
       ['7d', '1 week'],
       ['14d', '2 weeks'],
@@ -26174,7 +26242,7 @@
         </button>
 
         ${
-          `<p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${escapeActivityHtml(predictionEvidence)}</p>`
+          `<p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${escapeActivityHtml(predictionEvidence)}<small class="ta-training-summary-prediction-context">${escapeActivityHtml(predictionContextText)}</small></p>`
         }
 
       </section>
@@ -26242,7 +26310,9 @@
       content =
         renderStatGrowthDataView(
           growth,
-          readiness
+          readiness,
+          options.plan,
+          options.summary_stat
         );
     } else {
       content =
@@ -35249,6 +35319,13 @@
         flex-wrap: wrap;
         align-items: baseline;
         gap: 5px;
+      }
+
+      #${MODAL_ID} .ta-training-summary-prediction-context {
+        flex: 1 0 100%;
+        color: #aaa;
+        font-size: 12px;
+        line-height: 1.35;
       }
 
       #${MODAL_ID} .ta-training-summary-meta {
