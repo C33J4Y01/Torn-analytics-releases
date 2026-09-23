@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.59
+// @version      2.18.60
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,10 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.59';
+  const VERSION = '2.18.60';
 
-  // v2.18.59 makes predictions plan-aware so Happy Jump guidance can never
-  // reuse no-boost evidence while the player is still preparing the jump.
+  // v2.18.60 makes training plans guidance-first: Happy Jump receives a live
+  // preparation checklist and supply foundation, while Efficient training
+  // explains Energy preservation. Predictions and recaps remain secondary.
   // Logging, stored history, API behavior, charts, and Army gains are unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -18666,6 +18667,178 @@
     return plan;
   }
 
+  function trainingReadinessHappyJumpSupplies() {
+    return [
+      {
+        item: 'Xanax',
+        quantity: 4,
+        optional: false,
+        inventory_status: 'unknown'
+      },
+      {
+        item: 'Erotic DVD',
+        quantity: 5,
+        optional: false,
+        inventory_status: 'unknown',
+        note: 'Standard setup; job and faction perks can change the best amount.'
+      },
+      {
+        item: 'Ecstasy',
+        quantity: 1,
+        optional: false,
+        inventory_status: 'unknown'
+      },
+      {
+        item: 'Points',
+        quantity: 30,
+        optional: true,
+        inventory_status: 'unknown',
+        note: 'Optional daily Energy refill; Points are not an inventory item.'
+      }
+    ];
+  }
+
+  function trainingReadinessCooldownLabel(
+    readyAtValue,
+    nowSeconds = Math.floor(Date.now() / 1000)
+  ) {
+    const readyAt = Number(readyAtValue);
+    const now = Number.isFinite(Number(nowSeconds))
+      ? Math.floor(Number(nowSeconds))
+      : Math.floor(Date.now() / 1000);
+
+    if (!Number.isSafeInteger(readyAt) || readyAt <= 0) {
+      return {
+        state: 'unknown',
+        label: 'Unavailable'
+      };
+    }
+
+    if (readyAt <= now) {
+      return {
+        state: 'complete',
+        label: 'Ready'
+      };
+    }
+
+    return {
+      state: 'waiting',
+      label: `Ready in ${trainingReadinessFormatDuration(readyAt - now)}`
+    };
+  }
+
+  function renderTrainingReadinessGuide(
+    readiness,
+    planValue,
+    advice,
+    nowSeconds = Math.floor(Date.now() / 1000)
+  ) {
+    const plan = trainingReadinessPlan(planValue);
+    const now = Number.isFinite(Number(nowSeconds))
+      ? Math.floor(Number(nowSeconds))
+      : Math.floor(Date.now() / 1000);
+    const finiteValue = value =>
+      value !== null &&
+      value !== undefined &&
+      value !== '' &&
+      Number.isFinite(Number(value))
+        ? Number(value)
+        : null;
+    const energy = finiteValue(readiness?.energy);
+    const energyMaximum = finiteValue(readiness?.energy_maximum);
+    const drug = trainingReadinessCooldownLabel(
+      readiness?.drug_ready_at,
+      now
+    );
+    const booster = trainingReadinessCooldownLabel(
+      readiness?.booster_ready_at,
+      now
+    );
+    const statusRow = (label, value, state = 'waiting') => `
+      <li class="ta-training-guide-row ta-training-guide-${escapeActivityHtml(state)}">
+        <span>${escapeActivityHtml(label)}</span>
+        <b>${escapeActivityHtml(value)}</b>
+      </li>
+    `;
+
+    if (plan !== 'happy_jump') {
+      const energyState = energy === null
+        ? 'Live Energy unavailable'
+        : energyMaximum !== null && energy >= energyMaximum
+          ? 'At maximum — train now'
+          : energy > 0
+            ? `${energy.toLocaleString()}E available`
+            : '0E — ready for Xanax or refill';
+
+      return `
+        <div class="ta-training-guide ta-training-efficient-guide" data-ta-training-guide>
+          <p class="ta-training-guide-purpose">
+            <strong>Keep your Energy moving.</strong>
+            Natural Energy stops regenerating at its normal maximum. Train regularly so it does not sit full.
+          </p>
+          <ul class="ta-training-guide-list">
+            ${statusRow('Natural Energy', energyState, energyMaximum !== null && energy !== null && energy >= energyMaximum ? 'action' : 'complete')}
+            ${statusRow('Before Xanax', 'Train to 0E first so an overdose cannot erase saved Energy.', drug.state)}
+            ${statusRow('Before daily refill', 'Train to 0E so the refill restores the full bar.', 'waiting')}
+          </ul>
+          <p class="ta-training-guide-note">If your current gym leaves a small unusable remainder, train as low as that gym allows.</p>
+        </div>
+      `;
+    }
+
+    const stackValue = energy === null
+      ? 'Unavailable'
+      : `${Math.min(energy, 1000).toLocaleString()} / 1,000E${energy >= 1000 ? ' — Complete' : ''}`;
+    const stackState = energy !== null && energy >= 1000
+      ? 'complete'
+      : energy === null
+        ? 'unknown'
+        : 'waiting';
+    const quarter = trainingReadinessQuarterHour(now * 1000);
+    const supplyRows = trainingReadinessHappyJumpSupplies()
+      .map(supply => `
+        <li>
+          <span>${escapeActivityHtml(`${supply.item} ×${supply.quantity}${supply.optional ? ' · optional' : ''}`)}</span>
+          <b>Count unknown</b>
+          ${supply.note ? `<small>${escapeActivityHtml(supply.note)}</small>` : ''}
+        </li>
+      `)
+      .join('');
+
+    return `
+      <div class="ta-training-guide ta-training-happy-guide" data-ta-training-guide>
+        <p class="ta-training-guide-purpose">
+          <strong>Prepare first; predict second.</strong>
+          Finish the stack and cooldowns before starting the timed Happiness boost.
+        </p>
+        <ul class="ta-training-guide-list">
+          ${statusRow('Energy stack', stackValue, stackState)}
+          ${statusRow('Drug cooldown', drug.label, drug.state)}
+          ${statusRow('Booster cooldown', booster.label, booster.state)}
+          <li class="ta-training-guide-row ta-training-guide-waiting">
+            <span>Next TCT reset</span>
+            <b data-ta-training-jump-countdown>Begin just after reset · ${escapeActivityHtml(trainingReadinessFormatDuration(quarter.seconds_until))}</b>
+          </li>
+        </ul>
+        <div class="ta-training-jump-sequence">
+          <strong>Jump sequence</strong>
+          <ol>
+            <li>Just after a TCT Happiness reset, use the planned Happiness boosters.</li>
+            <li>Take Ecstasy to double current Happiness.</li>
+            <li>Train the stacked Energy before the next Happiness reset.</li>
+            <li>Optional: use the 30-point Energy refill and train again.</li>
+          </ol>
+        </div>
+        <details class="ta-training-supplies">
+          <summary><span>Jump supplies</span><b>Inventory counts unknown</b></summary>
+          <ul>${supplyRows}</ul>
+          <p>Inventory tracking is not connected yet. Torn Analytics will not guess what you own, use items, or make purchases.</p>
+        </details>
+        <p class="ta-training-guide-note">Xanax and Ecstasy can overdose and erase saved Energy. This assistant is read-only guidance, not a safety guarantee.</p>
+      </div>
+    `;
+  }
+
   function trainingReadinessPlanAdvice(
     readiness,
     planValue,
@@ -18699,12 +18872,6 @@
     };
     const boosterState = cooldownState(readiness?.booster_ready_at);
     const drugState = cooldownState(readiness?.drug_ready_at);
-    const candySuggestion =
-      happiness !== null &&
-      happinessMaximum !== null &&
-      happiness < happinessMaximum &&
-      boosterState === 'ready';
-
     if (energy === null) {
       return {
         plan,
@@ -18851,28 +19018,16 @@
       if (energy > 0) {
         return {
           plan,
-          title: 'Train to 0E first',
-          detail: 'Starting at 0E avoids risking saved Energy to an overdose and prevents wasting any natural Energy.',
+          title: 'Protect your Energy before Xanax',
+          detail: 'Train existing Energy to 0E before taking Xanax. If it overdoses, Torn empties the bar; starting at 0E prevents losing saved Energy and keeps natural regeneration moving.',
           tone: 'wait'
         };
       }
 
-      const happinessAfterXanax =
-        happiness === null
-          ? null
-          : happiness + 75;
-      const needsCandyAfterXanax =
-        happinessAfterXanax !== null &&
-        happinessMaximum !== null &&
-        happinessAfterXanax < happinessMaximum &&
-        boosterState === 'ready';
-
       return {
         plan,
         title: 'Take a Xanax, then train promptly',
-        detail: needsCandyAfterXanax
-          ? 'After Xanax: If you have candy, consider eating some to train at your natural maximum Happiness.'
-          : 'Train promptly after taking it so natural Energy regeneration can resume.',
+        detail: 'Train the Xanax Energy promptly so natural Energy regeneration can resume.',
         tone: 'ready'
       };
     }
@@ -18881,12 +19036,12 @@
       if (energy > 0) {
         return {
           plan,
-          title: 'Train available Energy',
-          detail: candySuggestion
-            ? 'If you have candy, consider eating some to train at your natural maximum Happiness.'
-            : energyMaximum !== null && energy >= energyMaximum
-              ? 'Train now so natural Energy can start regenerating again while the Xanax cooldown clears.'
-              : 'Keep natural Energy regenerating while the Xanax cooldown clears.',
+          title: energyMaximum !== null && energy >= energyMaximum
+            ? 'Train now — Energy is at maximum'
+            : 'Train available Energy',
+          detail: energyMaximum !== null && energy >= energyMaximum
+            ? 'Natural Energy cannot regenerate while the bar is full. Train now while the Xanax cooldown clears.'
+            : 'Use Energy before it reaches maximum so natural regeneration does not stop while the Xanax cooldown clears.',
           tone: 'ready'
         };
       }
@@ -18903,9 +19058,7 @@
       return {
         plan,
         title: 'Train available Energy',
-        detail: candySuggestion
-          ? 'If you have candy, consider eating some to train at your natural maximum Happiness.'
-          : 'Drug cooldown is unavailable; refresh live cooldowns before planning the next Xanax.',
+        detail: 'Use Energy before it reaches maximum. Refresh live cooldowns before planning the next Xanax.',
         tone: 'info'
       };
     }
@@ -19785,6 +19938,7 @@
               <strong data-ta-training-plan-title>${escapeActivityHtml(planAdvice.title)}</strong>
               <small data-ta-training-plan-detail>${escapeActivityHtml(planAdvice.detail)}</small>
             </div>
+            ${renderTrainingReadinessGuide(readiness, trainingPlan, planAdvice, advisorNow)}
             <details class="ta-training-advisor-explanation">
               <summary>
                 <span>Why this advice</span>
@@ -19924,6 +20078,17 @@
 
       if (planDetail) {
         planDetail.textContent = advice.detail;
+      }
+
+      const planGuide = section.querySelector('[data-ta-training-guide]');
+
+      if (planGuide) {
+        planGuide.outerHTML = renderTrainingReadinessGuide(
+          readiness,
+          advice.plan,
+          advice,
+          now
+        );
       }
 
       if (advisorAction) {
@@ -26228,22 +26393,39 @@
             : ''
         }
 
-        <button
-          type="button"
-          class="ta-training-recap"
-          data-ta-training-recap
-          data-ta-training-recap-text="${escapeActivityHtml(statGrowthTrainingRecapSentence(summary))}"
-          data-ta-copy-state="idle"
-          aria-label="Prepare training recap copy"
-        >
-          <span>Training recap</span>
-          <b>${escapeActivityHtml(statGrowthTrainingRecapSentence(summary))}</b>
-          <small data-ta-training-recap-copy-label aria-live="polite"></small>
-        </button>
+        ${renderTrainingReadinessGuide(
+          readiness,
+          plan,
+          advice,
+          Math.floor(Date.now() / 1000)
+        )}
 
-        ${
-          `<p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${escapeActivityHtml(predictionEvidence)}<small class="ta-training-summary-prediction-context">${escapeActivityHtml(predictionContextText)}</small></p>`
-        }
+        <details class="ta-training-support-section">
+          <summary>
+            <span>Training recap</span>
+            <b>${escapeActivityHtml(summary.period_label)}</b>
+          </summary>
+          <button
+            type="button"
+            class="ta-training-recap"
+            data-ta-training-recap
+            data-ta-training-recap-text="${escapeActivityHtml(statGrowthTrainingRecapSentence(summary))}"
+            data-ta-copy-state="idle"
+            aria-label="Prepare training recap copy"
+          >
+            <span>Shareable recap</span>
+            <b>${escapeActivityHtml(statGrowthTrainingRecapSentence(summary))}</b>
+            <small data-ta-training-recap-copy-label aria-live="polite"></small>
+          </button>
+        </details>
+
+        <details class="ta-training-support-section">
+          <summary>
+            <span>Estimated gain</span>
+            <b>${projection?.available ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}` : 'Not enough evidence'}</b>
+          </summary>
+          <p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${escapeActivityHtml(predictionEvidence)}<small class="ta-training-summary-prediction-context">${escapeActivityHtml(predictionContextText)}</small></p>
+        </details>
 
       </section>
     `;
@@ -26457,6 +26639,45 @@
           .stats_workspace_view
       );
 
+    const refreshJumpCountdown =
+      () => {
+        clearTimeout(
+          root.__taTrainingJumpCountdownTimer
+        );
+
+        const countdown =
+          root?.querySelector?.(
+            '[data-ta-training-jump-countdown]'
+          );
+
+        if (!countdown) {
+          return;
+        }
+
+        const update =
+          () => {
+            if (!countdown.isConnected) {
+              return;
+            }
+
+            const quarter =
+              trainingReadinessQuarterHour(
+                Date.now()
+              );
+
+            countdown.textContent =
+              `Begin just after reset · ${trainingReadinessFormatDuration(quarter.seconds_until)}`;
+
+            root.__taTrainingJumpCountdownTimer =
+              setTimeout(
+                update,
+                1000 - (Date.now() % 1000) + 20
+              );
+          };
+
+        update();
+      };
+
     const refreshCompactSummary =
       (
         rangeValue,
@@ -26498,6 +26719,7 @@
           );
 
         bindCompactSummary();
+        refreshJumpCountdown();
       };
 
     const bindCompactSummary =
@@ -26708,6 +26930,7 @@
       };
 
     bindCompactSummary();
+    refreshJumpCountdown();
 
     const viewButtons =
       Array.from(
@@ -26800,6 +27023,7 @@
         }
 
         bindCompactSummary();
+        refreshJumpCountdown();
         bindStatGrowthDashboardInteractions(
           root,
           root.__taTrainingGrowth
@@ -33024,6 +33248,164 @@
         opacity: .74;
       }
 
+      #${MODAL_ID} .ta-training-guide {
+        display: grid;
+        gap: 9px;
+        padding: 10px;
+        border-top: 1px solid #40341f;
+        background: rgba(0, 0, 0, .12);
+      }
+
+      #${MODAL_ID} .ta-training-guide-purpose,
+      #${MODAL_ID} .ta-training-guide-note,
+      #${MODAL_ID} .ta-training-supplies p {
+        margin: 0;
+        color: #d9d9d9;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      #${MODAL_ID} .ta-training-guide-purpose strong {
+        display: block;
+        margin-bottom: 2px;
+        color: #f1f1f1;
+        font-size: 13px;
+      }
+
+      #${MODAL_ID} .ta-training-guide-list,
+      #${MODAL_ID} .ta-training-supplies ul,
+      #${MODAL_ID} .ta-training-jump-sequence ol {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      #${MODAL_ID} .ta-training-guide-row {
+        display: grid;
+        grid-template-columns: minmax(96px, .7fr) minmax(0, 1.3fr);
+        gap: 8px;
+        padding: 7px 0;
+        border-top: 1px solid rgba(255, 255, 255, .07);
+      }
+
+      #${MODAL_ID} .ta-training-guide-row > span,
+      #${MODAL_ID} .ta-training-supplies li > span {
+        color: #aaa;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      #${MODAL_ID} .ta-training-guide-row > b,
+      #${MODAL_ID} .ta-training-supplies li > b {
+        color: #e5e5e5;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.4;
+      }
+
+      #${MODAL_ID} .ta-training-guide-complete > b {
+        color: #83c99c;
+      }
+
+      #${MODAL_ID} .ta-training-guide-action > b {
+        color: #e4bb68;
+      }
+
+      #${MODAL_ID} .ta-training-guide-unknown > b {
+        color: #9bbbd0;
+      }
+
+      #${MODAL_ID} .ta-training-jump-sequence {
+        padding: 9px;
+        border: 1px solid rgba(200, 155, 69, .32);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, .18);
+      }
+
+      #${MODAL_ID} .ta-training-jump-sequence > strong {
+        display: block;
+        margin-bottom: 6px;
+        color: #e6c681;
+        font-size: 11px;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-training-jump-sequence ol {
+        display: grid;
+        gap: 5px;
+        counter-reset: ta-jump-step;
+      }
+
+      #${MODAL_ID} .ta-training-jump-sequence li {
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr);
+        gap: 6px;
+        color: #ddd;
+        font-size: 12px;
+        line-height: 1.4;
+        counter-increment: ta-jump-step;
+      }
+
+      #${MODAL_ID} .ta-training-jump-sequence li::before {
+        content: counter(ta-jump-step);
+        color: #c9aa6a;
+        font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-training-supplies {
+        border-top: 1px solid rgba(255, 255, 255, .08);
+      }
+
+      #${MODAL_ID} .ta-training-supplies > summary,
+      #${MODAL_ID} .ta-training-support-section > summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 42px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      #${MODAL_ID} .ta-training-supplies > summary::-webkit-details-marker,
+      #${MODAL_ID} .ta-training-support-section > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-training-supplies > summary > span,
+      #${MODAL_ID} .ta-training-support-section > summary > span {
+        color: #e5e5e5;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-training-supplies > summary > b,
+      #${MODAL_ID} .ta-training-support-section > summary > b {
+        color: #aaa;
+        font-size: 10px;
+        text-align: right;
+      }
+
+      #${MODAL_ID} .ta-training-supplies ul {
+        padding-bottom: 7px;
+      }
+
+      #${MODAL_ID} .ta-training-supplies li {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 3px 8px;
+        padding: 6px 0;
+        border-top: 1px solid rgba(255, 255, 255, .06);
+      }
+
+      #${MODAL_ID} .ta-training-supplies li > small {
+        grid-column: 1 / -1;
+        color: #999;
+        font-size: 10px;
+        line-height: 1.35;
+      }
+
       #${MODAL_ID} .ta-training-advisor-explanation {
         border-top: 1px solid #40341f;
       }
@@ -35332,6 +35714,34 @@
         color: #9d9d9d;
         font-size: 12px;
         line-height: 1.35;
+      }
+
+      #${MODAL_ID} .ta-training-compact-summary > .ta-training-guide {
+        margin: 0 -12px;
+        padding: 11px 12px;
+        border-top: 1px solid #3d3424;
+        border-bottom: 1px solid #3d3424;
+      }
+
+      #${MODAL_ID} .ta-training-support-section {
+        border: 1px solid #333;
+        border-radius: 9px;
+        background: #121212;
+      }
+
+      #${MODAL_ID} .ta-training-support-section > summary {
+        min-height: 44px;
+        padding: 0 10px;
+      }
+
+      #${MODAL_ID} .ta-training-support-section > .ta-training-recap,
+      #${MODAL_ID} .ta-training-support-section > .ta-training-summary-prediction {
+        border-top: 1px solid #303030;
+        border-radius: 0 0 9px 9px;
+      }
+
+      #${MODAL_ID} .ta-training-support-section > .ta-training-summary-prediction {
+        padding: 10px;
       }
 
       #${MODAL_ID} .ta-training-recap {
