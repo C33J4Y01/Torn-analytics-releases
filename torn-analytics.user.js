@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.61
+// @version      2.18.62
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.61';
+  const VERSION = '2.18.62';
 
-  // v2.18.61 corrects zero-second cooldown readiness, tightens Happy Jump
-  // wording, and moves recap/prediction controls beside the results they affect.
-  // Logging, stored history, API behavior, charts, and Army gains are unchanged.
+  // v2.18.62 preserves recap and prediction drawer state and modal scroll
+  // position when their period or stat selectors refresh the Overview.
+  // Calculations, logging, storage, API behavior, charts, and Army gains are unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -26401,7 +26401,10 @@
           Math.floor(Date.now() / 1000)
         )}
 
-        <details class="ta-training-support-section">
+        <details
+          class="ta-training-support-section"
+          data-ta-training-support-section="recap"
+        >
           <summary>
             <span>Training recap</span>
             <b>${escapeActivityHtml(summary.period_label)}</b>
@@ -26434,7 +26437,10 @@
           </button>
         </details>
 
-        <details class="ta-training-support-section">
+        <details
+          class="ta-training-support-section"
+          data-ta-training-support-section="prediction"
+        >
           <summary>
             <span>Estimated gain</span>
             <b>${projection?.available ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}` : 'Not enough evidence'}</b>
@@ -26642,6 +26648,52 @@
     `;
   }
 
+  function trainingSupportOpenSections(
+    summary
+  ) {
+    return Array.from(
+      summary?.querySelectorAll?.(
+        '[data-ta-training-support-section][open]'
+      ) ||
+      []
+    )
+      .map(section =>
+        section.getAttribute?.(
+          'data-ta-training-support-section'
+        ) ||
+        ''
+      )
+      .filter(Boolean);
+  }
+
+  function restoreTrainingSupportOpenSections(
+    summary,
+    openSections = []
+  ) {
+    const openSet =
+      new Set(
+        Array.isArray(openSections)
+          ? openSections
+          : []
+      );
+
+    for (
+      const section
+      of summary?.querySelectorAll?.(
+        '[data-ta-training-support-section]'
+      ) ||
+      []
+    ) {
+      section.open =
+        openSet.has(
+          section.getAttribute?.(
+            'data-ta-training-support-section'
+          ) ||
+          ''
+        );
+    }
+  }
+
   function bindTrainingWorkspaceInteractions(
     root,
     readiness = null,
@@ -26732,6 +26784,26 @@
         root.__taTrainingSummaryStat =
           summaryStat;
 
+        const openSupportSections =
+          trainingSupportOpenSections(
+            current
+          );
+        const scrollContainer =
+          current.closest?.(
+            '.ta-modal-scroll'
+          ) ||
+          null;
+        const scrollTop =
+          Number.isFinite(
+            Number(
+              scrollContainer?.scrollTop
+            )
+          )
+            ? Number(
+                scrollContainer.scrollTop
+              )
+            : null;
+
         current.outerHTML =
           renderTrainingCompactSummary(
             root.__taTrainingReadiness,
@@ -26740,6 +26812,24 @@
             readTrainingReadinessPlan(),
             summaryStat
           );
+
+        const nextSummary =
+          root?.querySelector?.(
+            '[data-ta-training-summary]'
+          );
+
+        restoreTrainingSupportOpenSections(
+          nextSummary,
+          openSupportSections
+        );
+
+        if (
+          scrollContainer &&
+          scrollTop !== null
+        ) {
+          scrollContainer.scrollTop =
+            scrollTop;
+        }
 
         bindCompactSummary();
         refreshJumpCountdown();
