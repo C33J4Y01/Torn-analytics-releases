@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.63
+// @version      2.18.64
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,12 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.63';
+  const VERSION = '2.18.64';
 
-  // v2.18.63 rejects Happiness checkpoints superseded by later boosters,
-  // groups same-window training and point-refill sessions into one observed
-  // Happy Jump, and shows completed-jump guidance and recap evidence.
-  // Exporting, synchronization, storage, weekly totals, and predictions are unchanged.
+  // v2.18.64 reconstructs exact Happy Jump starting Happiness from observed
+  // Ecstasy gain and gym-use logs, corroborated by a later API checkpoint.
+  // API traffic, storage, synchronization, exports, totals, and predictions are unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -16885,7 +16884,19 @@
       log_id:
         logId,
       timestamp,
-      source
+      source,
+      happiness_increased:
+        (() => {
+          const value =
+            statGrowthFiniteNumber(
+              log?.data?.happy_increased
+            );
+
+          return value !== null &&
+            value >= 0
+              ? value
+              : null;
+        })()
     };
   }
 
@@ -17377,7 +17388,19 @@
           source_log_id:
             Number(event.log_id),
           source_event_id:
-            String(event.id || '')
+            String(event.id || ''),
+          happiness_increased:
+            (() => {
+              const value =
+                statGrowthFiniteNumber(
+                  event.happiness_increased
+                );
+
+              return value !== null &&
+                value >= 0
+                  ? value
+                  : null;
+            })()
         });
       }
 
@@ -17428,6 +17451,7 @@
       );
     const observedAt =
       Number(
+        snapshot?.observation_started_at ??
         snapshot?.observed_at ??
         snapshot?.captured_at
       );
@@ -17523,6 +17547,471 @@
       boosts_after_snapshot:
         boostsAfterSnapshot
     };
+  }
+
+  function statGrowthTrustedHappinessSnapshot(
+    action
+  ) {
+    const snapshot =
+      action?.live_snapshot;
+    const status =
+      String(
+        snapshot?.status ||
+        ''
+      );
+    const happiness =
+      statGrowthFiniteNumber(
+        snapshot?.happiness_before
+      );
+    const maximum =
+      statGrowthFiniteNumber(
+        snapshot?.happiness_maximum
+      );
+
+    if (
+      ![
+        'exact_live_snapshot',
+        'recent_live_snapshot',
+        'armed_api_snapshot',
+        'pretrain_api_checkpoint'
+      ].includes(
+        status
+      ) ||
+      happiness === null ||
+      happiness < 0 ||
+      maximum === null ||
+      maximum <= 0
+    ) {
+      return null;
+    }
+
+    return {
+      status,
+      happiness_before:
+        happiness,
+      happiness_maximum:
+        maximum
+    };
+  }
+
+  function statGrowthResolveHappyJumpHappiness(
+    actions,
+    event
+  ) {
+    const actionIds =
+      new Set(
+        Array.isArray(
+          event?.action_ids
+        )
+          ? event.action_ids.map(
+              String
+            )
+          : []
+      );
+    const eventActions =
+      (
+        Array.isArray(
+          actions
+        )
+          ? actions
+          : []
+      )
+        .filter(
+          action =>
+            actionIds.has(
+              String(
+                action?.id ||
+                ''
+              )
+            )
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            Number(
+              left?.timestamp ||
+              0
+            ) -
+              Number(
+                right?.timestamp ||
+                0
+              ) ||
+            String(
+              left?.id ||
+              ''
+            ).localeCompare(
+              String(
+                right?.id ||
+                ''
+              )
+            )
+        );
+
+    if (
+      !eventActions.length
+    ) {
+      return null;
+    }
+
+    const boostMap =
+      new Map();
+
+    for (
+      const action
+      of eventActions
+    ) {
+      const actionTimestamp =
+        Number(
+          action?.timestamp
+        );
+
+      for (
+        const boost
+        of Array.isArray(
+          action?.training_context?.boosts
+        )
+          ? action.training_context.boosts
+          : []
+      ) {
+        const secondsBefore =
+          statGrowthFiniteNumber(
+            boost?.seconds_before
+          );
+        const boostTimestamp =
+          Number.isSafeInteger(
+            actionTimestamp
+          ) &&
+          secondsBefore !== null &&
+          secondsBefore >= 0
+            ? actionTimestamp -
+              secondsBefore
+            : null;
+        const sourceEventId =
+          String(
+            boost?.source_event_id ||
+            ''
+          );
+        const key =
+          sourceEventId ||
+          `${boost?.source_log_id || ''}:${boostTimestamp}`;
+
+        if (
+          !key ||
+          !Number.isSafeInteger(
+            boostTimestamp
+          )
+        ) {
+          continue;
+        }
+
+        const happinessIncreased =
+          statGrowthFiniteNumber(
+            boost?.happiness_increased
+          );
+
+        boostMap.set(
+          key,
+          {
+            source_event_id:
+              sourceEventId,
+            source_log_id:
+              Number(
+                boost?.source_log_id
+              ),
+            source:
+              String(
+                boost?.source ||
+                ''
+              ),
+            timestamp:
+              boostTimestamp,
+            happiness_increased:
+              happinessIncreased !== null &&
+              happinessIncreased >= 0
+                ? happinessIncreased
+                : null
+          }
+        );
+      }
+    }
+
+    const boosts =
+      Array.from(
+        boostMap.values()
+      )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            left.timestamp -
+              right.timestamp ||
+            String(
+              left.source_event_id
+            ).localeCompare(
+              String(
+                right.source_event_id
+              )
+            )
+        );
+    const ecstasy =
+      boosts.find(
+        boost =>
+          Number(
+            boost.source_log_id
+          ) === 2210 &&
+          (
+            !event?.ecstasy_event_id ||
+            boost.source_event_id ===
+              String(
+                event.ecstasy_event_id
+              )
+          )
+      ) ||
+      boosts.find(
+        boost =>
+          Number(
+            boost.source_log_id
+          ) === 2210
+      );
+    const ecstasyGain =
+      statGrowthFiniteNumber(
+        ecstasy?.happiness_increased
+      );
+
+    if (
+      !ecstasy ||
+      ecstasyGain === null ||
+      ecstasyGain <= 0
+    ) {
+      return null;
+    }
+
+    const firstTimestamp =
+      Number(
+        eventActions[0]?.timestamp
+      );
+    let happiness =
+      ecstasyGain * 2;
+
+    for (
+      const boost
+      of boosts
+    ) {
+      if (
+        boost.timestamp <=
+          ecstasy.timestamp ||
+        boost.timestamp >
+          firstTimestamp
+      ) {
+        continue;
+      }
+
+      if (
+        boost.happiness_increased ===
+          null
+      ) {
+        return null;
+      }
+
+      happiness +=
+        boost.happiness_increased;
+    }
+
+    const rows =
+      [];
+    let previousTimestamp =
+      firstTimestamp;
+
+    for (
+      let index = 0;
+      index < eventActions.length;
+      index++
+    ) {
+      const action =
+        eventActions[index];
+      const actionTimestamp =
+        Number(
+          action?.timestamp
+        );
+
+      if (
+        index > 0
+      ) {
+        for (
+          const boost
+          of boosts
+        ) {
+          if (
+            boost.timestamp <=
+              previousTimestamp ||
+            boost.timestamp >
+              actionTimestamp
+          ) {
+            continue;
+          }
+
+          if (
+            boost.happiness_increased ===
+              null
+          ) {
+            return null;
+          }
+
+          happiness +=
+            boost.happiness_increased;
+        }
+      }
+
+      const snapshot =
+        statGrowthTrustedHappinessSnapshot(
+          action
+        );
+      const snapshotMatches =
+        Boolean(
+          snapshot &&
+          statGrowthNearlyEqual(
+            snapshot.happiness_before,
+            happiness
+          )
+        );
+
+      rows.push({
+        action,
+        happiness_before:
+          happiness,
+        snapshot,
+        snapshot_matches:
+          snapshotMatches
+      });
+
+      const happyUsed =
+        statGrowthOptionalNonNegativeInteger(
+          action?.happy_used
+        );
+
+      if (
+        happyUsed === null
+      ) {
+        if (
+          index <
+          eventActions.length - 1
+        ) {
+          return null;
+        }
+      } else {
+        happiness -=
+          happyUsed;
+
+        if (
+          happiness < 0
+        ) {
+          return null;
+        }
+      }
+
+      previousTimestamp =
+        actionTimestamp;
+    }
+
+    const corroboratingRow =
+      rows.find(
+        row =>
+          row.snapshot_matches
+      ) ||
+      null;
+    const maximum =
+      rows
+        .map(
+          row =>
+            row.snapshot?.happiness_maximum
+        )
+        .find(
+          value =>
+            Number.isFinite(
+              Number(
+                value
+              )
+            ) &&
+            Number(value) > 0
+        ) ||
+      null;
+
+    if (
+      !corroboratingRow
+    ) {
+      return null;
+    }
+
+    for (
+      const row
+      of rows
+    ) {
+      const snapshotHappiness =
+        row.snapshot?.happiness_before;
+      const superseded =
+        row.snapshot &&
+        !row.snapshot_matches;
+
+      row.action.resolved_happiness = {
+        status:
+          row.snapshot_matches
+            ? 'exact_checkpoint_confirmed'
+            : 'reconstructed_from_exact_logs',
+        happiness_before:
+          row.happiness_before,
+        happiness_maximum:
+          row.snapshot?.happiness_maximum ||
+          maximum,
+        ecstasy_happiness_increased:
+          ecstasyGain,
+        ecstasy_event_id:
+          ecstasy.source_event_id,
+        corroborating_action_id:
+          String(
+            corroboratingRow.action?.id ||
+            ''
+          ),
+        corroborating_happiness:
+          corroboratingRow.snapshot?.happiness_before,
+        superseded_snapshot_happiness:
+          superseded
+            ? snapshotHappiness
+            : null,
+        source:
+          'ecstasy_and_training_log_chain'
+      };
+
+      if (
+        superseded
+      ) {
+        row.action.snapshot_freshness = {
+          ...row.action.snapshot_freshness,
+          status:
+            'superseded_by_exact_log_chain'
+        };
+      }
+    }
+
+    event.happiness_evidence = {
+      status:
+        'exact_log_chain_confirmed',
+      ecstasy_happiness_increased:
+        ecstasyGain,
+      first_happiness_before:
+        rows[0].happiness_before,
+      corroborating_action_id:
+        String(
+          corroboratingRow.action?.id ||
+          ''
+        ),
+      corroborating_happiness:
+        corroboratingRow.snapshot?.happiness_before
+    };
+
+    return event.happiness_evidence;
   }
 
   function statGrowthHappyJumpEventKey(
@@ -17841,6 +18330,16 @@
       const event
       of events
     ) {
+      if (
+        typeof statGrowthResolveHappyJumpHappiness ===
+          'function'
+      ) {
+        statGrowthResolveHappyJumpHappiness(
+          actions,
+          event
+        );
+      }
+
       for (
         const actionId
         of event.action_ids
@@ -22278,7 +22777,8 @@
 
   function statGrowthSessionLiveSnapshot(
     snapshot,
-    freshness = null
+    freshness = null,
+    resolvedHappiness = null
   ) {
     const status =
       String(
@@ -22341,7 +22841,45 @@
 
     const staleAfterBoosters =
       freshness?.status ===
-        'stale_after_boosters';
+        'stale_after_boosters' ||
+      freshness?.status ===
+        'superseded_by_exact_log_chain';
+    const resolvedValue =
+      Number(
+        resolvedHappiness?.happiness_before
+      );
+    const resolvedMaximum =
+      Number(
+        resolvedHappiness?.happiness_maximum ??
+        snapshot?.happiness_maximum
+      );
+    const snapshotValue =
+      Number(
+        snapshot?.happiness_before
+      );
+    const reconstructed =
+      resolvedHappiness?.status ===
+        'reconstructed_from_exact_logs' &&
+      Number.isFinite(
+        resolvedValue
+      ) &&
+      Number.isFinite(
+        resolvedMaximum
+      ) &&
+      Math.abs(
+        resolvedValue -
+        snapshotValue
+      ) >
+        1e-8 *
+        Math.max(
+          1,
+          Math.abs(
+            resolvedValue
+          ),
+          Math.abs(
+            snapshotValue
+          )
+        );
     const laterBoosters =
       staleAfterBoosters
         ? statGrowthTrainingContextBoosters({
@@ -22373,7 +22911,9 @@
     return {
       status,
       confidence:
-        staleAfterBoosters
+        reconstructed
+          ? 'Reconstructed from exact Torn logs'
+          : staleAfterBoosters
           ? 'Partial — Happiness outdated'
           : exact
           ? 'Exact live snapshot'
@@ -22388,26 +22928,40 @@
         ).toLocaleString() +
         'E',
       happiness:
-        Number(
-          snapshot.happiness_before
+        (
+          reconstructed
+            ? resolvedValue
+            : Number(
+                snapshot.happiness_before
+              )
         ).toLocaleString() +
         ' / ' +
-        Number(
-          snapshot.happiness_maximum
+        (
+          reconstructed
+            ? resolvedMaximum
+            : Number(
+                snapshot.happiness_maximum
+              )
         ).toLocaleString() +
         (
-          staleAfterBoosters
+          staleAfterBoosters &&
+          !reconstructed
             ? ' · earlier'
             : ''
         ),
       happiness_label:
-        staleAfterBoosters
+        reconstructed
+          ? 'Happiness before'
+          : staleAfterBoosters
           ? 'Earlier Happiness checkpoint'
           : 'Happiness before',
       happiness_reliable:
+        reconstructed ||
         !staleAfterBoosters,
       note:
-        staleAfterBoosters
+        reconstructed
+          ? `Exact Torn logs show Ecstasy gained ${Number(resolvedHappiness.ecstasy_happiness_increased || 0).toLocaleString()} Happiness, establishing ${resolvedValue.toLocaleString()} before this train. The later ${Number(resolvedHappiness.corroborating_happiness || 0).toLocaleString()} checkpoint confirms the chain after recorded Happiness use. The earlier ${snapshotValue.toLocaleString()} API checkpoint was captured mid-stack.`
+          : staleAfterBoosters
           ? `Happiness boosters were logged at or after this checkpoint: ${laterBoosters.join(', ') || 'additional Happiness boosters'}. Its Energy remains observed, but its Happiness is not the final pre-train value.`
           : exact
           ? 'Live Happiness and Energy were captured immediately before this training action.'
@@ -22454,7 +23008,14 @@
         ? action.happy_jump_event
         : null;
     const liveSnapshot =
-      (() => {
+      typeof statGrowthSessionLiveSnapshot ===
+        'function'
+        ? statGrowthSessionLiveSnapshot(
+            action?.live_snapshot,
+            action?.snapshot_freshness,
+            action?.resolved_happiness
+          )
+        : (() => {
         const snapshot =
           action?.live_snapshot;
         const status =
@@ -22596,7 +23157,7 @@
                 ? 'A read-only Torn API snapshot was armed on the active Gym tab before this training action.'
                 : 'A very recent live Happiness and Energy checkpoint was used because the Gym-page bars were not ready at the training action.'
         };
-      })();
+          })();
     const rawEnergySourceStatus =
       String(
         action?.energy_source_evidence?.status ||
@@ -31993,6 +32554,16 @@
               1000
             ),
           observed_at:
+            Math.floor(
+              burst.checkpoint.received_at /
+              1000
+            ),
+          observation_started_at:
+            Math.floor(
+              burst.checkpoint.requested_at /
+              1000
+            ),
+          observation_completed_at:
             Math.floor(
               burst.checkpoint.received_at /
               1000
