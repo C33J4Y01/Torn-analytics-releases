@@ -5,14 +5,14 @@ on:
     paths:
       - torn-analytics.user.js
       - torn-analytics.meta.js
-      - .github/workflows/validate-release.yml
+      - .github/workflows/**
   push:
     branches:
       - main
     paths:
       - torn-analytics.user.js
       - torn-analytics.meta.js
-      - .github/workflows/validate-release.yml
+      - .github/workflows/**
 
 permissions:
   contents: read
