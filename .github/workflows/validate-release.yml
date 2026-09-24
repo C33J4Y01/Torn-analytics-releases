@@ -1,15 +1,17 @@
-name: Validate stable userscript
+name: Validate stable release artifacts
 
 on:
   pull_request:
     paths:
       - torn-analytics.user.js
+      - torn-analytics.meta.js
       - .github/workflows/validate-release.yml
   push:
     branches:
       - main
     paths:
       - torn-analytics.user.js
+      - torn-analytics.meta.js
       - .github/workflows/validate-release.yml
 
 permissions:
@@ -23,22 +25,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Check JavaScript syntax
-        run: node --check torn-analytics.user.js
-      - name: Check stable release metadata
+      - name: Check release artifact syntax
+        run: |
+          node --check torn-analytics.user.js
+          node --check torn-analytics.meta.js
+      - name: Check stable release contract
         run: |
           node <<'NODE'
           const fs = require('node:fs');
           const assert = require('node:assert/strict');
           const source = fs.readFileSync('torn-analytics.user.js', 'utf8');
-          const stable = 'https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js';
-          assert.match(source, /^\/\/ @version\s+\d+\.\d+\.\d+$/m);
-          assert.ok(source.includes('// @updateURL    ' + stable));
-          assert.ok(source.includes('// @downloadURL  ' + stable));
+          const metadata = fs.readFileSync('torn-analytics.meta.js', 'utf8');
+          const stableUser = 'https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js';
+          const stableMeta = 'https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js';
+          const header = source.match(/^\/\/ ==UserScript==\n[\s\S]*?^\/\/ ==\/UserScript==\n/mu)?.[0];
+          const sourceVersion = source.match(/^\/\/ @version\s+(\S+)$/mu)?.[1];
+          const metadataVersion = metadata.match(/^\/\/ @version\s+(\S+)$/mu)?.[1];
+
+          assert.match(sourceVersion ?? '', /^\d+\.\d+\.\d+$/u);
+          assert.equal(metadataVersion, sourceVersion);
+          assert.equal(metadata, header);
+          assert.ok(source.includes('// @updateURL    ' + stableMeta));
+          assert.ok(source.includes('// @downloadURL  ' + stableUser));
           assert.ok(source.includes("'###PDA-APIKEY###'"));
           assert.ok(!source.includes('-----BEGIN PRIVATE KEY-----'));
-          assert.ok(!/gh[pousr]_[A-Za-z0-9_]{20,}/.test(source));
-          console.log('Stable metadata and basic secret checks passed.');
+          assert.ok(!/gh[pousr]_[A-Za-z0-9_]{20,}/u.test(source));
+          console.log('Stable artifact parity, metadata, and basic secret checks passed.');
           NODE
-      - name: Record release checksum
-        run: sha256sum torn-analytics.user.js
+      - name: Record release checksums
+        run: sha256sum torn-analytics.user.js torn-analytics.meta.js

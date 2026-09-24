@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.65
+// @version      2.18.66
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
-// @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
+// @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
 // @downloadURL  https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
 // @match        https://www.torn.com/*
 // @match        https://torn.com/*
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.65';
+  const VERSION = '2.18.66';
 
-  // v2.18.65 moves chart filters and the range summary above the graph,
-  // compacts the legend and selected-session surface, and combines evidence
-  // under one details drawer. Analytics and data contracts are unchanged.
+  // v2.18.66 gives update checks a generated header-only metadata artifact.
+  // The full userscript remains the install target and runtime behavior is
+  // unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
