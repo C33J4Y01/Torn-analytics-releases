@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.62
+// @version      2.18.63
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,11 +22,12 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.62';
+  const VERSION = '2.18.63';
 
-  // v2.18.62 preserves recap and prediction drawer state and modal scroll
-  // position when their period or stat selectors refresh the Overview.
-  // Calculations, logging, storage, API behavior, charts, and Army gains are unchanged.
+  // v2.18.63 rejects Happiness checkpoints superseded by later boosters,
+  // groups same-window training and point-refill sessions into one observed
+  // Happy Jump, and shows completed-jump guidance and recap evidence.
+  // Exporting, synchronization, storage, weekly totals, and predictions are unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -17413,6 +17414,481 @@
     };
   }
 
+  function statGrowthSnapshotFreshness(
+    action
+  ) {
+    const snapshot =
+      action?.live_snapshot;
+    const context =
+      action?.training_context;
+    const status =
+      String(
+        snapshot?.status ||
+        ''
+      );
+    const observedAt =
+      Number(
+        snapshot?.observed_at ??
+        snapshot?.captured_at
+      );
+
+    if (
+      ![
+        'exact_live_snapshot',
+        'recent_live_snapshot',
+        'armed_api_snapshot',
+        'pretrain_api_checkpoint'
+      ].includes(
+        status
+      ) ||
+      !Number.isSafeInteger(
+        observedAt
+      ) ||
+      observedAt <= 0
+    ) {
+      return {
+        status:
+          'unavailable',
+        boosts_after_snapshot: []
+      };
+    }
+
+    const actionTimestamp =
+      Number(
+        action?.timestamp
+      );
+    const boostsAfterSnapshot =
+      (
+        Array.isArray(
+          context?.boosts
+        )
+          ? context.boosts
+          : []
+      )
+        .map(
+          boost => ({
+            ...boost,
+            timestamp:
+              Number.isSafeInteger(
+                actionTimestamp
+              ) &&
+              Number.isFinite(
+                Number(
+                  boost?.seconds_before
+                )
+              )
+                ? actionTimestamp -
+                  Math.max(
+                    0,
+                    Number(
+                      boost.seconds_before
+                    )
+                  )
+                : null
+          })
+        )
+        .filter(
+          boost =>
+            Number.isSafeInteger(
+              boost.timestamp
+            ) &&
+            boost.timestamp >=
+              observedAt
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            left.timestamp -
+              right.timestamp ||
+            String(
+              left.source_event_id ||
+              ''
+            ).localeCompare(
+              String(
+                right.source_event_id ||
+                ''
+              )
+            )
+        );
+
+    return {
+      status:
+        boostsAfterSnapshot.length
+          ? 'stale_after_boosters'
+          : 'current_for_observed_boosters',
+      observed_at:
+        observedAt,
+      boosts_after_snapshot:
+        boostsAfterSnapshot
+    };
+  }
+
+  function statGrowthHappyJumpEventKey(
+    action
+  ) {
+    const timestamp =
+      Number(
+        action?.timestamp
+      );
+    const boosts =
+      Array.isArray(
+        action?.training_context?.boosts
+      )
+        ? action.training_context.boosts
+        : [];
+    const ecstasy =
+      boosts
+        .filter(
+          boost =>
+            Number(
+              boost?.source_log_id
+            ) === 2210 ||
+            String(
+              boost?.source ||
+              ''
+            ).toLowerCase() ===
+              'ecstasy'
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            Number(
+              left?.seconds_before ||
+              0
+            ) -
+            Number(
+              right?.seconds_before ||
+              0
+            )
+        )[0];
+
+    if (
+      !Number.isSafeInteger(
+        timestamp
+      ) ||
+      timestamp <= 0 ||
+      !ecstasy
+    ) {
+      return null;
+    }
+
+    const secondsBefore =
+      Math.max(
+        0,
+        Number(
+          ecstasy.seconds_before
+        ) ||
+        0
+      );
+    const eventTimestamp =
+      timestamp -
+      secondsBefore;
+    const quarter =
+      Math.floor(
+        eventTimestamp /
+        (15 * 60)
+      );
+    const eventId =
+      String(
+        ecstasy.source_event_id ||
+        ''
+      );
+
+    return {
+      key:
+        `${eventId || eventTimestamp}|${quarter}`,
+      ecstasy_timestamp:
+        eventTimestamp,
+      ecstasy_event_id:
+        eventId,
+      quarter
+    };
+  }
+
+  function statGrowthHappyJumpEvents(
+    actions
+  ) {
+    const grouped =
+      new Map();
+
+    for (
+      const action
+      of Array.isArray(
+        actions
+      )
+        ? actions
+        : []
+    ) {
+      const identity =
+        statGrowthHappyJumpEventKey(
+          action
+        );
+
+      if (
+        !identity ||
+        Math.floor(
+          Number(
+            action?.timestamp
+          ) /
+          (15 * 60)
+        ) !==
+          identity.quarter
+      ) {
+        continue;
+      }
+
+      const event =
+        grouped.get(
+          identity.key
+        ) || {
+          id:
+            identity.key,
+          status:
+            'observed_completed',
+          ecstasy_timestamp:
+            identity.ecstasy_timestamp,
+          ecstasy_event_id:
+            identity.ecstasy_event_id,
+          first_timestamp:
+            Number(
+              action.timestamp
+            ),
+          last_timestamp:
+            Number(
+              action.timestamp
+            ),
+          action_ids: [],
+          sessions: 0,
+          trains: 0,
+          energy_used: 0,
+          gain: 0,
+          stats: {},
+          booster_event_ids:
+            new Set(),
+          booster_count: 0,
+          point_refill_observed:
+            false
+        };
+
+      event.first_timestamp =
+        Math.min(
+          event.first_timestamp,
+          Number(
+            action.timestamp
+          )
+        );
+      event.last_timestamp =
+        Math.max(
+          event.last_timestamp,
+          Number(
+            action.timestamp
+          )
+        );
+      event.action_ids.push(
+        String(
+          action?.id ||
+          ''
+        )
+      );
+      event.sessions++;
+      event.trains +=
+        Number(
+          action?.trains ||
+          0
+        );
+      event.energy_used +=
+        Number(
+          action?.energy_used ||
+          0
+        );
+      event.gain +=
+        Number(
+          action?.stat_increased ||
+          0
+        );
+      event.point_refill_observed =
+        event.point_refill_observed ||
+        [
+          'point_refill_observed',
+          'mixed_sources_observed'
+        ].includes(
+          String(
+            action?.energy_source_evidence?.status ||
+            ''
+          )
+        );
+
+      const stat =
+        String(
+          action?.stat ||
+          ''
+        );
+
+      if (
+        stat
+      ) {
+        const statRow =
+          event.stats[stat] || {
+            stat,
+            label:
+              String(
+                action?.stat_label ||
+                stat
+              ),
+            sessions: 0,
+            trains: 0,
+            energy_used: 0,
+            gain: 0
+          };
+
+        statRow.sessions++;
+        statRow.trains +=
+          Number(
+            action?.trains ||
+            0
+          );
+        statRow.energy_used +=
+          Number(
+            action?.energy_used ||
+            0
+          );
+        statRow.gain +=
+          Number(
+            action?.stat_increased ||
+            0
+          );
+        event.stats[stat] =
+          statRow;
+      }
+
+      for (
+        const boost
+        of Array.isArray(
+          action?.training_context?.boosts
+        )
+          ? action.training_context.boosts
+          : []
+      ) {
+        const boostId =
+          String(
+            boost?.source_event_id ||
+            `${boost?.source_log_id || ''}:${Number(action.timestamp) - Number(boost?.seconds_before || 0)}`
+          );
+
+        if (
+          boostId
+        ) {
+          event.booster_event_ids.add(
+            boostId
+          );
+        }
+      }
+
+      grouped.set(
+        identity.key,
+        event
+      );
+    }
+
+    const events =
+      Array.from(
+        grouped.values()
+      )
+        .map(
+          event => ({
+            ...event,
+            booster_count:
+              event.booster_event_ids.size,
+            booster_event_ids:
+              Array.from(
+                event.booster_event_ids
+              ),
+            stats:
+              Object.values(
+                event.stats
+              )
+          })
+        )
+        .filter(
+          event =>
+            event.energy_used >= 750 &&
+            event.booster_count >= 2
+        )
+        .sort(
+          (
+            left,
+            right
+          ) =>
+            left.first_timestamp -
+              right.first_timestamp ||
+            String(
+              left.id
+            ).localeCompare(
+              String(
+                right.id
+              )
+            )
+        );
+
+    const byActionId =
+      new Map();
+
+    for (
+      const event
+      of events
+    ) {
+      for (
+        const actionId
+        of event.action_ids
+      ) {
+        byActionId.set(
+          actionId,
+          event
+        );
+      }
+    }
+
+    for (
+      const action
+      of Array.isArray(
+        actions
+      )
+        ? actions
+        : []
+    ) {
+      action.happy_jump_event =
+        byActionId.get(
+          String(
+            action?.id ||
+            ''
+          )
+        ) ||
+        null;
+    }
+
+    return events;
+  }
+
+  function statGrowthLatestHappyJumpEvent(
+    growth
+  ) {
+    const events =
+      Array.isArray(
+        growth?.happy_jump_events
+      )
+        ? growth.happy_jump_events
+        : [];
+
+    return events[
+      events.length - 1
+    ] ||
+      null;
+  }
+
   function statGrowthBlankStat(
     stat,
     label
@@ -18183,9 +18659,28 @@
           historyFirstTimestamp,
           previousTrainingTimestamp
         );
+      action.snapshot_freshness =
+        typeof statGrowthSnapshotFreshness ===
+          'function'
+          ? statGrowthSnapshotFreshness(
+              action
+            )
+          : {
+              status:
+                'unavailable',
+              boosts_after_snapshot: []
+            };
       previousTrainingTimestamp =
         action.timestamp;
     }
+
+    const happyJumpEvents =
+      typeof statGrowthHappyJumpEvents ===
+        'function'
+        ? statGrowthHappyJumpEvents(
+            actions
+          )
+        : [];
 
     const stats =
       statGrowthBlankStatTotals();
@@ -18462,6 +18957,8 @@
         actions.length,
       training_actions:
         actions,
+      happy_jump_events:
+        happyJumpEvents,
       training_context_window_seconds:
         15 * 60,
       energy_source_lookback_seconds:
@@ -18764,6 +19261,33 @@
       </li>
     `;
 
+    if (
+      plan === 'happy_jump' &&
+      advice?.phase ===
+        'completed' &&
+      advice?.happy_jump_event
+    ) {
+      const event =
+        advice.happy_jump_event;
+      const remainingEnergy =
+        energy !== null &&
+        energy > 0
+          ? `${energy.toLocaleString()}E currently available. Continue normal training when convenient.`
+          : 'No remaining Energy is waiting to be trained.';
+
+      return `
+        <div class="ta-training-guide ta-training-happy-guide ta-training-happy-complete" data-ta-training-guide data-ta-happy-jump-complete>
+          <ul class="ta-training-guide-list">
+            ${statusRow('Jump result', `+${statGrowthFormatNumber(event.gain, 2)} total stats`, 'complete')}
+            ${statusRow('Energy trained', `${Number(event.energy_used || 0).toLocaleString()}E · ${Number(event.trains || 0).toLocaleString()} trains`, 'complete')}
+            ${statusRow('Drug cooldown', drug.label, drug.state)}
+            ${statusRow('Booster cooldown', booster.label, booster.state)}
+          </ul>
+          <p class="ta-training-guide-note">${escapeActivityHtml(remainingEnergy)}</p>
+        </div>
+      `;
+    }
+
     if (plan !== 'happy_jump') {
       const energyState = energy === null
         ? 'Live Energy unavailable'
@@ -18841,7 +19365,8 @@
   function trainingReadinessPlanAdvice(
     readiness,
     planValue,
-    nowSeconds = Math.floor(Date.now() / 1000)
+    nowSeconds = Math.floor(Date.now() / 1000),
+    growth = null
   ) {
     const plan = trainingReadinessPlan(planValue);
     const now = Number.isFinite(Number(nowSeconds))
@@ -18881,6 +19406,49 @@
     }
 
     if (plan === 'happy_jump') {
+      const completedJump =
+        typeof statGrowthLatestHappyJumpEvent ===
+          'function'
+          ? statGrowthLatestHappyJumpEvent(
+              growth
+            )
+          : null;
+      const completedAt =
+        Number(
+          completedJump?.last_timestamp
+        );
+      const completedRecently =
+        Number.isSafeInteger(
+          completedAt
+        ) &&
+        completedAt > 0 &&
+        now >= completedAt &&
+        now - completedAt <=
+          48 * 60 * 60;
+
+      if (
+        completedRecently &&
+        completedJump?.status ===
+          'observed_completed' &&
+        boosterState ===
+          'waiting' &&
+        energy < 750
+      ) {
+        return {
+          plan,
+          phase:
+            'completed',
+          title:
+            'Happy Jump complete',
+          detail:
+            `${Number(completedJump.energy_used || 0).toLocaleString()}E across ${Number(completedJump.sessions || 0).toLocaleString()} gym ${Number(completedJump.sessions || 0) === 1 ? 'session' : 'sessions'} produced +${statGrowthFormatNumber(completedJump.gain, 2)} total stats.`,
+          tone:
+            'complete',
+          happy_jump_event:
+            completedJump
+        };
+      }
+
       if (readiness?.over_happiness && energy > 0) {
         return {
           plan,
@@ -21306,6 +21874,13 @@
   function statGrowthPotentialHappyJump(
     action
   ) {
+    if (
+      action?.happy_jump_event?.status ===
+        'observed_completed'
+    ) {
+      return true;
+    }
+
     const boosters =
       action?.training_context?.boosts;
     const boosterCount =
@@ -21323,6 +21898,46 @@
       0
     ) >= 750 &&
       boosterCount >= 2;
+  }
+
+  function statGrowthHappyJumpEventSentence(
+    event
+  ) {
+    if (
+      !event ||
+      Number(
+        event?.energy_used ||
+        0
+      ) <= 0
+    ) {
+      return '';
+    }
+
+    const stats =
+      (
+        Array.isArray(
+          event?.stats
+        )
+          ? event.stats
+          : []
+      )
+        .filter(
+          row =>
+            Number(
+              row?.gain ||
+              0
+            ) > 0
+        )
+        .map(
+          row =>
+            `${statGrowthFormatNumber(row.gain, 2)} ${row.label || trainingReadinessStatLabel(row.stat)}`
+        );
+    const breakdown =
+      stats.length
+        ? ` — ${stats.join(' · ')}`
+        : '';
+
+    return `Happy Jump complete: ${Number(event.energy_used).toLocaleString()} Energy across ${Number(event.sessions || 0).toLocaleString()} gym ${Number(event.sessions || 0) === 1 ? 'session' : 'sessions'}, ${Number(event.trains || 0).toLocaleString()} trains, and ${statGrowthFormatNumber(event.gain, 2)} total stats${breakdown}.`;
   }
 
   function statGrowthTrainingContextSummary(
@@ -21662,7 +22277,8 @@
   }
 
   function statGrowthSessionLiveSnapshot(
-    snapshot
+    snapshot,
+    freshness = null
   ) {
     const status =
       String(
@@ -21723,6 +22339,17 @@
       status ===
         'pretrain_api_checkpoint';
 
+    const staleAfterBoosters =
+      freshness?.status ===
+        'stale_after_boosters';
+    const laterBoosters =
+      staleAfterBoosters
+        ? statGrowthTrainingContextBoosters({
+            boosts:
+              freshness.boosts_after_snapshot
+          })
+        : [];
+
     const checkpointAge =
       Number(
         snapshot?.checkpoint_age_ms
@@ -21746,7 +22373,9 @@
     return {
       status,
       confidence:
-        exact
+        staleAfterBoosters
+          ? 'Partial — Happiness outdated'
+          : exact
           ? 'Exact live snapshot'
           : pretrainApi
             ? 'Pre-train API checkpoint'
@@ -21765,9 +22394,22 @@
         ' / ' +
         Number(
           snapshot.happiness_maximum
-        ).toLocaleString(),
+        ).toLocaleString() +
+        (
+          staleAfterBoosters
+            ? ' · earlier'
+            : ''
+        ),
+      happiness_label:
+        staleAfterBoosters
+          ? 'Earlier Happiness checkpoint'
+          : 'Happiness before',
+      happiness_reliable:
+        !staleAfterBoosters,
       note:
-        exact
+        staleAfterBoosters
+          ? `Happiness boosters were logged at or after this checkpoint: ${laterBoosters.join(', ') || 'additional Happiness boosters'}. Its Energy remains observed, but its Happiness is not the final pre-train value.`
+          : exact
           ? 'Live Happiness and Energy were captured immediately before this training action.'
           : pretrainApi
             ? burstTapCount > 1
@@ -21806,6 +22448,11 @@
       statGrowthSessionEnergyEvidence(
         action?.energy_source_evidence
       );
+    const jumpEvent =
+      action?.happy_jump_event?.status ===
+        'observed_completed'
+        ? action.happy_jump_event
+        : null;
     const liveSnapshot =
       (() => {
         const snapshot =
@@ -21869,6 +22516,17 @@
           status ===
             'pretrain_api_checkpoint';
 
+        const staleAfterBoosters =
+          action?.snapshot_freshness?.status ===
+            'stale_after_boosters';
+        const laterBoosters =
+          staleAfterBoosters
+            ? statGrowthTrainingContextBoosters({
+                boosts:
+                  action.snapshot_freshness.boosts_after_snapshot
+              })
+            : [];
+
         const checkpointAge =
           Number(
             snapshot?.checkpoint_age_ms
@@ -21892,7 +22550,9 @@
         return {
           status,
           confidence:
-            exact
+            staleAfterBoosters
+              ? 'Partial — Happiness outdated'
+              : exact
               ? 'Exact live snapshot'
               : pretrainApi
                 ? 'Pre-train API checkpoint'
@@ -21911,9 +22571,22 @@
             ' / ' +
             Number(
               snapshot.happiness_maximum
-            ).toLocaleString(),
+            ).toLocaleString() +
+            (
+              staleAfterBoosters
+                ? ' · earlier'
+                : ''
+            ),
+          happiness_label:
+            staleAfterBoosters
+              ? 'Earlier Happiness checkpoint'
+              : 'Happiness before',
+          happiness_reliable:
+            !staleAfterBoosters,
           note:
-            exact
+            staleAfterBoosters
+              ? `Happiness boosters were logged at or after this checkpoint: ${laterBoosters.join(', ') || 'additional Happiness boosters'}. Its Energy remains observed, but its Happiness is not the final pre-train value.`
+              : exact
               ? 'Live Happiness and Energy were captured immediately before this training action.'
               : pretrainApi
                 ? burstTapCount > 1
@@ -21986,13 +22659,24 @@
         liveSnapshot.energy,
       snapshot_happiness:
         liveSnapshot.happiness,
+      snapshot_happiness_label:
+        liveSnapshot.happiness_label ||
+        'Happiness before',
       context_label:
         context.label,
       jump_label:
-        statGrowthPotentialHappyJump(
-          action
-        )
-          ? 'Potential happy jump'
+        jumpEvent
+          ? `Happy jump · ${Number(jumpEvent.energy_used).toLocaleString()}E total`
+          : statGrowthPotentialHappyJump(
+              action
+            )
+            ? 'Potential happy jump'
+            : '',
+      jump_recap:
+        jumpEvent
+          ? statGrowthHappyJumpEventSentence(
+              jumpEvent
+            )
           : '',
       context_evidence:
         context.evidence,
@@ -22119,6 +22803,8 @@
           <span class="ta-stat-session-jump-badge" data-ta-stat-session-field="jump_label">${escapeActivityHtml(model.jump_label)}</span>
         </div>
 
+        <p class="ta-stat-session-jump-recap" data-ta-stat-session-field="jump_recap" ${model.jump_recap ? '' : 'hidden'}>${escapeActivityHtml(model.jump_recap)}</p>
+
         <details class="ta-stat-session-details">
           <summary>
             <span>Session details</span>
@@ -22139,7 +22825,7 @@
                 <b data-ta-stat-session-field="happiness_used">${escapeActivityHtml(model.happiness_used)}</b>
               </span>
               <span>
-                <i>Happiness before</i>
+                <i data-ta-stat-session-field="snapshot_happiness_label">${escapeActivityHtml(model.snapshot_happiness_label)}</i>
                 <b data-ta-stat-session-field="snapshot_happiness">${escapeActivityHtml(model.snapshot_happiness)}</b>
               </span>
               <span>
@@ -22272,6 +22958,21 @@
           'energy_context_unavailable'
         )
       );
+    }
+
+    const jumpRecap =
+      panel.querySelector(
+        '[data-ta-stat-session-field="jump_recap"]'
+      );
+
+    if (
+      jumpRecap
+    ) {
+      jumpRecap.hidden =
+        !String(
+          model.jump_recap ||
+          ''
+        );
     }
   }
 
@@ -26244,11 +26945,66 @@
         planValue ||
         readTrainingReadinessPlan()
       );
+    const latestHappyJump =
+      typeof statGrowthLatestHappyJumpEvent ===
+        'function'
+        ? statGrowthLatestHappyJumpEvent(
+            growth
+          )
+        : null;
+    const periodDays =
+      period === '7d'
+        ? 7
+        : period === '14d'
+          ? 14
+          : period === '30d'
+            ? 30
+            : null;
+    const periodCutoff =
+      periodDays === null
+        ? null
+        : Math.floor(
+            Date.now() /
+            1000
+          ) -
+          periodDays *
+            86400;
+    const jumpMatchesStat =
+      summary.stat === 'all' ||
+      (
+        Array.isArray(
+          latestHappyJump?.stats
+        ) &&
+        latestHappyJump.stats.some(
+          row =>
+            row?.stat ===
+              summary.stat
+        )
+      );
+    const jumpInPeriod =
+      latestHappyJump &&
+      jumpMatchesStat &&
+      (
+        periodCutoff === null ||
+        Number(
+          latestHappyJump.last_timestamp ||
+          0
+        ) >=
+          periodCutoff
+      );
+    const jumpRecap =
+      jumpInPeriod
+        ? statGrowthHappyJumpEventSentence(
+            latestHappyJump
+          )
+        : '';
     const advice =
       readiness
         ? trainingReadinessPlanAdvice(
             readiness,
-            plan
+            plan,
+            undefined,
+            growth
           )
         : null;
     const selectedPredictionStat =
@@ -26423,6 +27179,11 @@
               </select>
             </label>
           </div>
+          ${
+            jumpRecap
+              ? `<p class="ta-training-jump-recap" data-ta-training-jump-recap><span>Latest Happy Jump</span><b>${escapeActivityHtml(jumpRecap)}</b></p>`
+              : ''
+          }
           <button
             type="button"
             class="ta-training-recap"
@@ -35223,6 +35984,19 @@
         display: none;
       }
 
+      #${MODAL_ID} .ta-stat-session-jump-recap {
+        margin: 0;
+        padding-left: 8px;
+        border-left: 3px solid #c79642;
+        color: #d9c08e;
+        font-size: 11px;
+        line-height: 1.42;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-recap[hidden] {
+        display: none;
+      }
+
       #${MODAL_ID} .ta-stat-session-details,
       #${MODAL_ID} .ta-stat-session-energy-evidence {
         overflow: hidden;
@@ -35895,6 +36669,30 @@
 
       #${MODAL_ID} .ta-training-support-section > .ta-training-summary-prediction {
         padding: 10px;
+      }
+
+      #${MODAL_ID} .ta-training-jump-recap {
+        display: grid;
+        gap: 4px;
+        margin: 0;
+        padding: 9px 10px;
+        border-top: 1px solid #3d3424;
+        background: #18150f;
+      }
+
+      #${MODAL_ID} .ta-training-jump-recap > span {
+        color: #cfa95f;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-training-jump-recap > b {
+        color: #e4d3ae;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1.42;
       }
 
       #${MODAL_ID} .ta-training-recap {
