@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.64
+// @version      2.18.65
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.user.js
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.64';
+  const VERSION = '2.18.65';
 
-  // v2.18.64 reconstructs exact Happy Jump starting Happiness from observed
-  // Ecstasy gain and gym-use logs, corroborated by a later API checkpoint.
-  // API traffic, storage, synchronization, exports, totals, and predictions are unchanged.
+  // v2.18.65 moves chart filters and the range summary above the graph,
+  // compacts the legend and selected-session surface, and combines evidence
+  // under one details drawer. Analytics and data contracts are unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -22912,7 +22912,7 @@
       status,
       confidence:
         reconstructed
-          ? 'Reconstructed from exact Torn logs'
+          ? 'Exact log reconstruction'
           : staleAfterBoosters
           ? 'Partial — Happiness outdated'
           : exact
@@ -23227,7 +23227,7 @@
         context.label,
       jump_label:
         jumpEvent
-          ? `Happy jump · ${Number(jumpEvent.energy_used).toLocaleString()}E total`
+          ? `Happy Jump · ${Number(jumpEvent.energy_used).toLocaleString()}E · ${statGrowthFormatGain(jumpEvent.gain)}`
           : statGrowthPotentialHappyJump(
               action
             )
@@ -23349,8 +23349,6 @@
         </div>
 
         <div class="ta-stat-session-quickline">
-          <strong>Total ${field('stat_after', model.stat_after)}</strong>
-          <span>·</span>
           <strong>${field('energy', model.energy)}E</strong>
           <span>·</span>
           <strong>${field('trains', model.trains)} trains</strong>
@@ -23361,10 +23359,12 @@
         <div class="ta-stat-session-badges">
           <span class="ta-stat-session-energy-badge" data-ta-stat-energy-source="${escapeActivityHtml(model.energy_source_status)}" data-ta-stat-session-field="energy_source_label">${escapeActivityHtml(model.energy_source_label)}</span>
           <span class="ta-stat-session-context-badge" data-ta-stat-session-field="context_label">${escapeActivityHtml(model.context_label)}</span>
-          <span class="ta-stat-session-jump-badge" data-ta-stat-session-field="jump_label">${escapeActivityHtml(model.jump_label)}</span>
         </div>
 
-        <p class="ta-stat-session-jump-recap" data-ta-stat-session-field="jump_recap" ${model.jump_recap ? '' : 'hidden'}>${escapeActivityHtml(model.jump_recap)}</p>
+        <details class="ta-stat-session-jump-group" data-ta-stat-session-jump-group ${model.jump_label ? '' : 'hidden'}>
+          <summary data-ta-stat-session-field="jump_label">${escapeActivityHtml(model.jump_label)}</summary>
+          <p data-ta-stat-session-field="jump_recap">${escapeActivityHtml(model.jump_recap)}</p>
+        </details>
 
         <details class="ta-stat-session-details">
           <summary>
@@ -23401,20 +23401,12 @@
             <div class="ta-stat-session-context">
               <strong data-ta-stat-session-field="context_evidence">${escapeActivityHtml(model.context_evidence)}</strong>
               <span data-ta-stat-session-field="context_detail">${escapeActivityHtml(model.context_detail)}</span>
-              <small data-ta-stat-session-field="context_note">${escapeActivityHtml(model.context_note)}</small>
             </div>
-          </div>
-        </details>
-
-        <details class="ta-stat-session-energy-evidence">
-          <summary>
-            <span>Why classified this way</span>
-            <strong data-ta-stat-session-field="energy_source_label">${escapeActivityHtml(model.energy_source_label)}</strong>
-          </summary>
-          <div>
-            <strong data-ta-stat-session-field="energy_source_evidence">${escapeActivityHtml(model.energy_source_evidence)}</strong>
-            <span data-ta-stat-session-field="energy_source_detail">${escapeActivityHtml(model.energy_source_detail)}</span>
-            <small data-ta-stat-session-field="energy_source_note">${escapeActivityHtml(model.energy_source_note)}</small>
+            <div class="ta-stat-session-energy-evidence">
+              <strong data-ta-stat-session-field="energy_source_evidence">${escapeActivityHtml(model.energy_source_evidence)}</strong>
+              <span data-ta-stat-session-field="energy_source_detail">${escapeActivityHtml(model.energy_source_detail)}</span>
+              <small data-ta-stat-session-field="energy_source_note">${escapeActivityHtml(model.energy_source_note)}</small>
+            </div>
           </div>
         </details>
       </section>
@@ -23521,17 +23513,17 @@
       );
     }
 
-    const jumpRecap =
+    const jumpGroup =
       panel.querySelector(
-        '[data-ta-stat-session-field="jump_recap"]'
+        '[data-ta-stat-session-jump-group]'
       );
 
     if (
-      jumpRecap
+      jumpGroup
     ) {
-      jumpRecap.hidden =
+      jumpGroup.hidden =
         !String(
-          model.jump_recap ||
+          model.jump_label ||
           ''
         );
     }
@@ -23701,7 +23693,7 @@
             <span>No observations · ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}</span>
           </div>
 
-          <div class="ta-stat-post-chart-controls">
+          <div class="ta-stat-chart-controls">
             ${renderStatGrowthScopeControl(scope)}
             ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, scope)}
             ${renderStatGrowthScopedGainSummary(growth, focus, scope, selectedRange, selectedContext)}
@@ -24059,7 +24051,13 @@
       <div class="ta-chart-card ta-stat-total-chart" data-ta-stat-total-card>
         <div class="ta-chart-heading">
           <span>Observed total &amp; session gain</span>
-          <span>${escapeActivityHtml(label)} · ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))} · ${samples.length} observations</span>
+          <span>${escapeActivityHtml(label)} · ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}</span>
+        </div>
+
+        <div class="ta-stat-chart-controls">
+          ${renderStatGrowthScopeControl(scope)}
+          ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, scope)}
+          ${renderStatGrowthScopedGainSummary(growth, focus, scope, selectedRange, selectedContext)}
         </div>
 
         <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeActivityHtml(label)} observed total line ${sessionOrder ? 'in oldest-to-latest session order' : 'over calendar time'} with session gain bars classified by observed Energy-source evidence" class="ta-stat-total-svg" data-ta-stat-total-svg>
@@ -24091,18 +24089,10 @@
           ${happyJumpLegend}
         </div>
         <div class="ta-stat-total-scale">
-          ${sessionOrder ? 'Even session spacing · ' : ''}Session gain scale: 0–${escapeActivityHtml(statGrowthFormatCompactGain(maximumGain))} · tap a bar, line, or point for exact values
+          ${sessionOrder ? 'Even spacing · ' : ''}Tap for exact values
         </div>
 
         ${renderStatGrowthSessionInspector(firstSession)}
-
-        <div class="ta-stat-post-chart-controls">
-          ${renderStatGrowthScopeControl(scope)}
-          ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, scope)}
-          ${renderStatGrowthScopedGainSummary(growth, focus, scope, selectedRange, selectedContext)}
-        </div>
-
-
       </div>
     `;
   }
@@ -24185,7 +24175,7 @@
             <span>No observations · ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}</span>
           </div>
 
-          <div class="ta-stat-post-chart-controls">
+          <div class="ta-stat-chart-controls">
             ${renderStatGrowthScopeControl('all')}
             ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, 'all')}
             ${renderStatGrowthScopedGainSummary(growth, focus, 'all', selectedRange, selectedContext)}
@@ -24526,7 +24516,13 @@
       <div class="ta-chart-card ta-stat-total-chart ta-stat-all-chart ${sessionOrder ? 'ta-stat-session-order-mode' : 'ta-stat-calendar-mode'}" data-ta-stat-total-card>
         <div class="ta-chart-heading">
           <span>All-stat history</span>
-          <span>${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}${statGrowthRangeUsesSessions(selectedRange) ? ' per stat' : ''} · ${allSamples.length.toLocaleString()} observations</span>
+          <span>${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}${statGrowthRangeUsesSessions(selectedRange) ? ' per stat' : ''}</span>
+        </div>
+
+        <div class="ta-stat-chart-controls">
+          ${renderStatGrowthScopeControl('all')}
+          ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, 'all')}
+          ${renderStatGrowthScopedGainSummary(growth, focus, 'all', selectedRange, selectedContext)}
         </div>
 
         <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Strength, Defense, Speed, and Dexterity observed totals ${sessionOrder ? 'in independent oldest-to-latest session order per stat' : `over ${escapeActivityHtml(statGrowthRangeLabel(selectedRange))}`}" class="ta-stat-total-svg ta-stat-all-svg" data-ta-stat-total-svg>
@@ -24552,18 +24548,12 @@
           ).join('')}
         </div>
         <div class="ta-stat-total-scale">
-          ${sessionOrder ? 'Each lane runs oldest → latest with even session spacing · tap a line or point for exact values' : 'Each stat uses its own lane and scale · choose a stat, then drag for exact sessions'}
+          ${sessionOrder ? 'Even spacing per stat · Tap for exact values' : 'Choose a stat · Drag for exact sessions'}
         </div>
 
         ${calendarNavigator}
 
         ${renderStatGrowthSessionInspector(latestSession)}
-
-        <div class="ta-stat-post-chart-controls">
-          ${renderStatGrowthScopeControl('all')}
-          ${renderStatGrowthFocusControl(focus, selectedContext, selectedRange, 'all')}
-          ${renderStatGrowthScopedGainSummary(growth, focus, 'all', selectedRange, selectedContext)}
-        </div>
       </div>
     `;
   }
@@ -25688,10 +25678,8 @@
       <div class="ta-stat-gain-scope ta-stat-compact-efficiency" data-ta-stat-gain-summary>
         <strong>${escapeActivityHtml(statGrowthFormatGain(summary.gain))}</strong>
         <span>
-          ${escapeActivityHtml(summary.range_label)} ·
-          ${summary.actions.toLocaleString()} actions ·
+          ${summary.actions.toLocaleString()} sessions ·
           ${summary.energy_used.toLocaleString()} E ·
-          ${escapeActivityHtml(statGrowthFormatRate(summary.gain_per_energy))} gym gain/E ·
           ${summary.training_days.toLocaleString()} days${
             summary.job_special_gain > 0
               ? ` · ${escapeActivityHtml(statGrowthFormatGain(summary.job_special_gain))} Army Strength / ${summary.job_points_used.toLocaleString()} JP`
@@ -37665,6 +37653,178 @@
         padding: 0;
         border: 0;
         background: transparent;
+      }
+
+      /* v2.18.65: controls-first chart hierarchy with one compact inspector. */
+      #${MODAL_ID} .ta-stat-chart-controls {
+        display: grid;
+        gap: 6px;
+        margin: 8px 0 5px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #302c25;
+      }
+
+      #${MODAL_ID} .ta-stat-chart-controls .ta-stat-gain-scope-controls,
+      #${MODAL_ID} .ta-stat-chart-controls .ta-stat-total-controls,
+      #${MODAL_ID} .ta-stat-chart-controls .ta-stat-gain-scope {
+        margin: 0;
+      }
+
+      #${MODAL_ID} .ta-stat-chart-controls .ta-stat-gain-scope-controls button {
+        min-height: 28px;
+        padding: 4px 7px;
+      }
+
+      #${MODAL_ID} .ta-stat-chart-controls .ta-stat-compact-efficiency {
+        gap: 3px 7px;
+        padding: 5px 1px 0;
+        border: 0;
+        border-top: 1px solid #2b2b2b;
+        border-radius: 0;
+        background: transparent;
+      }
+
+      #${MODAL_ID} .ta-stat-chart-controls .ta-stat-compact-efficiency strong {
+        font-size: 14px;
+      }
+
+      #${MODAL_ID} .ta-stat-chart-controls .ta-stat-compact-efficiency span {
+        font-size: 10px;
+      }
+
+      #${MODAL_ID} .ta-stat-total-legend {
+        flex-wrap: nowrap;
+        gap: 12px;
+        overflow-x: auto;
+        padding-bottom: 2px;
+        white-space: nowrap;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      #${MODAL_ID} .ta-stat-total-legend::-webkit-scrollbar {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-stat-total-scale {
+        margin-top: 2px;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      #${MODAL_ID} .ta-stat-total-chart > .ta-stat-session-inspector {
+        gap: 5px;
+        margin-top: 8px;
+        padding: 9px 0 0;
+        border: 0;
+        border-top: 1px solid #4a4031;
+        border-radius: 0;
+        background: transparent;
+      }
+
+      #${MODAL_ID} .ta-stat-session-header {
+        grid-template-columns: 28px minmax(0, 1fr) 28px;
+        gap: 6px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-step {
+        width: 28px;
+        min-width: 28px;
+        height: 32px;
+        min-height: 32px;
+        font-size: 20px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-quickline {
+        padding-left: 34px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-badges {
+        flex-wrap: nowrap;
+        gap: 4px;
+        overflow-x: auto;
+        padding-left: 34px;
+        white-space: nowrap;
+        scrollbar-width: none;
+      }
+
+      #${MODAL_ID} .ta-stat-session-badges::-webkit-scrollbar {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-group {
+        overflow: hidden;
+        border: 1px solid #6b4b1f;
+        border-radius: 7px;
+        background: #1c160e;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-group[hidden] {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-group > summary {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 32px;
+        padding: 5px 8px;
+        color: #efc36f;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 850;
+        list-style: none;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-group > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-group > summary::after {
+        content: '▸';
+        margin-left: auto;
+        color: #b99a63;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-group[open] > summary::after {
+        content: '▾';
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-group > p {
+        margin: 0;
+        padding: 7px 8px;
+        border-top: 1px solid rgba(199, 150, 66, .22);
+        color: #d8c092;
+        font-size: 10px;
+        line-height: 1.4;
+      }
+
+      #${MODAL_ID} .ta-stat-session-jump-group > p:empty {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-stat-session-details .ta-stat-session-energy-evidence {
+        display: grid;
+        gap: 3px;
+        padding: 7px 8px;
+        border: 0;
+        border-left: 3px solid #5f91a8;
+        border-radius: 6px;
+        background: #12191d;
+        color: #d2d2d2;
+        font-size: 11px;
+        line-height: 1.38;
+      }
+
+      #${MODAL_ID} .ta-stat-session-details .ta-stat-session-energy-evidence > strong {
+        color: #e6f1f5;
+        font-size: 11px;
+      }
+
+      #${MODAL_ID} .ta-stat-session-details .ta-stat-session-energy-evidence > small {
+        color: #9faeb4;
+        font-size: 10px;
+        line-height: 1.4;
       }
 
       @media(max-width:520px) {
