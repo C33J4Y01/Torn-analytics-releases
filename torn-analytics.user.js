@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.67
+// @version      2.18.68
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.67';
+  const VERSION = '2.18.68';
 
-  // v2.18.67 adds an ephemeral, read-only Happy Jump supply snapshot from
-  // Torn's cached Drug and Booster inventory categories. Personal counts are
-  // never inferred, persisted, shared, or used to take actions.
+  // v2.18.68 keeps the read-only next-jump supply checklist available after a
+  // completed Happy Jump. Inventory, analytics, and storage contracts remain
+  // unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -20059,6 +20059,47 @@
     };
   }
 
+  function renderTrainingSupplyDetails(
+    snapshot = null,
+    label = 'Jump supplies'
+  ) {
+    const supplyPresentation = trainingReadinessSupplyPresentation(
+      snapshot
+    );
+    const supplyRows = supplyPresentation.supplies
+      .map(supply => {
+        const owned = Number(supply.inventory_count);
+        const countAvailable = Number.isSafeInteger(owned) && owned >= 0;
+        const statusLabel = supply.inventory_status === 'ready'
+          ? `${owned.toLocaleString()} owned · Ready`
+          : supply.inventory_status === 'missing'
+            ? `${owned.toLocaleString()} owned · Need ${(supply.quantity - owned).toLocaleString()}`
+            : supply.inventory_status === 'not_checked'
+              ? 'Not checked'
+              : 'Count unavailable';
+        const noteHtml = supply.note
+          ? '<small>' + escapeActivityHtml(supply.note) + '</small>'
+          : '';
+
+        return `
+        <li class="ta-training-supply-${escapeActivityHtml(supply.inventory_status)}">
+          <span>${escapeActivityHtml(`${supply.item} ×${supply.quantity}${supply.optional ? ' · optional' : ''}`)}</span>
+          <b>${escapeActivityHtml(countAvailable || supply.inventory_status === 'not_checked' ? statusLabel : 'Count unavailable')}</b>
+          ${noteHtml}
+        </li>
+      `;
+      })
+      .join('');
+
+    return `
+      <details class="ta-training-supplies">
+        <summary><span>${escapeActivityHtml(label)}</span><b class="ta-training-supply-summary-${escapeActivityHtml(supplyPresentation.state)}">${escapeActivityHtml(supplyPresentation.summary)}</b></summary>
+        <ul>${supplyRows}</ul>
+        <p>${escapeActivityHtml(supplyPresentation.note)}</p>
+      </details>
+    `;
+  }
+
   function renderTrainingReadinessGuide(
     readiness,
     planValue,
@@ -20116,6 +20157,10 @@
             ${statusRow('Booster cooldown', booster.label, booster.state)}
           </ul>
           <p class="ta-training-guide-note">${escapeActivityHtml(remainingEnergy)}</p>
+          ${renderTrainingSupplyDetails(
+            readiness?.supply_snapshot,
+            'Next jump supplies'
+          )}
         </div>
       `;
     }
@@ -20154,33 +20199,6 @@
         ? 'unknown'
         : 'waiting';
     const quarter = trainingReadinessQuarterHour(now * 1000);
-    const supplyPresentation = trainingReadinessSupplyPresentation(
-      readiness?.supply_snapshot
-    );
-    const supplyRows = supplyPresentation.supplies
-      .map(supply => {
-        const owned = Number(supply.inventory_count);
-        const countAvailable = Number.isSafeInteger(owned) && owned >= 0;
-        const statusLabel = supply.inventory_status === 'ready'
-          ? `${owned.toLocaleString()} owned · Ready`
-          : supply.inventory_status === 'missing'
-            ? `${owned.toLocaleString()} owned · Need ${(supply.quantity - owned).toLocaleString()}`
-            : supply.inventory_status === 'not_checked'
-              ? 'Not checked'
-              : 'Count unavailable';
-        const noteHtml = supply.note
-          ? '<small>' + escapeActivityHtml(supply.note) + '</small>'
-          : '';
-
-        return `
-        <li class="ta-training-supply-${escapeActivityHtml(supply.inventory_status)}">
-          <span>${escapeActivityHtml(`${supply.item} ×${supply.quantity}${supply.optional ? ' · optional' : ''}`)}</span>
-          <b>${escapeActivityHtml(countAvailable || supply.inventory_status === 'not_checked' ? statusLabel : 'Count unavailable')}</b>
-          ${noteHtml}
-        </li>
-      `;
-      })
-      .join('');
 
     return `
       <div class="ta-training-guide ta-training-happy-guide" data-ta-training-guide>
@@ -20202,11 +20220,7 @@
             <li>Optional: use the 30-point Energy refill and train again.</li>
           </ol>
         </div>
-        <details class="ta-training-supplies">
-          <summary><span>Jump supplies</span><b class="ta-training-supply-summary-${escapeActivityHtml(supplyPresentation.state)}">${escapeActivityHtml(supplyPresentation.summary)}</b></summary>
-          <ul>${supplyRows}</ul>
-          <p>${escapeActivityHtml(supplyPresentation.note)}</p>
-        </details>
+        ${renderTrainingSupplyDetails(readiness?.supply_snapshot)}
         <p class="ta-training-guide-note">Xanax and Ecstasy can overdose and erase saved Energy. This assistant is read-only guidance, not a safety guarantee.</p>
       </div>
     `;
