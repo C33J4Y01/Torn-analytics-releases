@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.68
+// @version      2.18.69
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.68';
+  const VERSION = '2.18.69';
 
-  // v2.18.68 keeps the read-only next-jump supply checklist available after a
-  // completed Happy Jump. Inventory, analytics, and storage contracts remain
-  // unchanged.
+  // v2.18.69 uses the most recent fully verified Happy Jump booster evidence
+  // for the next Erotic DVD target. API, prediction, and storage contracts
+  // remain unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -18166,6 +18166,8 @@
           stats: {},
           booster_event_ids:
             new Set(),
+          booster_sources:
+            new Map(),
           booster_count: 0,
           point_refill_observed:
             false
@@ -18282,6 +18284,24 @@
           event.booster_event_ids.add(
             boostId
           );
+
+          const source =
+            String(
+              boost?.source ||
+              ''
+            );
+          const priorSource =
+            event.booster_sources.get(
+              boostId
+            );
+
+          event.booster_sources.set(
+            boostId,
+            priorSource === undefined ||
+            priorSource === source
+              ? source
+              : ''
+          );
         }
       }
 
@@ -18296,19 +18316,61 @@
         grouped.values()
       )
         .map(
-          event => ({
-            ...event,
-            booster_count:
-              event.booster_event_ids.size,
-            booster_event_ids:
+          event => {
+            const {
+              booster_sources:
+                boosterSources,
+              ...eventFields
+            } = event;
+            const boosterEventIds =
               Array.from(
                 event.booster_event_ids
-              ),
-            stats:
-              Object.values(
-                event.stats
-              )
-          })
+              );
+            const boosterSourceCounts =
+              {};
+            let boosterSourcesComplete =
+              boosterEventIds.length > 0;
+
+            for (
+              const eventId
+              of boosterEventIds
+            ) {
+              const source =
+                boosterSources.get(
+                  eventId
+                );
+
+              if (
+                !source
+              ) {
+                boosterSourcesComplete =
+                  false;
+                continue;
+              }
+
+              boosterSourceCounts[source] =
+                Number(
+                  boosterSourceCounts[source] ||
+                  0
+                ) + 1;
+            }
+
+            return {
+              ...eventFields,
+              booster_count:
+                boosterEventIds.length,
+              booster_event_ids:
+                boosterEventIds,
+              booster_source_counts:
+                boosterSourceCounts,
+              booster_sources_complete:
+                boosterSourcesComplete,
+              stats:
+                Object.values(
+                  event.stats
+                )
+            };
+          }
         )
         .filter(
           event =>
@@ -19912,7 +19974,8 @@
   }
 
   function trainingReadinessHappyJumpSupplies(
-    snapshot = null
+    snapshot = null,
+    supplyPlan = null
   ) {
     const inventoryAvailable = snapshot?.status === 'available';
     const countFor = key => {
@@ -19942,6 +20005,26 @@
         note
       };
     };
+    const personalizedDvdQuantity =
+      supplyPlan?.source === 'latest_verified_happy_jump' &&
+      Number.isSafeInteger(
+        Number(
+          supplyPlan?.erotic_dvd_quantity
+        )
+      ) &&
+      Number(
+        supplyPlan.erotic_dvd_quantity
+      ) >= 1 &&
+      Number(
+        supplyPlan.erotic_dvd_quantity
+      ) <= 100
+        ? Number(
+            supplyPlan.erotic_dvd_quantity
+          )
+        : null;
+    const dvdQuantity =
+      personalizedDvdQuantity ||
+      5;
 
     return [
       supply(
@@ -19952,9 +20035,11 @@
       supply(
         'Erotic DVD',
         'erotic_dvd',
-        5,
+        dvdQuantity,
         false,
-        'Standard setup; job and faction perks can change the best amount.'
+        personalizedDvdQuantity === null
+          ? 'Standard setup; job and faction perks can change the best amount.'
+          : 'Based on your latest verified Happy Jump.'
       ),
       supply(
         'Ecstasy',
@@ -19973,10 +20058,103 @@
     ];
   }
 
-  function trainingReadinessSupplyPresentation(
-    snapshot = null
+  function trainingReadinessHappyJumpSupplyPlan(
+    growth = null
   ) {
-    const supplies = trainingReadinessHappyJumpSupplies(snapshot);
+    const fallback = {
+      source: 'standard',
+      erotic_dvd_quantity: 5,
+      verified_at: null
+    };
+    const events =
+      Array.isArray(
+        growth?.happy_jump_events
+      )
+        ? growth.happy_jump_events
+        : [];
+
+    for (
+      let index = events.length - 1;
+      index >= 0;
+      index--
+    ) {
+      const event =
+        events[index];
+      const counts =
+        event?.booster_source_counts;
+      const dvdQuantity =
+        Number(
+          counts?.['Erotic DVD']
+        );
+      const ecstasyQuantity =
+        Number(
+          counts?.Ecstasy
+        );
+      const boosterCount =
+        Number(
+          event?.booster_count
+        );
+      const countedBoosters =
+        counts &&
+        typeof counts === 'object' &&
+        !Array.isArray(counts)
+          ? Object.values(counts)
+              .reduce(
+                (total, value) =>
+                  Number.isSafeInteger(
+                    Number(value)
+                  ) &&
+                  Number(value) >= 0
+                    ? total +
+                      Number(value)
+                    : Number.NaN,
+                0
+              )
+          : Number.NaN;
+
+      if (
+        event?.status !== 'observed_completed' ||
+        event?.happiness_evidence?.status !== 'exact_log_chain_confirmed' ||
+        event?.booster_sources_complete !== true ||
+        !Number.isSafeInteger(boosterCount) ||
+        boosterCount <= 0 ||
+        countedBoosters !== boosterCount ||
+        ecstasyQuantity !== 1 ||
+        !Number.isSafeInteger(dvdQuantity) ||
+        dvdQuantity < 1 ||
+        dvdQuantity > 100 ||
+        dvdQuantity + ecstasyQuantity !== boosterCount
+      ) {
+        continue;
+      }
+
+      const verifiedAt =
+        Number(
+          event?.last_timestamp
+        );
+
+      return {
+        source: 'latest_verified_happy_jump',
+        erotic_dvd_quantity: dvdQuantity,
+        verified_at:
+          Number.isSafeInteger(verifiedAt) &&
+          verifiedAt > 0
+            ? verifiedAt
+            : null
+      };
+    }
+
+    return fallback;
+  }
+
+  function trainingReadinessSupplyPresentation(
+    snapshot = null,
+    supplyPlan = null
+  ) {
+    const supplies = trainingReadinessHappyJumpSupplies(
+      snapshot,
+      supplyPlan
+    );
 
     if (snapshot?.status === 'available') {
       const missingUnits = supplies
@@ -20061,10 +20239,12 @@
 
   function renderTrainingSupplyDetails(
     snapshot = null,
-    label = 'Jump supplies'
+    label = 'Jump supplies',
+    supplyPlan = null
   ) {
     const supplyPresentation = trainingReadinessSupplyPresentation(
-      snapshot
+      snapshot,
+      supplyPlan
     );
     const supplyRows = supplyPresentation.supplies
       .map(supply => {
@@ -20159,7 +20339,8 @@
           <p class="ta-training-guide-note">${escapeActivityHtml(remainingEnergy)}</p>
           ${renderTrainingSupplyDetails(
             readiness?.supply_snapshot,
-            'Next jump supplies'
+            'Next jump supplies',
+            readiness?.happy_jump_supply_plan
           )}
         </div>
       `;
@@ -20220,7 +20401,11 @@
             <li>Optional: use the 30-point Energy refill and train again.</li>
           </ol>
         </div>
-        ${renderTrainingSupplyDetails(readiness?.supply_snapshot)}
+        ${renderTrainingSupplyDetails(
+          readiness?.supply_snapshot,
+          'Jump supplies',
+          readiness?.happy_jump_supply_plan
+        )}
         <p class="ta-training-guide-note">Xanax and Ecstasy can overdose and erase saved Energy. This assistant is read-only guidance, not a safety guarantee.</p>
       </div>
     `;
@@ -20988,6 +21173,10 @@
               reason: 'not_requested',
               fetched_at: null
             },
+      happy_jump_supply_plan:
+        trainingReadinessHappyJumpSupplyPlan(
+          growth
+        ),
       quarter_hour: trainingReadinessQuarterHour(nowMs),
       models,
       models_by_context: modelsByContext
