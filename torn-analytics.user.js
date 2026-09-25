@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.66
+// @version      2.18.67
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.66';
+  const VERSION = '2.18.67';
 
-  // v2.18.66 gives update checks a generated header-only metadata artifact.
-  // The full userscript remains the install target and runtime behavior is
-  // unchanged.
+  // v2.18.67 adds an ephemeral, read-only Happy Jump supply snapshot from
+  // Torn's cached Drug and Booster inventory categories. Personal counts are
+  // never inferred, persisted, shared, or used to take actions.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -10681,6 +10681,13 @@
         tracker
       );
 
+    latestAnalysis.training_supplies =
+      await loadTrainingSupplySnapshot(
+        apiKey,
+        tracker,
+        readTrainingReadinessPlan() === 'happy_jump'
+      );
+
     latestAnalysis.activity =
       buildOverallActivity(
         latestLogs,
@@ -10701,7 +10708,8 @@
         Date.now(),
         typeof location !== 'undefined'
           ? location.href
-          : ''
+          : '',
+        latestAnalysis.training_supplies
       );
 
     const analysisHost =
@@ -19525,6 +19533,243 @@
     };
   }
   // ============================================================
+  // HAPPY JUMP SUPPLY SNAPSHOT
+  // ============================================================
+
+  let trainingSupplySnapshotCache = null;
+
+  function normalizeTrainingInventoryCategoryResponse(
+    json,
+    category,
+    fetchedAt = Date.now()
+  ) {
+    const normalizedCategory = String(category || '').trim();
+
+    if (!['Drug', 'Booster'].includes(normalizedCategory)) {
+      throw new Error('Unsupported training inventory category.');
+    }
+
+    const inventory = json?.inventory;
+    const rows = inventory?.items;
+    const sourceTimestamp = Number(inventory?.timestamp);
+    const total = Number(json?._metadata?.total);
+
+    if (
+      !inventory ||
+      typeof inventory !== 'object' ||
+      Array.isArray(inventory) ||
+      !Array.isArray(rows) ||
+      !Number.isSafeInteger(sourceTimestamp) ||
+      sourceTimestamp <= 0 ||
+      !Number.isSafeInteger(total) ||
+      total < 0
+    ) {
+      throw new Error('Torn API returned an invalid inventory response.');
+    }
+
+    if (rows.length !== total) {
+      throw new Error('Torn API returned an incomplete inventory category.');
+    }
+
+    const targets = normalizedCategory === 'Drug'
+      ? new Map([
+          [206, { key: 'xanax', name: 'Xanax' }],
+          [197, { key: 'ecstasy', name: 'Ecstasy' }]
+        ])
+      : new Map([
+          [366, { key: 'erotic_dvd', name: 'Erotic DVD' }]
+        ]);
+    const counts = {};
+
+    for (const target of targets.values()) {
+      counts[target.key] = 0;
+    }
+
+    for (const row of rows) {
+      const id = Number(row?.id);
+      const amount = Number(row?.amount);
+
+      if (
+        !row ||
+        typeof row !== 'object' ||
+        Array.isArray(row) ||
+        !Number.isSafeInteger(id) ||
+        id <= 0 ||
+        !Number.isSafeInteger(amount) ||
+        amount < 0 ||
+        typeof row.faction_owned !== 'boolean'
+      ) {
+        throw new Error('Torn API returned a malformed inventory item.');
+      }
+
+      const target = targets.get(id);
+
+      if (!target) {
+        continue;
+      }
+
+      if (String(row.name || '').trim() !== target.name) {
+        throw new Error(`Torn item ${id} did not match ${target.name}.`);
+      }
+
+      if (!row.faction_owned) {
+        counts[target.key] += amount;
+      }
+    }
+
+    return {
+      status: 'available',
+      category: normalizedCategory,
+      fetched_at: Number.isFinite(Number(fetchedAt))
+        ? Number(fetchedAt)
+        : Date.now(),
+      source_timestamp: sourceTimestamp,
+      total_rows: total,
+      counts
+    };
+  }
+
+  function combineTrainingSupplyCategories(
+    drugs,
+    boosters,
+    fetchedAt = Date.now()
+  ) {
+    if (
+      drugs?.status !== 'available' ||
+      drugs?.category !== 'Drug' ||
+      boosters?.status !== 'available' ||
+      boosters?.category !== 'Booster'
+    ) {
+      throw new Error('Complete Drug and Booster inventory categories are required.');
+    }
+
+    const count = (source, key) => {
+      const value = Number(source?.counts?.[key]);
+
+      if (!Number.isSafeInteger(value) || value < 0) {
+        throw new Error('Torn API returned an invalid training supply count.');
+      }
+
+      return value;
+    };
+
+    return {
+      status: 'available',
+      fetched_at: Number.isFinite(Number(fetchedAt))
+        ? Number(fetchedAt)
+        : Date.now(),
+      source_timestamps: {
+        drug: Number(drugs.source_timestamp),
+        booster: Number(boosters.source_timestamp)
+      },
+      items: {
+        xanax: count(drugs, 'xanax'),
+        ecstasy: count(drugs, 'ecstasy'),
+        erotic_dvd: count(boosters, 'erotic_dvd')
+      }
+    };
+  }
+
+  async function fetchTrainingSupplySnapshot(
+    apiKey,
+    tracker
+  ) {
+    const fetchedAt = Date.now();
+    const drugsJson = await apiFetchJson(
+      `${API_BASE}/user/inventory?cat=Drug&limit=250`,
+      apiKey,
+      tracker
+    );
+    const boostersJson = await apiFetchJson(
+      `${API_BASE}/user/inventory?cat=Booster&limit=250`,
+      apiKey,
+      tracker
+    );
+    const drugs = normalizeTrainingInventoryCategoryResponse(
+      drugsJson,
+      'Drug',
+      fetchedAt
+    );
+    const boosters = normalizeTrainingInventoryCategoryResponse(
+      boostersJson,
+      'Booster',
+      fetchedAt
+    );
+
+    return combineTrainingSupplyCategories(
+      drugs,
+      boosters,
+      fetchedAt
+    );
+  }
+
+  async function loadTrainingSupplySnapshot(
+    apiKey,
+    tracker,
+    enabled = true
+  ) {
+    if (!enabled) {
+      return {
+        status: 'unavailable',
+        reason: 'not_requested',
+        fetched_at: null
+      };
+    }
+
+    const normalizedKey = String(apiKey || '').trim();
+
+    if (!normalizedKey) {
+      return {
+        status: 'unavailable',
+        reason: 'api_key_unavailable',
+        fetched_at: null
+      };
+    }
+
+    const cachedAt = Number(trainingSupplySnapshotCache?.snapshot?.fetched_at);
+
+    if (
+      trainingSupplySnapshotCache?.api_key === normalizedKey &&
+      trainingSupplySnapshotCache?.snapshot?.status === 'available' &&
+      Number.isFinite(cachedAt) &&
+      Date.now() >= cachedAt &&
+      Date.now() - cachedAt < 5 * 60 * 1000
+    ) {
+      return trainingSupplySnapshotCache.snapshot;
+    }
+
+    tracker?.setStage(
+      'Refreshing Happy Jump supplies…',
+      'Two cached Torn inventory requests'
+    );
+
+    try {
+      const snapshot = await fetchTrainingSupplySnapshot(
+        normalizedKey,
+        tracker
+      );
+
+      trainingSupplySnapshotCache = {
+        api_key: normalizedKey,
+        snapshot
+      };
+      return snapshot;
+    } catch (error) {
+      console.warn('Happy Jump supply refresh failed.', error);
+      const message = String(error?.message || error || '');
+
+      return {
+        status: 'unavailable',
+        reason: /Torn API error 16|access level|permission/i.test(message)
+          ? 'access_denied'
+          : /invalid|malformed|incomplete|did not match/i.test(message)
+            ? 'invalid_response'
+            : 'api_request_failed',
+        fetched_at: null
+      };
+    }
+  }
+  // ============================================================
   // GYM TRAINER
   // ============================================================
 
@@ -19666,35 +19911,123 @@
     return plan;
   }
 
-  function trainingReadinessHappyJumpSupplies() {
+  function trainingReadinessHappyJumpSupplies(
+    snapshot = null
+  ) {
+    const inventoryAvailable = snapshot?.status === 'available';
+    const countFor = key => {
+      if (!inventoryAvailable) {
+        return null;
+      }
+
+      const value = Number(snapshot?.items?.[key]);
+      return Number.isSafeInteger(value) && value >= 0
+        ? value
+        : null;
+    };
+    const supply = (item, key, quantity, optional = false, note = '') => {
+      const inventoryCount = countFor(key);
+
+      return {
+        item,
+        key,
+        quantity,
+        optional,
+        inventory_count: inventoryCount,
+        inventory_status: inventoryCount === null
+          ? 'unknown'
+          : inventoryCount >= quantity
+            ? 'ready'
+            : 'missing',
+        note
+      };
+    };
+
     return [
-      {
-        item: 'Xanax',
-        quantity: 4,
-        optional: false,
-        inventory_status: 'unknown'
-      },
-      {
-        item: 'Erotic DVD',
-        quantity: 5,
-        optional: false,
-        inventory_status: 'unknown',
-        note: 'Standard setup; job and faction perks can change the best amount.'
-      },
-      {
-        item: 'Ecstasy',
-        quantity: 1,
-        optional: false,
-        inventory_status: 'unknown'
-      },
+      supply(
+        'Xanax',
+        'xanax',
+        4
+      ),
+      supply(
+        'Erotic DVD',
+        'erotic_dvd',
+        5,
+        false,
+        'Standard setup; job and faction perks can change the best amount.'
+      ),
+      supply(
+        'Ecstasy',
+        'ecstasy',
+        1
+      ),
       {
         item: 'Points',
+        key: 'points',
         quantity: 30,
         optional: true,
-        inventory_status: 'unknown',
+        inventory_count: null,
+        inventory_status: 'not_checked',
         note: 'Optional daily Energy refill; Points are not an inventory item.'
       }
     ];
+  }
+
+  function trainingReadinessSupplyPresentation(
+    snapshot = null
+  ) {
+    const supplies = trainingReadinessHappyJumpSupplies(snapshot);
+
+    if (snapshot?.status === 'available') {
+      const missingUnits = supplies
+        .filter(supply => !supply.optional && supply.inventory_status === 'missing')
+        .reduce(
+          (total, supply) =>
+            total + Math.max(0, supply.quantity - supply.inventory_count),
+          0
+        );
+
+      return {
+        state: missingUnits > 0 ? 'missing' : 'ready',
+        summary: missingUnits > 0
+          ? `${missingUnits.toLocaleString()} ${missingUnits === 1 ? 'item' : 'items'} missing`
+          : 'Jump items ready',
+        note: 'Personal inventory only · Torn may cache counts for up to 1 hour.',
+        supplies
+      };
+    }
+
+    const reason = String(snapshot?.reason || 'not_requested');
+    const messages = {
+      access_denied: {
+        summary: 'Inventory permission needed',
+        note: 'Allow user → inventory for this API key, then Reanalyze.'
+      },
+      api_key_unavailable: {
+        summary: 'Inventory unavailable',
+        note: 'Save a Torn API key, then Reanalyze to check supplies.'
+      },
+      invalid_response: {
+        summary: 'Inventory unavailable',
+        note: 'Torn returned incomplete inventory data, so no counts are shown.'
+      },
+      api_request_failed: {
+        summary: 'Inventory unavailable',
+        note: 'The supply refresh failed. Reanalyze to try again.'
+      },
+      not_requested: {
+        summary: 'Refresh to check supplies',
+        note: 'Reanalyze with Happy Jump selected to load inventory counts.'
+      }
+    };
+    const message = messages[reason] || messages.api_request_failed;
+
+    return {
+      state: 'unknown',
+      summary: message.summary,
+      note: message.note,
+      supplies
+    };
   }
 
   function trainingReadinessCooldownLabel(
@@ -19821,14 +20154,32 @@
         ? 'unknown'
         : 'waiting';
     const quarter = trainingReadinessQuarterHour(now * 1000);
-    const supplyRows = trainingReadinessHappyJumpSupplies()
-      .map(supply => `
-        <li>
+    const supplyPresentation = trainingReadinessSupplyPresentation(
+      readiness?.supply_snapshot
+    );
+    const supplyRows = supplyPresentation.supplies
+      .map(supply => {
+        const owned = Number(supply.inventory_count);
+        const countAvailable = Number.isSafeInteger(owned) && owned >= 0;
+        const statusLabel = supply.inventory_status === 'ready'
+          ? `${owned.toLocaleString()} owned · Ready`
+          : supply.inventory_status === 'missing'
+            ? `${owned.toLocaleString()} owned · Need ${(supply.quantity - owned).toLocaleString()}`
+            : supply.inventory_status === 'not_checked'
+              ? 'Not checked'
+              : 'Count unavailable';
+        const noteHtml = supply.note
+          ? '<small>' + escapeActivityHtml(supply.note) + '</small>'
+          : '';
+
+        return `
+        <li class="ta-training-supply-${escapeActivityHtml(supply.inventory_status)}">
           <span>${escapeActivityHtml(`${supply.item} ×${supply.quantity}${supply.optional ? ' · optional' : ''}`)}</span>
-          <b>Count unknown</b>
-          ${supply.note ? `<small>${escapeActivityHtml(supply.note)}</small>` : ''}
+          <b>${escapeActivityHtml(countAvailable || supply.inventory_status === 'not_checked' ? statusLabel : 'Count unavailable')}</b>
+          ${noteHtml}
         </li>
-      `)
+      `;
+      })
       .join('');
 
     return `
@@ -19852,9 +20203,9 @@
           </ol>
         </div>
         <details class="ta-training-supplies">
-          <summary><span>Jump supplies</span><b>Inventory counts unknown</b></summary>
+          <summary><span>Jump supplies</span><b class="ta-training-supply-summary-${escapeActivityHtml(supplyPresentation.state)}">${escapeActivityHtml(supplyPresentation.summary)}</b></summary>
           <ul>${supplyRows}</ul>
-          <p>Inventory tracking is not connected yet. Torn Analytics will not guess what you own, use items, or make purchases.</p>
+          <p>${escapeActivityHtml(supplyPresentation.note)}</p>
         </details>
         <p class="ta-training-guide-note">Xanax and Ecstasy can overdose and erase saved Energy. This assistant is read-only guidance, not a safety guarantee.</p>
       </div>
@@ -20494,7 +20845,8 @@
     bars,
     cooldowns,
     nowMs = Date.now(),
-    pageUrl = ''
+    pageUrl = '',
+    supplies = null
   ) {
     const actions = Array.isArray(growth?.training_actions)
       ? growth.training_actions
@@ -20614,6 +20966,14 @@
         Number.isSafeInteger(Number(cooldowns.booster_ready_at))
           ? Number(cooldowns.booster_ready_at)
           : null,
+      supply_snapshot:
+        supplies && typeof supplies === 'object'
+          ? supplies
+          : {
+              status: 'unavailable',
+              reason: 'not_requested',
+              fetched_at: null
+            },
       quarter_hour: trainingReadinessQuarterHour(nowMs),
       models,
       models_by_context: modelsByContext
@@ -34762,6 +35122,16 @@
         font-size: 11px;
         font-weight: 700;
         line-height: 1.4;
+      }
+
+      #${MODAL_ID} .ta-training-supplies .ta-training-supply-ready > b,
+      #${MODAL_ID} .ta-training-supplies .ta-training-supply-summary-ready {
+        color: #83c99c;
+      }
+
+      #${MODAL_ID} .ta-training-supplies .ta-training-supply-missing > b,
+      #${MODAL_ID} .ta-training-supplies .ta-training-supply-summary-missing {
+        color: #e4bb68;
       }
 
       #${MODAL_ID} .ta-training-guide-complete > b {
