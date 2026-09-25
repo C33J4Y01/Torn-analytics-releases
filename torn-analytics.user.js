@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.69
+// @version      2.18.70
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,11 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.69';
+  const VERSION = '2.18.70';
 
-  // v2.18.69 uses the most recent fully verified Happy Jump booster evidence
-  // for the next Erotic DVD target. API, prediction, and storage contracts
-  // remain unchanged.
+  // v2.18.70 reduces Settings density and separates routine diagnostics from
+  // recovery tools. API, analysis, security, and storage contracts remain
+  // unchanged.
 
   const API_BASE = 'https://api.torn.com/v2';
 
@@ -9770,7 +9770,7 @@
     if (
       syncRunning
     ) {
-      return 'Updating recent logs now. Dashboard analysis remains deferred until the tool is open.';
+      return 'Updating recent logs now.';
     }
 
     if (
@@ -9778,7 +9778,7 @@
         meta
       )
     ) {
-      return 'Automatic updates begin after the initial history build.';
+      return 'Starts after the initial history build.';
     }
 
     const updatedAt =
@@ -9795,8 +9795,7 @@
         : 'not recorded yet';
 
     return (
-      'On while Torn is active. Checks when history is at least 30 minutes old; ' +
-      `last history update: ${lastUpdate}.`
+      `Last update ${lastUpdate} · checks after 30 minutes`
     );
   }
 
@@ -34860,6 +34859,58 @@
         background: #101010;
       }
 
+      #${MODAL_ID} .panel[hidden] {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-history-status-card {
+        display: grid;
+        gap: 6px;
+        padding: 11px 12px;
+      }
+
+      #${MODAL_ID} .ta-history-status-heading {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      #${MODAL_ID} .ta-history-status-badges {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 5px;
+        margin-left: auto;
+      }
+
+      #${MODAL_ID} .ta-history-status-badges > strong {
+        padding: 3px 7px;
+        border: 1px solid #3e5947;
+        border-radius: 999px;
+        background: #152019;
+        color: #b9d8c1;
+        font-size: 10px;
+        white-space: nowrap;
+      }
+
+      #${MODAL_ID} .ta-history-summary-primary,
+      #${MODAL_ID} .ta-history-summary-secondary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 3px 6px;
+        line-height: 1.4;
+      }
+
+      #${MODAL_ID} .ta-history-summary-primary {
+        color: #ddd;
+        font-weight: 700;
+      }
+
+      #${MODAL_ID} .ta-history-summary-secondary {
+        margin-top: 2px;
+        opacity: .78;
+      }
+
       #${MODAL_ID} button,
       #${MODAL_ID} input,
       #${MODAL_ID} select {
@@ -35026,7 +35077,7 @@
 
       #${MODAL_ID} .ta-settings-status-strip {
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         justify-content: space-between;
         gap: 10px;
         padding: 9px 10px;
@@ -35035,18 +35086,35 @@
         background: #15151b;
       }
 
-      #${MODAL_ID} .ta-settings-status-strip > b {
-        flex: 0 0 auto;
+      #${MODAL_ID} .ta-settings-status-strip > span {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-settings-status-strip b {
         font-size: 12px;
       }
 
-      #${MODAL_ID} .ta-settings-status-strip > .small {
+      #${MODAL_ID} .ta-settings-status-strip small {
+        overflow-wrap: anywhere;
+        font-size: 10px;
+        opacity: .65;
+      }
+
+      #${MODAL_ID} .ta-settings-status-strip > strong {
         margin: 0;
-        text-align: right;
+        padding: 4px 7px;
+        border: 1px solid #3e5947;
+        border-radius: 999px;
+        background: #152019;
+        color: #b9d8c1;
+        font-size: 10px;
+        white-space: nowrap;
       }
 
       #${MODAL_ID} .actions.ta-settings-primary-actions {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 7px;
         margin-top: 5px;
       }
@@ -35058,6 +35126,29 @@
 
       #${MODAL_ID} .ta-settings-action-wide {
         grid-column: 1 / -1;
+      }
+
+      #${MODAL_ID} .ta-api-connection {
+        margin-top: 10px;
+      }
+
+      #${MODAL_ID} .ta-api-connection > summary > span {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-api-connection > summary small {
+        font-size: 10px;
+        font-weight: 500;
+        opacity: .62;
+      }
+
+      #${MODAL_ID} .ta-api-connection > summary > strong {
+        margin-left: auto;
+        color: #b9d8c1;
+        font-size: 10px;
+        white-space: nowrap;
       }
 
       #${MODAL_ID} .ta-settings-advanced {
@@ -35109,6 +35200,12 @@
         white-space: nowrap;
       }
 
+      #${MODAL_ID} .ta-settings-advanced-summary > strong[data-tone="warning"] {
+        border-color: #6a5430;
+        background: #211a10;
+        color: #e0ba73;
+      }
+
       #${MODAL_ID} .ta-settings-advanced-summary::after {
         content: '⌄';
         color: #aaa;
@@ -35130,15 +35227,26 @@
       }
 
       #${MODAL_ID} .ta-diagnostics-overview {
-        padding: 9px;
-        border: 1px solid #34433a;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 9px;
+        border: 1px solid #303038;
         border-radius: 8px;
-        background: #111914;
+        background: #15151a;
+      }
+
+      #${MODAL_ID} .ta-diagnostics-overview > .small {
+        flex: 1;
+        margin: 0;
       }
 
       #${MODAL_ID} .ta-diagnostics-overview > button {
-        min-height: 38px;
-        margin: 7px 0 0;
+        width: auto;
+        min-height: 36px;
+        margin: 0;
+        padding: 7px 9px;
+        font-size: 11px;
       }
 
       #${MODAL_ID} .ta-settings-tool {
@@ -35157,6 +35265,10 @@
         list-style: none;
         font-size: 12px;
         font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-settings-tool > summary > strong {
+        margin-left: auto;
       }
 
       #${MODAL_ID} .ta-settings-tool > summary::after {
@@ -35182,6 +35294,44 @@
       #${MODAL_ID} .ta-settings-tool-divider {
         margin: 11px 0;
         border-top: 1px solid #303038;
+      }
+
+      #${MODAL_ID} .ta-history-protection-card {
+        padding: 10px;
+        border: 1px solid #34433a;
+        border-radius: 8px;
+        background: #111914;
+      }
+
+      #${MODAL_ID} .ta-history-protection-state {
+        margin-top: 8px;
+        padding: 8px 9px;
+        border: 1px solid #3e5947;
+        border-radius: 7px;
+        background: #152019;
+        color: #b9d8c1;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      #${MODAL_ID} .ta-history-protection-state[data-tone="warning"] {
+        border-color: #6a5430;
+        background: #211a10;
+        color: #e0ba73;
+      }
+
+      #${MODAL_ID} .ta-history-protection-card > button,
+      #${MODAL_ID} .ta-settings-routine-action {
+        min-height: 40px;
+        margin: 8px 0 0;
+      }
+
+      #${MODAL_ID} .ta-settings-warning {
+        padding: 7px 8px;
+        border-left: 3px solid #b58438;
+        background: #1d1810;
+        color: #dfc18b;
+        opacity: 1;
       }
 
       #${MODAL_ID} .ta-training-snapshot-check-output,
@@ -36747,6 +36897,28 @@
         #${MODAL_ID} .actions,
         #${MODAL_ID} .stats {
           grid-template-columns: 1fr;
+        }
+
+        #${MODAL_ID} .actions.ta-settings-primary-actions {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        #${MODAL_ID} .ta-settings-primary-actions > button {
+          padding: 7px 4px;
+          font-size: 11px;
+        }
+
+        #${MODAL_ID} .ta-history-status-heading,
+        #${MODAL_ID} .ta-diagnostics-overview {
+          align-items: flex-start;
+        }
+
+        #${MODAL_ID} .ta-diagnostics-overview {
+          flex-direction: column;
+        }
+
+        #${MODAL_ID} .ta-diagnostics-overview > button {
+          width: 100%;
         }
 
         #${MODAL_ID} .ta-metric-grid {
@@ -38526,17 +38698,69 @@
       return '';
     }
 
+    const updatedAt =
+      Number(
+        cached.updated_at ||
+        0
+      );
+
+    const updatedText =
+      updatedAt
+        ? new Date(
+            updatedAt
+          ).toLocaleString()
+        : 'Update time unavailable';
+
     return `
-      ${cached.account_name}
-      [${cached.account_id}]
-      <br>
-      ${cached.count.toLocaleString()}
-      logs
-      <br>
-      ${timestampToLocalDate(cached.first_timestamp)}
-      →
-      ${timestampToLocalDate(cached.last_timestamp)}
+      <div class="ta-history-summary-primary">
+        ${cached.count.toLocaleString()} logs
+        <span>·</span>
+        Updated ${updatedText}
+      </div>
+      <div class="ta-history-summary-secondary">
+        ${cached.account_name} [${cached.account_id}]
+        <span>·</span>
+        ${timestampToLocalDate(cached.first_timestamp)}
+        →
+        ${timestampToLocalDate(cached.last_timestamp)}
+      </div>
     `;
+  }
+
+  function trainingSnapshotSettingsStatusText(
+    probe,
+    apiConnected = false
+  ) {
+    if (
+      probe?.result ===
+        'capture_access_confirmed'
+    ) {
+      return (
+        'Page snapshot available\n' +
+        `Energy ${Number(probe.energy).toLocaleString()} · ` +
+        `Happiness ${Number(probe.happiness).toLocaleString()} / ${Number(probe.happiness_maximum).toLocaleString()}`
+      );
+    }
+
+    if (
+      probe?.result ===
+        'resource_access_confirmed'
+    ) {
+      return (
+        'Page bars available\n' +
+        'Open the Gym to confirm training controls; no training is required.'
+      );
+    }
+
+    const fallbackText =
+      apiConnected
+        ? 'API checkpoint fallback active.'
+        : 'Connect an API key to use the checkpoint fallback.';
+
+    return (
+      'Page snapshot unavailable\n' +
+      `TornPDA is not exposing the required page controls here. ${fallbackText}`
+    );
   }
 
   async function openModal(
@@ -38583,11 +38807,19 @@
 
       historySection = `
 
-        <div class="panel">
+        <div class="panel ta-history-status-card">
+          <div class="ta-history-status-heading">
+            <b>History ready</b>
 
-          <b>
-            Stored history
-          </b>
+            <span class="ta-history-status-badges">
+              <strong id="ta-history-analysis-status">
+                Analysis ready
+              </strong>
+              <strong id="ta-history-protection-badge" hidden>
+                Protected
+              </strong>
+            </span>
+          </div>
 
           <div
             id="ta-stored-history-summary"
@@ -38595,7 +38827,6 @@
           >
             ${storedHistorySummaryHtml(cached)}
           </div>
-
         </div>
 
       `;
@@ -38649,14 +38880,6 @@
 
         <div class="ta-modal-scroll">
 
-        <div class="sub">
-
-          Your raw Torn log history is stored locally in IndexedDB
-          and remains available when the userscript code is replaced
-          by future compatible versions.
-
-        </div>
-
         ${historySection}
 
         <details class="ta-section ta-settings-section">
@@ -38668,28 +38891,43 @@
           <div class="ta-section-body">
             <div class="ta-settings-primary">
               <div class="ta-settings-status-strip">
-                <b>Automatic updates</b>
-                <span
-                  id="ta-automatic-sync-status"
-                  class="small"
-                >
-                  ${automaticLogSyncStatusText(cached)}
+                <span>
+                  <b>Automatic updates</b>
+                  <small id="ta-automatic-sync-status">
+                    ${automaticLogSyncStatusText(cached)}
+                  </small>
                 </span>
+
+                <strong id="ta-automatic-sync-state">On</strong>
               </div>
 
-              <div class="ta-settings-group">
-                <label class="ta-settings-label" for="ta-key">
-                  API key
-                </label>
+              <details class="ta-settings-tool ta-api-connection">
+                <summary>
+                  <span>
+                    <b>API connection</b>
+                    <small>Live resources and history updates</small>
+                  </span>
+                  <strong>${savedKey ? 'Connected' : 'Not connected'}</strong>
+                </summary>
 
-                <input
-                  id="ta-key"
-                  type="password"
-                  autocomplete="off"
-                  value=""
-                  placeholder="${savedKey ? 'Saved securely — leave blank to reuse' : 'Enter Torn API key'}"
-                >
-              </div>
+                <div class="ta-settings-tool-body">
+                  <label class="ta-settings-label" for="ta-key">
+                    API key
+                  </label>
+
+                  <input
+                    id="ta-key"
+                    type="password"
+                    autocomplete="off"
+                    value=""
+                    placeholder="${savedKey ? 'Saved securely — leave blank to reuse' : 'Enter Torn API key'}"
+                  >
+
+                  <div class="small">
+                    A new key is saved only when an action needs it.
+                  </div>
+                </div>
+              </details>
 
               <div class="ta-settings-group">
                 ${renderActivityTimeBasisControl()}
@@ -38715,9 +38953,8 @@
 
                         <button
                           id="ta-export-history"
-                          class="ta-settings-action-wide"
                         >
-                          Export History
+                          Export
                         </button>
 
                         <button
@@ -38727,11 +38964,6 @@
                         >
                           Save Export File
                         </button>
-
-                        <div class="small ta-settings-action-wide">
-                          Export creates a readable private copy without API
-                          or encryption keys.
-                        </div>
                       `
                       : `
                         <button
@@ -38746,15 +38978,12 @@
               </div>
             </div>
 
-            <details
-              id="ta-diagnostics-recovery"
-              class="ta-settings-advanced"
-            >
+            <details id="ta-diagnostics" class="ta-settings-advanced">
               <summary class="ta-settings-advanced-summary">
                 <span>
-                  <b>Diagnostics &amp; Recovery</b>
+                  <b>Diagnostics</b>
                   <small id="ta-diagnostics-summary-meta">
-                    Checks and advanced tools
+                    Local capture and reliability
                   </small>
                 </span>
 
@@ -38764,14 +38993,10 @@
               </summary>
 
               <div
-                id="ta-diagnostics-recovery-body"
+                id="ta-diagnostics-body"
                 class="ta-settings-advanced-body"
               >
                 <div class="ta-diagnostics-overview">
-                  <b id="ta-diagnostics-overview-title">
-                    System status: Checking…
-                  </b>
-
                   <div
                     id="ta-diagnostics-overview-meta"
                     class="small"
@@ -38864,15 +39089,33 @@
                   </div>
                 </details>
 
-                <details class="ta-settings-tool">
-                  <summary>History diagnostics &amp; recovery</summary>
-                  <div class="ta-settings-tool-body ta-history-tools">
-                    ${
-                      cached?.account_id
-                        ? `
-                          <button id="ta-forensic-history">
-                            Run History Diagnostic
-                          </button>
+              </div>
+            </details>
+
+            <details id="ta-history-recovery" class="ta-settings-advanced">
+              <summary class="ta-settings-advanced-summary">
+                <span>
+                  <b>History protection &amp; recovery</b>
+                  <small>Verification and advanced repair</small>
+                </span>
+
+                <strong id="ta-history-recovery-status">Checking…</strong>
+              </summary>
+
+              <div class="ta-settings-advanced-body ta-history-tools">
+                ${
+                  cached?.account_id
+                    ? `
+                      <button id="ta-forensic-history" class="ta-settings-routine-action">
+                        Check History Integrity
+                      </button>
+
+                      <details class="ta-settings-tool ta-rebuild-tools">
+                        <summary>Advanced rebuild tools</summary>
+                        <div class="ta-settings-tool-body">
+                          <div class="small ta-settings-warning">
+                            Use these only when diagnostics identify a history problem.
+                          </div>
 
                           <button id="ta-trace-history">
                             Trace Rebuild Collector
@@ -38883,25 +39126,29 @@
                           </button>
 
                           <div class="small">
-                            Full Rebuild recollects and verifies a replacement
-                            before atomically promoting it.
+                            A full rebuild verifies a replacement before
+                            atomically promoting it.
                           </div>
-                        `
-                        : `
-                          <div class="small">
-                            History tools become available after the initial
-                            history build.
-                          </div>
-                        `
-                    }
-                  </div>
-                </details>
+                        </div>
+                      </details>
+                    `
+                    : `
+                      <div class="small">
+                        History tools become available after the initial
+                        history build.
+                      </div>
+                    `
+                }
               </div>
             </details>
           </div>
         </details>
 
-        <div class="panel">
+        <div
+          id="ta-progress-panel"
+          class="panel ta-progress-panel"
+          ${cached?.account_id ? 'hidden' : ''}
+        >
 
           <div class="top">
 
@@ -39023,7 +39270,7 @@
       $('#ta-reliability-health-output');
 
     const diagnosticsSection =
-      $('#ta-diagnostics-recovery');
+      $('#ta-diagnostics');
 
     const diagnosticsRefreshButton =
       $('#ta-refresh-diagnostics');
@@ -39033,9 +39280,6 @@
 
     const diagnosticsSummaryMeta =
       $('#ta-diagnostics-summary-meta');
-
-    const diagnosticsOverviewTitle =
-      $('#ta-diagnostics-overview-title');
 
     const diagnosticsOverviewMeta =
       $('#ta-diagnostics-overview-meta');
@@ -39051,8 +39295,9 @@
         trainingSnapshotCapabilityProbe();
 
       trainingSnapshotCheckOutput.textContent =
-        trainingSnapshotCapabilityText(
-          probe
+        trainingSnapshotSettingsStatusText(
+          probe,
+          Boolean(savedKey)
         );
 
       return probe;
@@ -39215,13 +39460,6 @@
             ? 'Setup needed'
             : 'Review';
 
-      const statusTitle =
-        healthy
-          ? 'System status: Healthy'
-          : needsApiKey
-            ? 'System status: API key needed'
-            : 'System status: Review diagnostics';
-
       const checkpointCount =
         Array.isArray(
           checkpoint?.checkpoints
@@ -39254,13 +39492,6 @@
       ) {
         diagnosticsSummaryMeta.textContent =
           `${checkpointCount.toLocaleString()} checkpoints · ${intentCount.toLocaleString()} train taps`;
-      }
-
-      if (
-        diagnosticsOverviewTitle
-      ) {
-        diagnosticsOverviewTitle.textContent =
-          statusTitle;
       }
 
       if (
@@ -39408,6 +39639,18 @@
             meta
           );
       }
+
+      const state =
+        $('#ta-automatic-sync-state');
+
+      if (
+        state
+      ) {
+        state.textContent =
+          automaticLogSyncRunning
+            ? 'Updating'
+            : 'On';
+      }
     }
 
     async function refreshStoredHistorySummary() {
@@ -39537,6 +39780,46 @@
     const tracker =
       new ProgressTracker(
         info => {
+
+          const progressPanel =
+            $('#ta-progress-panel');
+
+          const analysisStatus =
+            $('#ta-history-analysis-status');
+
+          const finished =
+            info.percent >= 100;
+
+          const idle =
+            info.stage === 'Ready';
+
+          if (
+            progressPanel
+          ) {
+            progressPanel.hidden =
+              Boolean(
+                cached?.account_id &&
+                (
+                  idle ||
+                  finished
+                )
+              );
+          }
+
+          if (
+            analysisStatus
+          ) {
+            analysisStatus.textContent =
+              info.stage === 'Analysis ready'
+                ? 'Analysis ready'
+                : /failed|interrupted/i.test(
+                    info.stage
+                  )
+                  ? 'Needs review'
+                  : idle
+                    ? 'History ready'
+                    : 'Working';
+          }
 
           $('#ta-stage')
             .textContent =
@@ -40531,7 +40814,7 @@
 
       const settingsBody =
         modal.querySelector(
-          '#ta-diagnostics-recovery .ta-history-tools'
+          '#ta-history-recovery .ta-history-tools'
         );
 
       if (
@@ -40549,7 +40832,7 @@
         'ta-history-protection-panel';
 
       panel.className =
-        'ta-settings-group';
+        'ta-history-protection-card';
 
       const heading =
         document.createElement(
@@ -40558,6 +40841,20 @@
 
       heading.textContent =
         'Local history protection';
+
+      const state =
+        document.createElement(
+          'div'
+        );
+
+      state.id =
+        'ta-history-protection-state';
+
+      state.className =
+        'ta-history-protection-state';
+
+      state.textContent =
+        'Checking protection…';
 
       const detail =
         document.createElement(
@@ -40603,6 +40900,10 @@
       );
 
       panel.appendChild(
+        state
+      );
+
+      panel.appendChild(
         detail
       );
 
@@ -40614,9 +40915,51 @@
         verifyButton
       );
 
-      settingsBody.appendChild(
+      settingsBody.prepend(
         panel
       );
+
+      function setProtectionUiState(
+        label,
+        tone = 'neutral',
+        detailLabel = label
+      ) {
+        state.textContent =
+          detailLabel;
+
+        state.dataset.tone =
+          tone;
+
+        const recoveryStatus =
+          modal.querySelector(
+            '#ta-history-recovery-status'
+          );
+
+        if (
+          recoveryStatus
+        ) {
+          recoveryStatus.textContent =
+            label;
+
+          recoveryStatus.dataset.tone =
+            tone;
+        }
+
+        const historyBadge =
+          modal.querySelector(
+            '#ta-history-protection-badge'
+          );
+
+        if (
+          historyBadge
+        ) {
+          historyBadge.hidden =
+            tone !== 'positive';
+
+          historyBadge.textContent =
+            'Protected';
+        }
+      }
 
       async function refreshProtectionPanel() {
         try {
@@ -40627,8 +40970,16 @@
             verification.status ===
             'failed'
           ) {
+            setProtectionUiState(
+              'Unavailable',
+              'warning'
+            );
+
             detail.textContent =
               `Protection unavailable: ${verification.reason || 'verification failed.'}`;
+
+            button.hidden =
+              true;
 
             button.disabled =
               true;
@@ -40647,13 +40998,19 @@
           if (
             status.complete
           ) {
+            setProtectionUiState(
+              'Protected',
+              'positive',
+              `${status.protected.toLocaleString()} logs protected`
+            );
+
             detail.textContent =
               `${status.protected.toLocaleString()} stored Torn logs are encrypted at rest. ` +
               'Only account, record identity, and timestamp indexes remain outside the encrypted payload. ' +
               'Recovery verification is non-destructive.';
 
-            button.textContent =
-              'Stored History Protected';
+            button.hidden =
+              true;
 
             button.disabled =
               true;
@@ -40668,8 +41025,16 @@
             verification.status ===
             'initialized'
           ) {
+            setProtectionUiState(
+              'Restart required',
+              'warning'
+            );
+
             detail.textContent =
               'The local encryption key has been initialized. Reopen Torn before migrating existing history so the key can be verified across a fresh userscript run.';
+
+            button.hidden =
+              true;
 
             button.disabled =
               true;
@@ -40680,9 +41045,18 @@
             return;
           }
 
+          setProtectionUiState(
+            'Action needed',
+            'warning',
+            `${status.plaintext.toLocaleString()} logs need protection`
+          );
+
           detail.textContent =
             `${status.plaintext.toLocaleString()} of ${status.total.toLocaleString()} stored logs are still plaintext. ` +
             'Protection is resumable; closing the app mid-migration will not invalidate records already completed.';
+
+          button.hidden =
+            false;
 
           button.textContent =
             status.protected > 0
@@ -40696,8 +41070,16 @@
             true;
 
         } catch (error) {
+          setProtectionUiState(
+            'Status unavailable',
+            'warning'
+          );
+
           detail.textContent =
             `Protection status check failed: ${error.message}`;
+
+          button.hidden =
+            true;
 
           button.disabled =
             true;
@@ -40739,6 +41121,11 @@
           detail.textContent =
             'Preparing protected-history migration…';
 
+          setProtectionUiState(
+            'Protecting…',
+            'neutral'
+          );
+
           try {
             const result =
               await migrateAccountHistoryProtection(
@@ -40753,9 +41140,6 @@
             detail.textContent =
               `${result.total.toLocaleString()} stored Torn logs are protected. ` +
               `${result.migrated.toLocaleString()} records were encrypted during this run.`;
-
-            button.textContent =
-              'Stored History Protected';
 
             alert(
               'Stored history protection complete.\n\n' +
