@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.74
+// @version      2.18.75
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,12 +22,14 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.74';
+  const VERSION = '2.18.75';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
   // v2.18.73 repairs the device-tested Command Center mounting boundary.
   // v2.18.74 preserves the Overall Activity drawer through reopen and rotation.
+  // v2.18.75 compacts the repeated history status surface and tightens the
+  // top-level mobile hierarchy without changing data or analysis behavior.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -35029,7 +35031,7 @@
         z-index: 4;
         display: flex;
         gap: 6px;
-        margin: -16px -16px 14px;
+        margin: -16px -16px 10px;
         padding: 10px 12px;
         overflow-x: auto;
         border-bottom: 1px solid #333;
@@ -35159,21 +35161,53 @@
         display: none;
       }
 
-      #${MODAL_ID} .ta-history-status-card {
-        display: grid;
-        gap: 6px;
-        padding: 11px 12px;
+      #${MODAL_ID} .ta-history-status-strip {
+        margin-bottom: 8px;
+        padding: 0;
+        overflow: hidden;
       }
 
-      #${MODAL_ID} .ta-history-status-heading {
+      #${MODAL_ID} .ta-history-status-summary {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
+        min-height: 40px;
+        padding: 8px 10px;
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      #${MODAL_ID} .ta-history-status-summary::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-history-status-summary::after {
+        content: '▾';
+        flex: 0 0 auto;
+        font-size: 12px;
+        opacity: .65;
+        transition: transform .15s ease;
+      }
+
+      #${MODAL_ID} .ta-history-status-strip:not([open]) .ta-history-status-summary::after {
+        transform: rotate(-90deg);
+      }
+
+      #${MODAL_ID} .ta-history-status-main {
+        display: flex;
+        align-items: baseline;
+        gap: 5px;
+        min-width: 0;
+        color: #ddd;
+        font-size: 12px;
+        white-space: nowrap;
       }
 
       #${MODAL_ID} .ta-history-status-badges {
         display: flex;
-        flex-wrap: wrap;
+        flex: 0 0 auto;
         justify-content: flex-end;
         gap: 5px;
         margin-left: auto;
@@ -35187,6 +35221,11 @@
         color: #b9d8c1;
         font-size: 10px;
         white-space: nowrap;
+      }
+
+      #${MODAL_ID} .ta-history-status-details {
+        padding: 8px 10px 10px;
+        border-top: 1px solid #2d2d2d;
       }
 
       #${MODAL_ID} .ta-history-summary-primary,
@@ -35284,6 +35323,11 @@
         border: 1px solid #3a3a3a;
         border-radius: 10px;
         background: #101010;
+      }
+
+      #${MODAL_ID} [data-ta-primary-panel="settings"] > .ta-section,
+      #${MODAL_ID} #ta-status > [data-ta-primary-panel] > .ta-section {
+        margin-top: 8px;
       }
 
       #${MODAL_ID} .ta-section-summary-row {
@@ -37204,9 +37248,22 @@
           font-size: 11px;
         }
 
-        #${MODAL_ID} .ta-history-status-heading,
         #${MODAL_ID} .ta-diagnostics-overview {
           align-items: flex-start;
+        }
+
+        #${MODAL_ID} .ta-history-status-summary {
+          gap: 6px;
+          padding: 8px 9px;
+        }
+
+        #${MODAL_ID} .ta-history-status-main {
+          font-size: 11px;
+        }
+
+        #${MODAL_ID} .ta-history-status-badges > strong {
+          padding: 2px 6px;
+          font-size: 9px;
         }
 
         #${MODAL_ID} .ta-diagnostics-overview {
@@ -39008,6 +39065,14 @@
     `;
   }
 
+  function storedHistoryCompactText(
+    cached
+  ) {
+    return cached?.count
+      ? `${cached.count.toLocaleString()} logs`
+      : 'History unavailable';
+  }
+
   function trainingSnapshotSettingsStatusText(
     probe,
     apiConnected = false
@@ -39151,9 +39216,15 @@
 
       historySection = `
 
-        <div class="panel ta-history-status-card">
-          <div class="ta-history-status-heading">
-            <b>History ready</b>
+        <details class="panel ta-history-status-strip">
+          <summary class="ta-history-status-summary">
+            <span class="ta-history-status-main">
+              <b>History ready</b>
+              <span aria-hidden="true">·</span>
+              <span id="ta-stored-history-compact">
+                ${storedHistoryCompactText(cached)}
+              </span>
+            </span>
 
             <span class="ta-history-status-badges">
               <strong id="ta-history-analysis-status">
@@ -39163,15 +39234,15 @@
                 Protected
               </strong>
             </span>
-          </div>
+          </summary>
 
           <div
             id="ta-stored-history-summary"
-            class="small"
+            class="small ta-history-status-details"
           >
             ${storedHistorySummaryHtml(cached)}
           </div>
-        </div>
+        </details>
 
       `;
 
@@ -40092,15 +40163,30 @@
       const storedHistorySummary =
         $('#ta-stored-history-summary');
 
+      const storedHistoryCompact =
+        $('#ta-stored-history-compact');
+
       if (
-        storedHistorySummary &&
         refreshedCached?.account_id &&
         refreshedCached.count
       ) {
-        storedHistorySummary.innerHTML =
-          storedHistorySummaryHtml(
-            refreshedCached
-          );
+        if (
+          storedHistorySummary
+        ) {
+          storedHistorySummary.innerHTML =
+            storedHistorySummaryHtml(
+              refreshedCached
+            );
+        }
+
+        if (
+          storedHistoryCompact
+        ) {
+          storedHistoryCompact.textContent =
+            storedHistoryCompactText(
+              refreshedCached
+            );
+        }
       }
 
       refreshAutomaticLogSyncStatus(
