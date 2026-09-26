@@ -38852,21 +38852,6 @@
   // MODAL
   // ============================================================
 
-  function shouldRestoreStoredAnalysis(
-    restoreState,
-    cached,
-    analyzeButton
-  ) {
-    void restoreState;
-
-    return Boolean(
-      cached?.account_id &&
-      cached.count &&
-      analyzeButton &&
-      !automaticLogSyncRunning
-    );
-  }
-
   function storedHistorySummaryHtml(
     cached
   ) {
@@ -39928,12 +39913,11 @@
     const settingsSection =
       $('.ta-settings-section');
 
+    // Existing local history should populate the dashboard immediately.
+    // Automatic synchronization may refresh it again when that background
+    // update completes, but it must not block the initial local analysis.
     let restoreAnalysisAfterAutomaticSync =
-      Boolean(
-        automaticLogSyncRunning &&
-        cached?.account_id &&
-        cached.count
-      );
+      false;
 
     function applyAutomaticLogSyncModalState(
       syncRunning = automaticLogSyncRunning
@@ -41029,11 +41013,9 @@
     }
 
     if (
-      shouldRestoreStoredAnalysis(
-        restoreState,
-        cached,
-        analyzeButton
-      )
+      cached?.account_id &&
+      cached.count &&
+      analyzeButton
     ) {
       tracker.setStage(
         'Restoring dashboard',
