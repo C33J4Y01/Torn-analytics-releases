@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.73
+// @version      2.18.74
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,11 +22,12 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.73';
+  const VERSION = '2.18.74';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
   // v2.18.73 repairs the device-tested Command Center mounting boundary.
+  // v2.18.74 preserves the Overall Activity drawer through reopen and rotation.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -13082,6 +13083,46 @@
       return;
     }
 
+    const activityDashboard =
+      root.querySelector(
+        '.ta-activity-section'
+      );
+    const persistActivityOpenState =
+      () =>
+        persistActivityDashboardState(
+          root
+        );
+
+    activityDashboard?.addEventListener(
+      'toggle',
+      persistActivityOpenState
+    );
+
+    // TornPDA's embedded WebKit can miss a details toggle event after touch.
+    // Read the final native state on the next task as a reliable fallback.
+    root.addEventListener(
+      'click',
+      event => {
+        const summary =
+          event.target?.closest?.(
+            'summary'
+          );
+
+        if (
+          !summary?.parentElement?.matches?.(
+            '.ta-activity-section'
+          )
+        ) {
+          return;
+        }
+
+        setTimeout(
+          persistActivityOpenState,
+          0
+        );
+      }
+    );
+
     const timeBasisButtons =
       Array.from(
         root.querySelectorAll(
@@ -13202,6 +13243,24 @@
         }
       );
     }
+  }
+
+  function persistActivityDashboardState(
+    root
+  ) {
+    const dashboard =
+      root?.querySelector?.(
+        '.ta-activity-section'
+      );
+
+    if (!dashboard) {
+      return;
+    }
+
+    writeActivityDashboardPreferences({
+      activity_dashboard_open:
+        dashboard.open === true
+    });
   }
 
   function renderActivityCategoryBars(
@@ -13420,9 +13479,13 @@
       partialContext.is_partial_today
         ? ' · today partial'
         : '';
+    const dashboardOpen =
+      readActivityDashboardPreferences()
+        .activity_dashboard_open ===
+      true;
 
     return `
-      <details class="ta-section ta-activity-section">
+      <details class="ta-section ta-activity-section" ${dashboardOpen ? 'open' : ''}>
         <summary class="ta-section-summary-row">
           <span class="ta-section-title">
             Overall Activity
@@ -13480,6 +13543,9 @@
   // They contain no account data and never restore the modal itself.
   const UI_RESOURCE_PREFERENCES_STORAGE_KEY =
     'tornAnalyticsResourcePreferencesV1';
+
+  const UI_ACTIVITY_PREFERENCES_STORAGE_KEY =
+    'tornAnalyticsActivityPreferencesV1';
 
   const UI_STAT_GROWTH_PREFERENCES_STORAGE_KEY =
     'tornAnalyticsStatGrowthPreferencesV1';
@@ -13615,6 +13681,59 @@
         JSON.stringify(next)
       );
     } catch (_) {}
+  }
+
+  function readActivityDashboardPreferences() {
+    try {
+      const raw = uiOrientationHandoffStorage()?.getItem(
+        UI_ACTIVITY_PREFERENCES_STORAGE_KEY
+      );
+      const parsed = raw ? JSON.parse(raw) : null;
+      return {
+        activity_dashboard_open:
+          uiSessionOptionalBoolean(
+            parsed?.activity_dashboard_open
+          )
+      };
+    } catch (_) {
+      return {
+        activity_dashboard_open: null
+      };
+    }
+  }
+
+  function writeActivityDashboardPreferences(
+    patch = {}
+  ) {
+    const current =
+      readActivityDashboardPreferences();
+    const value =
+      uiSessionOptionalBoolean(
+        patch?.activity_dashboard_open
+      );
+
+    if (
+      value === null ||
+      value === current.activity_dashboard_open
+    ) {
+      return current;
+    }
+
+    const next = {
+      activity_dashboard_open:
+        value
+    };
+
+    try {
+      uiOrientationHandoffStorage()?.setItem(
+        UI_ACTIVITY_PREFERENCES_STORAGE_KEY,
+        JSON.stringify(
+          next
+        )
+      );
+    } catch (_) {}
+
+    return next;
   }
 
   function uiSessionStatView(
@@ -41063,10 +41182,17 @@
 
         // Save the actual rendered drawer states immediately before TornPDA
         // removes this modal; this is the reliable fallback for touch WebKit.
-        persistResourceDashboardState(
+        const renderedAnalysisHost =
           document.getElementById(
             'ta-status'
-          )
+          );
+
+        persistActivityDashboardState(
+          renderedAnalysisHost
+        );
+
+        persistResourceDashboardState(
+          renderedAnalysisHost
         );
 
         writeUiSessionState({
