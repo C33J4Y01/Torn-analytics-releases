@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.72
+// @version      2.18.73
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,10 +22,11 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.72';
+  const VERSION = '2.18.73';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
+  // v2.18.73 repairs the device-tested Command Center mounting boundary.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -10716,13 +10717,9 @@
         'ta-status'
       );
 
-    if (
-      typeof renderCommandCenterSnapshot === 'function'
-    ) {
-      renderCommandCenterSnapshot(
-        latestAnalysis
-      );
-    }
+    renderCommandCenterSnapshot(
+      latestAnalysis
+    );
 
     if (
       analysisHost
@@ -10742,9 +10739,6 @@
         ) +
         '</div>';
 
-      if (typeof applyPrimaryTabPanels === 'function') {
-        applyPrimaryTabPanels(readPrimaryTabPreference());
-      }
 
       bindStoredAnalysisDashboardInteractions(
         analysisHost,
@@ -34948,7 +34942,11 @@
         color: #f2f7f7;
       }
 
-      #${MODAL_ID} [data-ta-primary-panel][hidden] {\n        display: none !important;\n      }\n\n      #${MODAL_ID} .ta-command-center {
+      #${MODAL_ID} [data-ta-primary-panel][hidden] {
+        display: none !important;
+      }
+
+      #${MODAL_ID} .ta-command-center {
         margin-bottom: 14px;
       }
 
@@ -38927,6 +38925,69 @@
     );
   }
 
+  function renderCommandCenterSnapshot(analysis) {
+    const commandCenterHost =
+      document.querySelector(
+        '[data-ta-command-center-live]'
+      );
+
+    if (!commandCenterHost) return;
+
+    const readiness = analysis?.training_readiness || null;
+    const growth = analysis?.stat_growth || null;
+    const plan = readTrainingReadinessPlan();
+    const advice = readiness
+      ? trainingReadinessPlanAdvice(readiness, plan, undefined, growth)
+      : null;
+    const energy = Number.isFinite(Number(readiness?.energy))
+      ? Number(readiness.energy)
+      : null;
+    const maximum = Number.isFinite(Number(readiness?.energy_maximum))
+      ? Number(readiness.energy_maximum)
+      : null;
+    const energyAtNaturalMaximum =
+      energy !== null &&
+      maximum !== null &&
+      energy >= maximum &&
+      energy < 1000;
+    const drug = trainingReadinessCooldownLabel(readiness?.drug_ready_at);
+    const booster = trainingReadinessCooldownLabel(readiness?.booster_ready_at);
+    const summary = statGrowthCompactSummaryModel(growth || {}, '7d', 'all');
+    const recap = statGrowthTrainingRecapSentence(summary);
+
+    commandCenterHost.innerHTML = `
+      <div class="ta-command-action ta-command-tone-${escapeActivityHtml(advice?.tone || 'info')}">
+        <span class="ta-command-center-kicker">Current action</span>
+        <strong>${escapeActivityHtml(advice?.title || 'Training guidance unavailable')}</strong>
+        <small>${escapeActivityHtml(advice?.detail || 'Refresh stored analysis to restore guidance.')}</small>
+      </div>
+      <div class="ta-command-status-row">
+        <div class="ta-command-energy ${energyAtNaturalMaximum ? 'is-action' : ''}">
+          <span>Energy</span>
+          <strong>${energy === null ? '—' : energy.toLocaleString() + 'E'}</strong>
+          <small>${
+            energyAtNaturalMaximum
+              ? 'At natural maximum · train to resume regeneration'
+              : energy !== null && energy >= 1000
+                ? 'Stacked Energy'
+                : maximum !== null
+                  ? 'Natural max ' + maximum.toLocaleString() + 'E'
+                  : 'Live state'
+          }</small>
+        </div>
+        <div class="ta-command-cooldowns">
+          <span>Cooldowns</span>
+          <b>Drug · ${escapeActivityHtml(drug.label)}</b>
+          <b>Booster · ${escapeActivityHtml(booster.label)}</b>
+        </div>
+      </div>
+      <div class="ta-command-recap">
+        <span>Recent training recap · ${escapeActivityHtml(summary.period_label)}</span>
+        <strong>${escapeActivityHtml(recap)}</strong>
+      </div>
+    `;
+  }
+
   async function openModal(
     options = {}
   ) {
@@ -39405,6 +39466,8 @@
 
         </div>
 
+        </div>
+
         <div id="ta-status"></div>
 
         </div>
@@ -39501,67 +39564,6 @@
       readPrimaryTabPreference(),
       false
     );
-
-    const commandCenterHost =
-      $('[data-ta-command-center-live]');
-
-    function renderCommandCenterSnapshot(analysis) {
-      if (!commandCenterHost) return;
-
-      const readiness = analysis?.training_readiness || null;
-      const growth = analysis?.stat_growth || null;
-      const plan = readTrainingReadinessPlan();
-      const advice = readiness
-        ? trainingReadinessPlanAdvice(readiness, plan, undefined, growth)
-        : null;
-      const energy = Number.isFinite(Number(readiness?.energy))
-        ? Number(readiness.energy)
-        : null;
-      const maximum = Number.isFinite(Number(readiness?.energy_maximum))
-        ? Number(readiness.energy_maximum)
-        : null;
-      const energyAtNaturalMaximum =
-        energy !== null &&
-        maximum !== null &&
-        energy >= maximum &&
-        energy < 1000;
-      const drug = trainingReadinessCooldownLabel(readiness?.drug_ready_at);
-      const booster = trainingReadinessCooldownLabel(readiness?.booster_ready_at);
-      const summary = statGrowthCompactSummaryModel(growth || {}, '7d', 'all');
-      const recap = statGrowthTrainingRecapSentence(summary);
-
-      commandCenterHost.innerHTML = `
-        <div class="ta-command-action ta-command-tone-${escapeActivityHtml(advice?.tone || 'info')}">
-          <span class="ta-command-center-kicker">Current action</span>
-          <strong>${escapeActivityHtml(advice?.title || 'Training guidance unavailable')}</strong>
-          <small>${escapeActivityHtml(advice?.detail || 'Refresh stored analysis to restore guidance.')}</small>
-        </div>
-        <div class="ta-command-status-row">
-          <div class="ta-command-energy ${energyAtNaturalMaximum ? 'is-action' : ''}">
-            <span>Energy</span>
-            <strong>${energy === null ? '—' : energy.toLocaleString() + 'E'}</strong>
-            <small>${
-              energyAtNaturalMaximum
-                ? 'At natural maximum · train to resume regeneration'
-                : energy !== null && energy >= 1000
-                  ? 'Stacked Energy'
-                  : maximum !== null
-                    ? 'Natural max ' + maximum.toLocaleString() + 'E'
-                    : 'Live state'
-            }</small>
-          </div>
-          <div class="ta-command-cooldowns">
-            <span>Cooldowns</span>
-            <b>Drug · ${escapeActivityHtml(drug.label)}</b>
-            <b>Booster · ${escapeActivityHtml(booster.label)}</b>
-          </div>
-        </div>
-        <div class="ta-command-recap">
-          <span>Recent training recap · ${escapeActivityHtml(summary.period_label)}</span>
-          <strong>${escapeActivityHtml(recap)}</strong>
-        </div>
-      `;
-    }
 
     const analysisHost =
       $('#ta-status');
@@ -40403,6 +40405,12 @@
         await analyzeStoredLogs(
           tracker,
           optionalApiKey
+        );
+
+        // The dashboards are mounted by analyzeStoredLogs after the initial
+        // tab selection, so reapply visibility to the newly created panels.
+        applyPrimaryTabPanels(
+          readPrimaryTabPreference()
         );
 
         await refreshStoredHistorySummary();
