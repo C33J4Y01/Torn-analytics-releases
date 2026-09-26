@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.75
+// @version      2.18.76
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.75';
+  const VERSION = '2.18.76';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -30,6 +30,8 @@
   // v2.18.74 preserves the Overall Activity drawer through reopen and rotation.
   // v2.18.75 compacts the repeated history status surface and tightens the
   // top-level mobile hierarchy without changing data or analysis behavior.
+  // v2.18.76 extends durable touch-safe persistence to every top-level
+  // Command Center drawer across close, reopen, refresh, and rotation.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -13549,6 +13551,9 @@
   const UI_ACTIVITY_PREFERENCES_STORAGE_KEY =
     'tornAnalyticsActivityPreferencesV1';
 
+  const UI_COMMAND_CENTER_DRAWER_PREFERENCES_STORAGE_KEY =
+    'tornAnalyticsCommandCenterDrawerPreferencesV1';
+
   const UI_STAT_GROWTH_PREFERENCES_STORAGE_KEY =
     'tornAnalyticsStatGrowthPreferencesV1';
 
@@ -13738,6 +13743,85 @@
     return next;
   }
 
+  function readCommandCenterDrawerPreferences() {
+    try {
+      const raw =
+        uiOrientationHandoffStorage()?.getItem(
+          UI_COMMAND_CENTER_DRAWER_PREFERENCES_STORAGE_KEY
+        );
+      const parsed =
+        raw
+          ? JSON.parse(
+              raw
+            )
+          : null;
+
+      return {
+        history_status_open:
+          uiSessionOptionalBoolean(
+            parsed?.history_status_open
+          ),
+        settings_dashboard_open:
+          uiSessionOptionalBoolean(
+            parsed?.settings_dashboard_open
+          )
+      };
+    } catch (_) {
+      return {
+        history_status_open: null,
+        settings_dashboard_open: null
+      };
+    }
+  }
+
+  function writeCommandCenterDrawerPreferences(
+    patch = {}
+  ) {
+    const current =
+      readCommandCenterDrawerPreferences();
+    const next = {
+      ...current
+    };
+
+    for (
+      const key
+      of [
+        'history_status_open',
+        'settings_dashboard_open'
+      ]
+    ) {
+      const value =
+        uiSessionOptionalBoolean(
+          patch?.[key]
+        );
+
+      if (
+        value !== null
+      ) {
+        next[key] =
+          value;
+      }
+    }
+
+    if (
+      JSON.stringify(next) ===
+      JSON.stringify(current)
+    ) {
+      return next;
+    }
+
+    try {
+      uiOrientationHandoffStorage()?.setItem(
+        UI_COMMAND_CENTER_DRAWER_PREFERENCES_STORAGE_KEY,
+        JSON.stringify(
+          next
+        )
+      );
+    } catch (_) {}
+
+    return next;
+  }
+
   function uiSessionStatView(
     value
   ) {
@@ -13798,6 +13882,10 @@
         );
 
       return {
+        training_workspace_open:
+          uiSessionOptionalBoolean(
+            parsed?.training_workspace_open
+          ),
         stat_growth_focus:
           uiSessionTrainingFocus(
             parsed?.stat_growth_focus ||
@@ -13814,6 +13902,8 @@
       };
     } catch (_) {
       return {
+        training_workspace_open:
+          null,
         stat_growth_focus:
           'recent',
         training_summary_stat:
@@ -13841,6 +13931,18 @@
     const next = {
       ...current
     };
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        safePatch,
+        'training_workspace_open'
+      )
+    ) {
+      next.training_workspace_open =
+        uiSessionOptionalBoolean(
+          safePatch.training_workspace_open
+        );
+    }
 
     if (
       Object.prototype.hasOwnProperty.call(
@@ -29295,14 +29397,78 @@
       section?.addEventListener(
         'toggle',
         () => {
-          writeUiSessionState({
-            [key]:
-              section.open ===
-              true
-          });
+          if (
+            key ===
+            'training_workspace_open'
+          ) {
+            persistTrainingWorkspaceState(
+              root
+            );
+          } else {
+            writeUiSessionState({
+              [key]:
+                section.open ===
+                true
+            });
+          }
         }
       );
     }
+
+    // TornPDA WebKit can miss the native details toggle after a touch.
+    // Capture the final open state on the next task as a fallback.
+    root?.addEventListener?.(
+      'click',
+      event => {
+        const summary =
+          event.target?.closest?.(
+            'summary'
+          );
+
+        if (
+          !summary?.parentElement?.matches?.(
+            '.ta-training-workspace-section'
+          )
+        ) {
+          return;
+        }
+
+        setTimeout(
+          () =>
+            persistTrainingWorkspaceState(
+              root
+            ),
+          0
+        );
+      }
+    );
+  }
+
+  function persistTrainingWorkspaceState(
+    root
+  ) {
+    const section =
+      root?.querySelector?.(
+        '.ta-training-workspace-section'
+      );
+
+    if (!section) {
+      return;
+    }
+
+    const open =
+      section.open ===
+      true;
+
+    writeUiSessionState({
+      training_workspace_open:
+        open
+    });
+
+    writeStatGrowthPreferences({
+      training_workspace_open:
+        open
+    });
   }
 
   function renderStoredAnalysisDashboards(
@@ -39073,6 +39239,36 @@
       : 'History unavailable';
   }
 
+  function persistCommandCenterDrawerState(
+    root
+  ) {
+    const history =
+      root?.querySelector?.(
+        '.ta-history-status-strip'
+      );
+    const settings =
+      root?.querySelector?.(
+        '.ta-settings-section'
+      );
+    const patch = {};
+
+    if (history) {
+      patch.history_status_open =
+        history.open ===
+        true;
+    }
+
+    if (settings) {
+      patch.settings_dashboard_open =
+        settings.open ===
+        true;
+    }
+
+    writeCommandCenterDrawerPreferences(
+      patch
+    );
+  }
+
   function trainingSnapshotSettingsStatusText(
     probe,
     apiConnected = false
@@ -39199,6 +39395,9 @@
     const savedKey =
       await loadSecureApiKey();
 
+    const commandCenterDrawerPreferences =
+      readCommandCenterDrawerPreferences();
+
     const modal =
       document.createElement(
         'div'
@@ -39216,7 +39415,7 @@
 
       historySection = `
 
-        <details class="panel ta-history-status-strip">
+        <details class="panel ta-history-status-strip" ${commandCenterDrawerPreferences.history_status_open === true ? 'open' : ''}>
           <summary class="ta-history-status-summary">
             <span class="ta-history-status-main">
               <b>History ready</b>
@@ -39313,7 +39512,7 @@
 
         ${historySection}
 
-        <div data-ta-primary-panel="settings">\n        <details class="ta-section ta-settings-section">
+        <div data-ta-primary-panel="settings">\n        <details class="ta-section ta-settings-section" ${commandCenterDrawerPreferences.settings_dashboard_open === true ? 'open' : ''}>
           <summary class="ta-section-summary-row">
             <span class="ta-section-title">Settings</span>
             <span class="ta-section-meta">Actions &amp; preferences</span>
@@ -39753,6 +39952,47 @@
     selectPrimaryTab(
       readPrimaryTabPreference(),
       false
+    );
+
+    const persistCommandCenterOpenState =
+      () =>
+        persistCommandCenterDrawerState(
+          modal
+        );
+
+    for (
+      const section
+      of modal.querySelectorAll(
+        '.ta-history-status-strip, .ta-settings-section'
+      )
+    ) {
+      section.addEventListener(
+        'toggle',
+        persistCommandCenterOpenState
+      );
+    }
+
+    modal.addEventListener(
+      'click',
+      event => {
+        const summary =
+          event.target?.closest?.(
+            'summary'
+          );
+
+        if (
+          !summary?.parentElement?.matches?.(
+            '.ta-history-status-strip, .ta-settings-section'
+          )
+        ) {
+          return;
+        }
+
+        setTimeout(
+          persistCommandCenterOpenState,
+          0
+        );
+      }
     );
 
     const analysisHost =
@@ -41272,6 +41512,14 @@
           document.getElementById(
             'ta-status'
           );
+
+        persistCommandCenterDrawerState(
+          modal
+        );
+
+        persistTrainingWorkspaceState(
+          renderedAnalysisHost
+        );
 
         persistActivityDashboardState(
           renderedAnalysisHost
