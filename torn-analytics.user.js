@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.77
+// @version      2.18.78
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.77';
+  const VERSION = '2.18.78';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -34,6 +34,8 @@
   // Command Center drawer across close, reopen, refresh, and rotation.
   // v2.18.77 moves the Resources drawer onto the shared Command Center
   // preference path while retaining each resource row's durable state.
+  // v2.18.78 replaces the unreliable Resources drawer with an always-visible
+  // section and keeps optional historical details compact by default.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -10741,8 +10743,7 @@
         '<div data-ta-primary-panel="resources">' +
         renderResourceDashboard(
           latestAnalysis?.resource_flow,
-          latestAnalysis?.resource_bars,
-          { ...readUiSessionState(), ...readResourceDashboardPreferences() }
+          latestAnalysis?.resource_bars
         ) +
         '</div>';
 
@@ -13659,15 +13660,8 @@
         UI_RESOURCE_PREFERENCES_STORAGE_KEY
       );
       const parsed = raw ? JSON.parse(raw) : null;
-      const commandCenter =
-        readCommandCenterDrawerPreferences();
       return {
-        // The top-level Resources drawer belongs to the Command Center shell.
-        // Prefer that shared store while retaining the original resource value
-        // as a migration fallback for existing installations.
-        resource_dashboard_open:
-          commandCenter.resource_dashboard_open ??
-          uiSessionOptionalBoolean(parsed?.resource_dashboard_open),
+        resource_dashboard_open: uiSessionOptionalBoolean(parsed?.resource_dashboard_open),
         resource_energy_open: uiSessionOptionalBoolean(parsed?.resource_energy_open),
         resource_nerve_open: uiSessionOptionalBoolean(parsed?.resource_nerve_open),
         resource_happiness_open: uiSessionOptionalBoolean(parsed?.resource_happiness_open)
@@ -13690,28 +13684,13 @@
       const value = uiSessionOptionalBoolean(patch[key]);
       if (value !== null) next[key] = value;
     }
-    if (JSON.stringify(next) !== JSON.stringify(current)) {
-      try {
-        uiOrientationHandoffStorage()?.setItem(
-          UI_RESOURCE_PREFERENCES_STORAGE_KEY,
-          JSON.stringify(next)
-        );
-      } catch (_) {}
-    }
-
-    const dashboardOpen =
-      uiSessionOptionalBoolean(
-        patch?.resource_dashboard_open
+    if (JSON.stringify(next) === JSON.stringify(current)) return;
+    try {
+      uiOrientationHandoffStorage()?.setItem(
+        UI_RESOURCE_PREFERENCES_STORAGE_KEY,
+        JSON.stringify(next)
       );
-
-    if (dashboardOpen !== null) {
-      writeCommandCenterDrawerPreferences({
-        resource_dashboard_open:
-          dashboardOpen
-      });
-    }
-
-    return next;
+    } catch (_) {}
   }
 
   function readActivityDashboardPreferences() {
@@ -13785,10 +13764,6 @@
           uiSessionOptionalBoolean(
             parsed?.history_status_open
           ),
-        resource_dashboard_open:
-          uiSessionOptionalBoolean(
-            parsed?.resource_dashboard_open
-          ),
         settings_dashboard_open:
           uiSessionOptionalBoolean(
             parsed?.settings_dashboard_open
@@ -13797,7 +13772,6 @@
     } catch (_) {
       return {
         history_status_open: null,
-        resource_dashboard_open: null,
         settings_dashboard_open: null
       };
     }
@@ -13816,7 +13790,6 @@
       const key
       of [
         'history_status_open',
-        'resource_dashboard_open',
         'settings_dashboard_open'
       ]
     ) {
@@ -28749,7 +28722,6 @@
     const state =
       {
         ...readUiSessionState(),
-        ...readResourceDashboardPreferences(),
         ...readStatGrowthPreferences()
       };
 
@@ -31749,8 +31721,7 @@
 
   function renderResourceDashboard(
     flow,
-    barsSnapshot,
-    options = {}
+    barsSnapshot
   ) {
     if (
       !flow
@@ -31766,15 +31737,6 @@
     const liveAvailable =
       barsSnapshot?.status ===
       'available';
-    const states =
-      options &&
-      typeof options ===
-      'object'
-        ? options
-        : {};
-    const dashboardOpen =
-      states.resource_dashboard_open ===
-      true;
     const resourcePanel =
       resource => {
         const summary =
@@ -31794,14 +31756,8 @@
               'nerve'
               ? 'Nerve'
               : 'Happiness';
-        const stateKey =
-          `resource_${resource}_open`;
-        const open =
-          states[stateKey] ===
-          true;
-
         return `
-          <details class="ta-resource-panel" data-ta-resource-panel="${resource}" ${open ? 'open' : ''}>
+          <details class="ta-resource-panel" data-ta-resource-panel="${resource}">
             <summary>
               ${renderResourceDashboardPanelSummary(
                 resource,
@@ -31819,13 +31775,13 @@
       };
 
     return `
-      <details class="ta-section ta-resource-section" ${dashboardOpen ? 'open' : ''}>
-        <summary class="ta-section-summary-row">
+      <section class="ta-section ta-resource-section">
+        <header class="ta-section-summary-row ta-resource-section-header">
           <span class="ta-section-title">Resources</span>
           <span class="ta-section-meta">
             ${resourceDashboardFormatNumber(totalEvents)} events
           </span>
-        </summary>
+        </header>
         <div class="ta-section-body ta-resource-compact-body">
           <div class="ta-resource-panel-list">
             ${resourcePanel('energy')}
@@ -31836,7 +31792,7 @@
             Natural regeneration is not included in historical gains because Torn does not log it.
           </p>
         </div>
-      </details>
+      </section>
     `;
   }
 
@@ -32170,59 +32126,6 @@
   function bindResourceDashboardInteractions(
     root
   ) {
-    const persist =
-      () => {
-        persistResourceDashboardState(
-          root
-        );
-      };
-    const dashboard =
-      root?.querySelector?.(
-        '.ta-resource-section'
-      );
-
-    dashboard?.addEventListener(
-      'toggle',
-      persist
-    );
-
-    for (
-      const panel
-      of root?.querySelectorAll?.(
-        '[data-ta-resource-panel]'
-      ) || []
-    ) {
-      panel.addEventListener(
-        'toggle',
-        persist
-      );
-    }
-
-    // TornPDA's embedded WebKit can miss a details "toggle" event after a
-    // touch. A deferred summary-click capture reads the final native state.
-    root?.addEventListener?.(
-      'click',
-      event => {
-        const summary =
-          event.target?.closest?.(
-            'summary'
-          );
-
-        if (
-          !summary?.parentElement?.matches?.(
-            '.ta-resource-section, [data-ta-resource-panel]'
-          )
-        ) {
-          return;
-        }
-
-        setTimeout(
-          persist,
-          0
-        );
-      }
-    );
-
     const countdowns =
       root?.querySelectorAll?.(
         '[data-ta-resource-full-at]'
@@ -32298,49 +32201,6 @@
       };
 
     update();
-  }
-
-  function persistResourceDashboardState(
-    root
-  ) {
-    const dashboard =
-      root?.querySelector?.(
-        '.ta-resource-section'
-      );
-
-    if (!dashboard) {
-      return;
-    }
-
-    const patch = {
-      resource_dashboard_open:
-        dashboard.open === true
-    };
-
-    for (
-      const panel
-      of dashboard.querySelectorAll?.(
-        '[data-ta-resource-panel]'
-      ) || []
-    ) {
-      const resource =
-        panel.getAttribute(
-          'data-ta-resource-panel'
-        );
-
-      if (
-        [
-          'energy',
-          'nerve',
-          'happiness'
-        ].includes(resource)
-      ) {
-        patch[`resource_${resource}_open`] =
-          panel.open === true;
-      }
-    }
-
-    writeUiSessionState(patch);
   }
   // ============================================================
   // AUTOMATIC TRAINING CHECKPOINT CANARY
@@ -35548,6 +35408,14 @@
         font-size: 13px;
         opacity: .7;
         transition: transform .15s ease;
+      }
+
+      #${MODAL_ID} .ta-resource-section-header {
+        cursor: default;
+      }
+
+      #${MODAL_ID} .ta-resource-section-header::after {
+        content: none;
       }
 
       #${MODAL_ID} .ta-section:not([open]) .ta-section-summary-row::after {
@@ -41552,10 +41420,6 @@
         );
 
         persistActivityDashboardState(
-          renderedAnalysisHost
-        );
-
-        persistResourceDashboardState(
           renderedAnalysisHost
         );
 
