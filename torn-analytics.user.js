@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.78
+// @version      2.18.79
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.78';
+  const VERSION = '2.18.79';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -36,6 +36,8 @@
   // preference path while retaining each resource row's durable state.
   // v2.18.78 replaces the unreliable Resources drawer with an always-visible
   // section and keeps optional historical details compact by default.
+  // v2.18.79 moves history status into Settings and gives Command the approved
+  // recap, cooldown, Energy-action, and direct-shortcut hierarchy.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -35060,8 +35062,29 @@
         background: #202020;
       }
 
-      #${MODAL_ID} .ta-modal-header h2 {
+      #${MODAL_ID} .ta-modal-title {
         flex: 1;
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-global-analysis-status {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: #91a09d;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      #${MODAL_ID} .ta-global-analysis-status::before {
+        width: 7px;
+        height: 7px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: #45c7b9;
+        content: '';
       }
 
       #${MODAL_ID} .ta-modal-close {
@@ -35124,34 +35147,22 @@
       }
 
       #${MODAL_ID} .ta-command-center {
+        display: grid;
+        gap: 10px;
         margin-bottom: 14px;
       }
 
-      #${MODAL_ID} .ta-command-center-placeholder,
-      #${MODAL_ID} .ta-command-action,
-      #${MODAL_ID} .ta-command-energy,
-      #${MODAL_ID} .ta-command-cooldowns,
-      #${MODAL_ID} .ta-command-recap {
-        border: 1px solid #333;
-        border-radius: 10px;
-        background: #f2f2f0;
-        color: #171b1b;
-      }
-
-      #${MODAL_ID} .ta-command-center-placeholder,
-      #${MODAL_ID} .ta-command-action,
-      #${MODAL_ID} .ta-command-recap {
-        padding: 12px;
-      }
-
-      #${MODAL_ID} .ta-command-center-placeholder,
-      #${MODAL_ID} .ta-command-action {
+      #${MODAL_ID} .ta-command-center-placeholder {
         display: grid;
         gap: 5px;
+        padding: 13px;
+        border: 1px solid #29403f;
+        border-radius: 10px;
+        background: #111918;
+        color: #eef3f2;
       }
 
       #${MODAL_ID} .ta-command-center-kicker,
-      #${MODAL_ID} .ta-command-status-row span,
       #${MODAL_ID} .ta-command-recap span {
         font-size: 11px;
         font-weight: 800;
@@ -35160,42 +35171,177 @@
         opacity: .65;
       }
 
-      #${MODAL_ID} .ta-command-status-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
-        gap: 8px;
-        margin-top: 8px;
-      }
-
-      #${MODAL_ID} .ta-command-energy,
-      #${MODAL_ID} .ta-command-cooldowns {
-        display: grid;
-        gap: 3px;
-        padding: 10px;
-      }
-
-      #${MODAL_ID} .ta-command-energy strong {
-        font-size: 22px;
-      }
-
-      #${MODAL_ID} .ta-command-energy.is-action {
-        border-color: #7f3c35;
-        background: #f4e3df;
-      }
-
-      #${MODAL_ID} .ta-command-cooldowns b {
-        font-size: 12px;
-      }
-
       #${MODAL_ID} .ta-command-recap {
         display: grid;
-        gap: 5px;
-        margin-top: 8px;
+        gap: 6px;
+        padding: 14px;
+        border: 1px solid #29403f;
+        border-radius: 10px;
+        background: #111817;
+        box-shadow: inset 4px 0 0 #45c7b9;
+        color: #f3f6f5;
       }
 
-      #${MODAL_ID} .ta-command-recap strong {
+      #${MODAL_ID} .ta-command-recap > span {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      #${MODAL_ID} .ta-command-recap > span > small {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+
+      #${MODAL_ID} .ta-command-recap > strong {
+        font-size: 26px;
+        font-weight: 500;
+        line-height: 1.15;
+      }
+
+      #${MODAL_ID} .ta-command-recap > small {
+        color: #9da8a5;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      #${MODAL_ID} .ta-command-cooldown-strip {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 7px 14px;
+        padding: 1px 4px 10px;
+        border-bottom: 1px solid #26302f;
+        color: #b0b8b6;
+      }
+
+      #${MODAL_ID} .ta-command-cooldown-strip > span {
+        font-size: 11px;
+        opacity: .72;
+      }
+
+      #${MODAL_ID} .ta-command-cooldown-strip > b {
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      #${MODAL_ID} .ta-command-cooldown-strip > b.is-ready {
+        color: #67c68b;
+      }
+
+      #${MODAL_ID} .ta-command-action {
+        --ta-command-energy-accent: #48b9ad;
+        display: grid;
+        gap: 8px;
+        padding: 15px;
+        border: 1px solid #315552;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #14201e 0%, #111514 100%);
+        color: #f1f3f2;
+      }
+
+      #${MODAL_ID} .ta-command-action.ta-command-energy-max {
+        --ta-command-energy-accent: #db6c63;
+        border-color: #70423e;
+        background: linear-gradient(135deg, #241816 0%, #151212 100%);
+      }
+
+      #${MODAL_ID} .ta-command-action.ta-command-energy-low {
+        --ta-command-energy-accent: #e1b84e;
+        border-color: #695725;
+        background: linear-gradient(135deg, #242113 0%, #151511 100%);
+      }
+
+      #${MODAL_ID} .ta-command-action.ta-command-energy-stacked {
+        --ta-command-energy-accent: #52d2c3;
+      }
+
+      #${MODAL_ID} .ta-command-energy-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      #${MODAL_ID} .ta-command-energy-heading > strong {
+        color: var(--ta-command-energy-accent);
+        font-size: 26px;
+        line-height: 1.1;
+      }
+
+      #${MODAL_ID} .ta-command-energy-heading > span {
+        padding: 6px 9px;
+        border: 1px solid var(--ta-command-energy-accent);
+        border-radius: 999px;
+        color: var(--ta-command-energy-accent);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      #${MODAL_ID} .ta-command-action > b {
+        font-size: 17px;
+      }
+
+      #${MODAL_ID} .ta-command-action > small {
+        color: #a5aeac;
         font-size: 13px;
         line-height: 1.45;
+      }
+
+      #${MODAL_ID} .ta-command-shortcuts {
+        display: grid;
+        gap: 8px;
+        padding-top: 2px;
+      }
+
+      #${MODAL_ID} .ta-command-shortcut-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      #${MODAL_ID} .ta-command-shortcut-grid > button {
+        position: relative;
+        display: grid;
+        gap: 4px;
+        min-height: 68px;
+        margin: 0;
+        padding: 12px 12px 12px 19px;
+        border: 1px solid #293635;
+        border-radius: 10px;
+        background: #131b1a;
+        color: #f0f3f2;
+        text-align: left;
+      }
+
+      #${MODAL_ID} .ta-command-shortcut-grid > button::before {
+        position: absolute;
+        top: 12px;
+        bottom: 12px;
+        left: 9px;
+        width: 4px;
+        border-radius: 999px;
+        background: #3ea99e;
+        content: '';
+      }
+
+      #${MODAL_ID} .ta-command-shortcut-grid b {
+        font-size: 13px;
+      }
+
+      #${MODAL_ID} .ta-command-shortcut-grid small {
+        color: #98a3a0;
+        font-size: 11px;
+      }
+
+      #${MODAL_ID} .ta-settings-group > .ta-history-status-strip {
+        margin: 8px 0 10px;
       }
 
       #${MODAL_ID} .sub {
@@ -39228,40 +39374,86 @@
       maximum !== null &&
       energy >= maximum &&
       energy < 1000;
+    const energyLow =
+      energy !== null &&
+      maximum !== null &&
+      energy < maximum &&
+      energy <= maximum * 0.5;
+    const energyTone =
+      energyAtNaturalMaximum
+        ? 'max'
+        : energy !== null &&
+            energy >= 1000
+          ? 'stacked'
+          : energyLow
+            ? 'low'
+            : 'active';
+    const energyStatus =
+      energyAtNaturalMaximum
+        ? 'At max · train'
+        : energy !== null &&
+            energy >= 1000
+          ? 'Stacked'
+          : energyLow
+            ? 'Low · optional'
+            : energy !== null
+              ? 'Regenerating'
+              : 'Live state';
     const drug = trainingReadinessCooldownLabel(readiness?.drug_ready_at);
     const booster = trainingReadinessCooldownLabel(readiness?.booster_ready_at);
     const summary = statGrowthCompactSummaryModel(growth || {}, '7d', 'all');
-    const recap = statGrowthTrainingRecapSentence(summary);
 
     commandCenterHost.innerHTML = `
-      <div class="ta-command-action ta-command-tone-${escapeActivityHtml(advice?.tone || 'info')}">
-        <span class="ta-command-center-kicker">Current action</span>
-        <strong>${escapeActivityHtml(advice?.title || 'Training guidance unavailable')}</strong>
+      <div class="ta-command-recap">
+        <span>
+          Recent training recap
+          <small>${escapeActivityHtml(summary.period_label)}</small>
+        </span>
+        <strong>${escapeActivityHtml(statGrowthFormatGain(summary.gain))} stats</strong>
+        <small>
+          ${summary.actions.toLocaleString()} gym ${summary.actions === 1 ? 'session' : 'sessions'} ·
+          ${summary.energy_used.toLocaleString()}E used${
+            summary.job_special_gain > 0
+              ? ` · Army ${escapeActivityHtml(statGrowthFormatGain(summary.job_special_gain))} / ${summary.job_points_used.toLocaleString()} JP`
+              : ''
+          }
+        </small>
+      </div>
+      <div class="ta-command-cooldown-strip">
+        <span>Cooldowns</span>
+        <b>Drug ${escapeActivityHtml(drug.label)}</b>
+        <b class="${booster.state === 'complete' ? 'is-ready' : ''}">Booster ${escapeActivityHtml(booster.label)}</b>
+      </div>
+      <div class="ta-command-action ta-command-energy-${energyTone}">
+        <div class="ta-command-energy-heading">
+          <strong>
+            ${energy === null ? '—' : energy.toLocaleString() + 'E'}${
+              maximum === null
+                ? ''
+                : ` / ${maximum.toLocaleString()}`
+            }
+          </strong>
+          <span>${escapeActivityHtml(energyStatus)}</span>
+        </div>
+        <b>${escapeActivityHtml(advice?.title || 'Training guidance unavailable')}</b>
         <small>${escapeActivityHtml(advice?.detail || 'Refresh stored analysis to restore guidance.')}</small>
       </div>
-      <div class="ta-command-status-row">
-        <div class="ta-command-energy ${energyAtNaturalMaximum ? 'is-action' : ''}">
-          <span>Energy</span>
-          <strong>${energy === null ? '—' : energy.toLocaleString() + 'E'}</strong>
-          <small>${
-            energyAtNaturalMaximum
-              ? 'At natural maximum · train to resume regeneration'
-              : energy !== null && energy >= 1000
-                ? 'Stacked Energy'
-                : maximum !== null
-                  ? 'Natural max ' + maximum.toLocaleString() + 'E'
-                  : 'Live state'
-          }</small>
+      <div class="ta-command-shortcuts">
+        <span class="ta-command-center-kicker">Direct shortcuts</span>
+        <div class="ta-command-shortcut-grid">
+          <button type="button" data-ta-command-shortcut="stats" data-ta-command-view="overview">
+            <b>Overview</b><small>Today’s totals</small>
+          </button>
+          <button type="button" data-ta-command-shortcut="stats" data-ta-command-view="charts">
+            <b>Charts</b><small>Stat trends</small>
+          </button>
+          <button type="button" data-ta-command-shortcut="stats" data-ta-command-view="data">
+            <b>Data</b><small>History &amp; export</small>
+          </button>
+          <button type="button" data-ta-command-shortcut="stats" data-ta-command-view="overview">
+            <b>Happy Jump</b><small>Plan &amp; track</small>
+          </button>
         </div>
-        <div class="ta-command-cooldowns">
-          <span>Cooldowns</span>
-          <b>Drug · ${escapeActivityHtml(drug.label)}</b>
-          <b>Booster · ${escapeActivityHtml(booster.label)}</b>
-        </div>
-      </div>
-      <div class="ta-command-recap">
-        <span>Recent training recap · ${escapeActivityHtml(summary.period_label)}</span>
-        <strong>${escapeActivityHtml(recap)}</strong>
       </div>
     `;
   }
@@ -39377,9 +39569,15 @@
       <div class="card">
 
         <div class="ta-modal-header">
-          <h2>
-            Torn Analytics v${VERSION}
-          </h2>
+          <div class="ta-modal-title">
+            <h2>
+              Torn Analytics v${VERSION}
+            </h2>
+
+            <span id="ta-global-analysis-status" class="ta-global-analysis-status">
+              ${cached?.account_id ? 'Analysis ready' : 'Setup required'}
+            </span>
+          </div>
 
           <button
             id="ta-close"
@@ -39407,8 +39605,6 @@
             <small>Energy, cooldowns, and your recent training recap will appear here from the existing analysis snapshot.</small>
           </div>
         </section>
-
-        ${historySection}
 
         <div data-ta-primary-panel="settings">\n        <details class="ta-section ta-settings-section" ${commandCenterDrawerPreferences.settings_dashboard_open === true ? 'open' : ''}>
           <summary class="ta-section-summary-row">
@@ -39463,6 +39659,8 @@
 
               <div class="ta-settings-group">
                 <b>Data &amp; analysis</b>
+
+                ${historySection}
 
                 <div
                   id="ta-main-actions"
@@ -39850,6 +40048,41 @@
     selectPrimaryTab(
       readPrimaryTabPreference(),
       false
+    );
+
+    modal.addEventListener(
+      'click',
+      event => {
+        const shortcut =
+          event.target?.closest?.(
+            '[data-ta-command-shortcut]'
+          );
+
+        if (!shortcut) {
+          return;
+        }
+
+        selectPrimaryTab(
+          shortcut.getAttribute(
+            'data-ta-command-shortcut'
+          )
+        );
+
+        const statsView =
+          shortcut.getAttribute(
+            'data-ta-command-view'
+          );
+
+        if (statsView) {
+          requestAnimationFrame(
+            () => {
+              modal.querySelector(
+                `[data-ta-stats-view-option="${statsView}"]`
+              )?.click();
+            }
+          );
+        }
+      }
     );
 
     const persistCommandCenterOpenState =
@@ -40443,6 +40676,9 @@
           const analysisStatus =
             $('#ta-history-analysis-status');
 
+          const globalAnalysisStatus =
+            $('#ta-global-analysis-status');
+
           const finished =
             info.percent >= 100;
 
@@ -40462,19 +40698,25 @@
               );
           }
 
-          if (
-            analysisStatus
-          ) {
+          const analysisStatusText =
+            info.stage === 'Analysis ready'
+              ? 'Analysis ready'
+              : /failed|interrupted/i.test(
+                  info.stage
+                )
+                ? 'Needs review'
+                : idle
+                  ? 'History ready'
+                  : 'Working';
+
+          if (analysisStatus) {
             analysisStatus.textContent =
-              info.stage === 'Analysis ready'
-                ? 'Analysis ready'
-                : /failed|interrupted/i.test(
-                    info.stage
-                  )
-                  ? 'Needs review'
-                  : idle
-                    ? 'History ready'
-                    : 'Working';
+              analysisStatusText;
+          }
+
+          if (globalAnalysisStatus) {
+            globalAnalysisStatus.textContent =
+              analysisStatusText;
           }
 
           $('#ta-stage')
