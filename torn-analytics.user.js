@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.79
+// @version      2.18.80
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.79';
+  const VERSION = '2.18.80';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -38,6 +38,8 @@
   // section and keeps optional historical details compact by default.
   // v2.18.79 moves history status into Settings and gives Command the approved
   // recap, cooldown, Energy-action, and direct-shortcut hierarchy.
+  // v2.18.80 merges Train Now into Command, combines activity and stat
+  // analytics, removes redundant outer drawers, and rebuilds Resources.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -10736,11 +10738,12 @@
       analysisHost
     ) {
       analysisHost.innerHTML =
-        '<div data-ta-primary-panel="stats">' +
-        renderTrainingWorkspace(latestAnalysis?.training_readiness, latestAnalysis?.stat_growth) +
-        '</div>' +
         '<div data-ta-primary-panel="activity">' +
-        renderOverallActivityDashboard(latestAnalysis?.activity) +
+        renderActivityWorkspace(
+          latestAnalysis?.activity,
+          latestAnalysis?.training_readiness,
+          latestAnalysis?.stat_growth
+        ) +
         '</div>' +
         '<div data-ta-primary-panel="resources">' +
         renderResourceDashboard(
@@ -13443,28 +13446,28 @@
   }
 
   function renderOverallActivityDashboard(
-    activity
+    activity,
+    options = {}
   ) {
+    const embedded =
+      options?.embedded ===
+      true;
     if (
       !activity?.total_logs
     ) {
-      return `
-        <details class="ta-section">
-          <summary class="ta-section-summary-row">
-            <span class="ta-section-title">
-              Overall Activity
-            </span>
-            <span class="ta-section-meta">
-              No activity data
-            </span>
-          </summary>
-          <div class="ta-section-body">
-            <div class="small">
-              No timestamped logs were available for activity analysis.
+      return embedded
+        ? '<div class="ta-stats-empty-state">No timestamped logs were available for activity analysis.</div>'
+        : `
+          <details class="ta-section">
+            <summary class="ta-section-summary-row">
+              <span class="ta-section-title">Overall Activity</span>
+              <span class="ta-section-meta">No activity data</span>
+            </summary>
+            <div class="ta-section-body">
+              <div class="small">No timestamped logs were available for activity analysis.</div>
             </div>
-          </div>
-        </details>
-      `;
+          </details>
+        `;
     }
 
     const summary =
@@ -13493,6 +13496,57 @@
         .activity_dashboard_open ===
       true;
 
+    const body = `
+      <div class="ta-section-body ta-activity-compact-body">
+        <section class="ta-activity-compact-summary">
+          <strong>${escapeActivityHtml(activityDashboardCompactSentence(summary))}</strong>
+          <span>
+            ${summary.average_per_active_day.toFixed(0)} per active day ·
+            ${Number(activity.longest_active_streak?.days || 0).toLocaleString()}-day streak ·
+            busiest ${escapeActivityHtml(busiestText)}${partialText}
+          </span>
+        </section>
+
+        ${
+          embedded
+            ? `
+              <div class="ta-activity-details-body">
+                ${renderActivityDailyChart(activity)}
+                ${renderActivityCategoryBars(activity)}
+                <div class="ta-activity-compact-note">
+                  Stored ${escapeActivityHtml(activity.first_date)} → ${escapeActivityHtml(activity.last_date)} ·
+                  ${escapeActivityHtml(timezone.label)}
+                </div>
+              </div>
+            `
+            : `
+              <details class="ta-stat-subsection ta-activity-details-section">
+                <summary>
+                  Activity details
+                  <span>Recent chart &amp; top categories</span>
+                </summary>
+                <div class="ta-stat-subsection-body ta-activity-details-body">
+                  ${renderActivityDailyChart(activity)}
+                  ${renderActivityCategoryBars(activity)}
+                  <div class="ta-activity-compact-note">
+                    Stored ${escapeActivityHtml(activity.first_date)} → ${escapeActivityHtml(activity.last_date)} ·
+                    ${escapeActivityHtml(timezone.label)}
+                  </div>
+                </div>
+              </details>
+            `
+        }
+      </div>
+    `;
+
+    if (embedded) {
+      return `
+        <section class="ta-activity-section ta-activity-embedded">
+          ${body}
+        </section>
+      `;
+    }
+
     return `
       <details class="ta-section ta-activity-section" ${dashboardOpen ? 'open' : ''}>
         <summary class="ta-section-summary-row">
@@ -13504,31 +13558,7 @@
           </span>
         </summary>
 
-        <div class="ta-section-body ta-activity-compact-body">
-          <section class="ta-activity-compact-summary">
-            <strong>${escapeActivityHtml(activityDashboardCompactSentence(summary))}</strong>
-            <span>
-              ${summary.average_per_active_day.toFixed(0)} per active day ·
-              ${Number(activity.longest_active_streak?.days || 0).toLocaleString()}-day streak ·
-              busiest ${escapeActivityHtml(busiestText)}${partialText}
-            </span>
-          </section>
-
-          <details class="ta-stat-subsection ta-activity-details-section">
-            <summary>
-              Activity details
-              <span>Recent chart &amp; top categories</span>
-            </summary>
-            <div class="ta-stat-subsection-body ta-activity-details-body">
-              ${renderActivityDailyChart(activity)}
-              ${renderActivityCategoryBars(activity)}
-              <div class="ta-activity-compact-note">
-                Stored ${escapeActivityHtml(activity.first_date)} → ${escapeActivityHtml(activity.last_date)} ·
-                ${escapeActivityHtml(timezone.label)}
-              </div>
-            </div>
-          </details>
-        </div>
+        ${body}
       </details>
     `;
   }
@@ -13620,12 +13650,13 @@
   function uiSessionPrimaryTab(value) {
     return [
       'command',
-      'stats',
       'activity',
       'resources',
       'settings'
     ].includes(value)
       ? value
+      : value === 'stats'
+        ? 'activity'
       : 'command';
   }
 
@@ -28326,8 +28357,12 @@
     growth,
     range = '7d',
     planValue = null,
-    statValue = 'all'
+    statValue = 'all',
+    options = {}
   ) {
+    const embedded =
+      options?.embedded ===
+      true;
     const period =
       statGrowthCompactPeriod(
         range
@@ -28526,27 +28561,42 @@
       .join('');
 
     return `
-      <section class="ta-training-compact-summary" data-ta-training-summary>
-        <div class="ta-training-summary-header">
-          <div>
-            <span class="ta-training-summary-kicker">Train now</span>
-            <strong>${escapeActivityHtml(advice?.title || 'Training history')}</strong>
-          </div>
-
-          <div class="ta-training-summary-selectors">
-            <label class="ta-training-summary-period">
-              <span>Plan</span>
-              <select data-ta-training-plan aria-label="Training plan">
-                ${planOptions}
-              </select>
-            </label>
-          </div>
-        </div>
-
+      <section class="ta-training-compact-summary${embedded ? ' ta-command-training-overview' : ''}" data-ta-training-summary>
         ${
-          advice?.detail
-            ? `<p class="ta-training-summary-advice">${escapeActivityHtml(advice.detail)}</p>`
-            : ''
+          embedded
+            ? `
+              <div class="ta-command-plan-row">
+                <span>Training plan</span>
+                <label class="ta-training-summary-period">
+                  <select data-ta-training-plan aria-label="Training plan">
+                    ${planOptions}
+                  </select>
+                </label>
+              </div>
+            `
+            : `
+              <div class="ta-training-summary-header">
+                <div>
+                  <span class="ta-training-summary-kicker">Train now</span>
+                  <strong>${escapeActivityHtml(advice?.title || 'Training history')}</strong>
+                </div>
+
+                <div class="ta-training-summary-selectors">
+                  <label class="ta-training-summary-period">
+                    <span>Plan</span>
+                    <select data-ta-training-plan aria-label="Training plan">
+                      ${planOptions}
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              ${
+                advice?.detail
+                  ? `<p class="ta-training-summary-advice">${escapeActivityHtml(advice.detail)}</p>`
+                  : ''
+              }
+            `
         }
 
         ${renderTrainingReadinessGuide(
@@ -28687,13 +28737,18 @@
         );
     } else {
       content =
-        renderTrainingCompactSummary(
-          readiness,
-          growth,
-          options.range,
-          options.plan,
-          options.summary_stat
-        );
+        options.activity
+          ? renderOverallActivityDashboard(
+              options.activity,
+              { embedded: true }
+            )
+          : renderTrainingCompactSummary(
+              readiness,
+              growth,
+              options.range,
+              options.plan,
+              options.summary_stat
+            );
     }
 
     return `
@@ -28807,6 +28862,72 @@
     `;
   }
 
+  function renderActivityWorkspace(
+    activity,
+    readiness,
+    growth
+  ) {
+    if (
+      !activity &&
+      !growth
+    ) {
+      return '';
+    }
+
+    const state = {
+      ...readUiSessionState(),
+      ...readStatGrowthPreferences()
+    };
+    const activeView =
+      uiSessionStatsWorkspaceView(
+        state.stats_workspace_view
+      );
+    const focus =
+      uiSessionTrainingFocus(
+        state.stat_growth_focus
+      );
+    const scope =
+      state.stat_growth_scope === 'all'
+        ? 'all'
+        : 'selected';
+    const context =
+      uiSessionStatGrowthContext(
+        state.stat_growth_context
+      );
+    const range =
+      uiSessionStatGrowthRange(
+        state.stat_growth_range
+      );
+    const summaryStat =
+      statGrowthCompactSummaryStat(
+        state.training_summary_stat
+      );
+
+    return `
+      <section class="ta-primary-workspace ta-activity-workspace" data-ta-activity-workspace>
+        <div class="ta-workspace-heading">
+          <b>Activity &amp; progress</b>
+          <span>${Number(activity?.total_logs || 0).toLocaleString()} logs · ${Number(growth?.valid_logs || 0).toLocaleString()} training actions</span>
+        </div>
+        ${renderStatsWorkspaceNavigation(activeView)}
+        ${renderStatsWorkspaceView(
+          activeView,
+          readiness,
+          growth,
+          {
+            activity,
+            focus,
+            scope,
+            context,
+            range,
+            plan: readTrainingReadinessPlan(),
+            summary_stat: summaryStat
+          }
+        )}
+      </section>
+    `;
+  }
+
   function trainingSupportOpenSections(
     summary
   ) {
@@ -28856,7 +28977,8 @@
   function bindTrainingWorkspaceInteractions(
     root,
     readiness = null,
-    growth = null
+    growth = null,
+    activity = null
   ) {
     root.__taTrainingReadiness =
       readiness ||
@@ -28865,6 +28987,10 @@
     root.__taTrainingGrowth =
       growth ||
       root.__taTrainingGrowth ||
+      null;
+    root.__taActivity =
+      activity ||
+      root.__taActivity ||
       null;
 
     root.__taStatsWorkspaceView =
@@ -28942,6 +29068,10 @@
 
         root.__taTrainingSummaryStat =
           summaryStat;
+        const embedded =
+          current.classList?.contains?.(
+            'ta-command-training-overview'
+          ) === true;
 
         const openSupportSections =
           trainingSupportOpenSections(
@@ -28969,7 +29099,8 @@
             root.__taTrainingGrowth,
             range,
             readTrainingReadinessPlan(),
-            summaryStat
+            summaryStat,
+            { embedded }
           );
 
         const nextSummary =
@@ -29219,6 +29350,20 @@
               planSelect.value
             );
 
+            if (
+              root?.matches?.(
+                '[data-ta-command-center-live]'
+              )
+            ) {
+              renderCommandCenterSnapshot({
+                training_readiness:
+                  root.__taTrainingReadiness,
+                stat_growth:
+                  root.__taTrainingGrowth
+              });
+              return;
+            }
+
             refreshCompactSummary(
               root.__taStatGrowthRange ||
               readUiSessionState()
@@ -29317,7 +29462,9 @@
                   readTrainingReadinessPlan(),
                 summary_stat:
                   root.__taTrainingSummaryStat ||
-                  preferences.training_summary_stat
+                  preferences.training_summary_stat,
+                activity:
+                  root.__taActivity
               }
             );
         }
@@ -29501,7 +29648,8 @@
     bindTrainingWorkspaceInteractions(
       root,
       analysis?.training_readiness,
-      analysis?.stat_growth
+      analysis?.stat_growth,
+      analysis?.activity
     );
 
     bindTrainingReadinessInteractions(
@@ -31527,7 +31675,7 @@
         : null;
 
     return `
-      <div class="ta-resource-live-card">
+      <div class="ta-resource-live-card ta-resource-live-${resource}">
         <div class="ta-resource-live-topline">
           <span>${title}</span>
           <b>${resourceDashboardFormatNumber(bar.current)} / ${resourceDashboardFormatNumber(bar.maximum)}</b>
@@ -31704,7 +31852,7 @@
       );
 
     return `
-      <div class="ta-resource-history-card ta-resource-compact-history">
+      <div class="ta-resource-history-card ta-resource-compact-history ta-resource-history-${resource}">
         <div class="ta-resource-compact-totals">
           <span><small>Gained</small><b>${resourceDashboardFormatNumber(summary.gain_total)}</b></span>
           <span><small>Used</small><b>${resourceDashboardFormatNumber(summary.use_total)}</b></span>
@@ -31739,56 +31887,39 @@
     const liveAvailable =
       barsSnapshot?.status ===
       'available';
-    const resourcePanel =
-      resource => {
-        const summary =
-          flow?.[resource] ||
-          resourceFlowBlankResource(
-            resource
-          );
-        const bar =
-          liveAvailable
-            ? barsSnapshot?.[resource]
-            : null;
-        const title =
-          resource ===
-          'energy'
-            ? 'Energy'
-            : resource ===
-              'nerve'
-              ? 'Nerve'
-              : 'Happiness';
-        return `
-          <details class="ta-resource-panel" data-ta-resource-panel="${resource}">
-            <summary>
-              ${renderResourceDashboardPanelSummary(
-                resource,
-                title,
-                summary,
-                bar,
-                barsSnapshot?.fetched_at
-              )}
-            </summary>
-            <div class="ta-resource-panel-body">
-              ${renderResourceDashboardHistoryCard(flow, resource)}
-            </div>
-          </details>
-        `;
-      };
-
     return `
-      <section class="ta-section ta-resource-section">
+      <section class="ta-section ta-resource-section ta-primary-workspace">
         <header class="ta-section-summary-row ta-resource-section-header">
           <span class="ta-section-title">Resources</span>
           <span class="ta-section-meta">
-            ${resourceDashboardFormatNumber(totalEvents)} events
+            Live bars &amp; ${resourceDashboardFormatNumber(totalEvents)} recorded events
           </span>
         </header>
         <div class="ta-section-body ta-resource-compact-body">
-          <div class="ta-resource-panel-list">
-            ${resourcePanel('energy')}
-            ${resourcePanel('nerve')}
-            ${resourcePanel('happiness')}
+          ${
+            liveAvailable
+              ? `
+                <div class="ta-resource-live-grid">
+                  ${renderResourceDashboardLiveCard('energy', barsSnapshot.energy, barsSnapshot.fetched_at)}
+                  ${renderResourceDashboardLiveCard('nerve', barsSnapshot.nerve, barsSnapshot.fetched_at)}
+                  ${renderResourceDashboardLiveCard('happiness', barsSnapshot.happiness, barsSnapshot.fetched_at)}
+                </div>
+              `
+              : `
+                <div class="ta-resource-live-unavailable">
+                  <b>Live resource bars unavailable</b>
+                  <span>Connect the Torn API in Settings or refresh analysis to restore current values.</span>
+                </div>
+              `
+          }
+          <div class="ta-resource-history-heading">
+            <b>Recorded history</b>
+            <span>Gains, use, and setbacks</span>
+          </div>
+          <div class="ta-resource-history-grid">
+            ${renderResourceDashboardHistoryCard(flow, 'energy')}
+            ${renderResourceDashboardHistoryCard(flow, 'nerve')}
+            ${renderResourceDashboardHistoryCard(flow, 'happiness')}
           </div>
           <p class="ta-resource-compact-disclaimer">
             Natural regeneration is not included in historical gains because Torn does not log it.
@@ -35096,10 +35227,12 @@
       }
 
       #${MODAL_ID} .ta-modal-scroll {
+        display: flex;
+        flex-direction: column;
         min-height: 0;
         overflow-x: hidden;
         overflow-y: auto;
-        padding: 16px;
+        padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
         overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
       }
@@ -35123,7 +35256,7 @@
       }
 
       #${MODAL_ID} .ta-primary-tab {
-        flex: 0 0 auto;
+        flex: 1 1 0;
         width: auto;
         min-height: 36px;
         margin: 0;
@@ -35144,6 +35277,10 @@
 
       #${MODAL_ID} [data-ta-primary-panel][hidden] {
         display: none !important;
+      }
+
+      #${MODAL_ID} .ta-primary-workspace {
+        min-height: calc(94vh - 170px);
       }
 
       #${MODAL_ID} .ta-command-center {
@@ -35338,6 +35475,37 @@
       #${MODAL_ID} .ta-command-shortcut-grid small {
         color: #98a3a0;
         font-size: 11px;
+      }
+
+      #${MODAL_ID} .ta-training-compact-summary.ta-command-training-overview {
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+
+      #${MODAL_ID} .ta-command-plan-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 2px 0 8px;
+        border-bottom: 1px solid #26302f;
+      }
+
+      #${MODAL_ID} .ta-command-plan-row > span {
+        color: #9da8a5;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-training-compact-summary.ta-command-training-overview > .ta-training-guide {
+        margin: 0;
+        border: 1px solid #35413f;
+        border-radius: 10px;
+        background: #121817;
       }
 
       #${MODAL_ID} .ta-settings-group > .ta-history-status-strip {
@@ -37066,7 +37234,31 @@
       #${MODAL_ID} .ta-resource-live-track > div {
         height: 100%;
         border-radius: inherit;
-        background: #aaa;
+        background: var(--ta-resource-color, #45c7b9);
+      }
+
+      #${MODAL_ID} .ta-resource-live-card,
+      #${MODAL_ID} .ta-resource-history-card {
+        border-color: var(--ta-resource-border, #303030);
+        box-shadow: inset 3px 0 0 var(--ta-resource-color, #45c7b9);
+      }
+
+      #${MODAL_ID} .ta-resource-live-energy,
+      #${MODAL_ID} .ta-resource-history-energy {
+        --ta-resource-color: #d9ae45;
+        --ta-resource-border: #5f522a;
+      }
+
+      #${MODAL_ID} .ta-resource-live-nerve,
+      #${MODAL_ID} .ta-resource-history-nerve {
+        --ta-resource-color: #70a8cf;
+        --ta-resource-border: #35566d;
+      }
+
+      #${MODAL_ID} .ta-resource-live-happiness,
+      #${MODAL_ID} .ta-resource-history-happiness {
+        --ta-resource-color: #c989bd;
+        --ta-resource-border: #684761;
       }
 
       #${MODAL_ID} .ta-resource-stack-status {
@@ -37143,6 +37335,31 @@
 
       #${MODAL_ID} .ta-resource-history-title {
         margin-bottom: 8px;
+      }
+
+      #${MODAL_ID} .ta-resource-history-heading,
+      #${MODAL_ID} .ta-workspace-heading {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      #${MODAL_ID} .ta-resource-history-heading {
+        margin-top: 5px;
+      }
+
+      #${MODAL_ID} .ta-resource-history-heading b,
+      #${MODAL_ID} .ta-workspace-heading b {
+        color: #f1f3f2;
+        font-size: 14px;
+      }
+
+      #${MODAL_ID} .ta-resource-history-heading span,
+      #${MODAL_ID} .ta-workspace-heading span {
+        color: #929c99;
+        font-size: 10px;
+        text-align: right;
       }
 
       #${MODAL_ID} .ta-resource-metric-grid {
@@ -37365,6 +37582,14 @@
         box-shadow: inset 3px 0 0 #9898aa;
       }
 
+      #${MODAL_ID} .ta-settings-section-header {
+        cursor: default;
+      }
+
+      #${MODAL_ID} .ta-settings-section-header::after {
+        content: none;
+      }
+
       #${MODAL_ID} .ta-stat-subsection {
         border-left: 2px solid #5a472b;
         background: #14120f;
@@ -37456,6 +37681,14 @@
         #${MODAL_ID} .ta-settings-primary-actions > button {
           padding: 7px 4px;
           font-size: 11px;
+        }
+
+        #${MODAL_ID} .ta-primary-workspace {
+          min-height: calc(94vh - 165px);
+        }
+
+        #${MODAL_ID} .ta-primary-tab {
+          padding-inline: 8px;
         }
 
         #${MODAL_ID} .ta-diagnostics-overview {
@@ -38754,6 +38987,26 @@
         line-height: 1.4;
       }
 
+      #${MODAL_ID} .ta-activity-workspace {
+        display: grid;
+        align-content: start;
+        gap: 10px;
+        padding: 12px;
+        border: 1px solid #34495d;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #101b25 0%, #111514 52%);
+        box-shadow: inset 4px 0 0 #6197c6;
+      }
+
+      #${MODAL_ID} .ta-activity-embedded .ta-section-body {
+        padding: 0;
+      }
+
+      #${MODAL_ID} .ta-activity-embedded .ta-activity-details-body {
+        display: grid;
+        gap: 10px;
+      }
+
       /* v2.18.51: one quiet weekly surface replaces two competing dashboards. */
       #${MODAL_ID} .ta-weekly-highlights-section {
         border-color: #3d584a;
@@ -39290,21 +39543,11 @@
       root?.querySelector?.(
         '.ta-history-status-strip'
       );
-    const settings =
-      root?.querySelector?.(
-        '.ta-settings-section'
-      );
     const patch = {};
 
     if (history) {
       patch.history_status_open =
         history.open ===
-        true;
-    }
-
-    if (settings) {
-      patch.settings_dashboard_open =
-        settings.open ===
         true;
     }
 
@@ -39438,24 +39681,38 @@
         <b>${escapeActivityHtml(advice?.title || 'Training guidance unavailable')}</b>
         <small>${escapeActivityHtml(advice?.detail || 'Refresh stored analysis to restore guidance.')}</small>
       </div>
+      ${renderTrainingCompactSummary(
+        readiness,
+        growth,
+        '7d',
+        plan,
+        'all',
+        { embedded: true }
+      )}
       <div class="ta-command-shortcuts">
         <span class="ta-command-center-kicker">Direct shortcuts</span>
         <div class="ta-command-shortcut-grid">
-          <button type="button" data-ta-command-shortcut="stats" data-ta-command-view="overview">
-            <b>Overview</b><small>Today’s totals</small>
-          </button>
-          <button type="button" data-ta-command-shortcut="stats" data-ta-command-view="charts">
+          <button type="button" data-ta-command-shortcut="activity" data-ta-command-view="charts">
             <b>Charts</b><small>Stat trends</small>
           </button>
-          <button type="button" data-ta-command-shortcut="stats" data-ta-command-view="data">
+          <button type="button" data-ta-command-shortcut="activity" data-ta-command-view="data">
             <b>Data</b><small>History &amp; export</small>
           </button>
-          <button type="button" data-ta-command-shortcut="stats" data-ta-command-view="overview">
-            <b>Happy Jump</b><small>Plan &amp; track</small>
+          <button type="button" data-ta-command-shortcut="resources">
+            <b>Resources</b><small>Live bars &amp; history</small>
+          </button>
+          <button type="button" data-ta-command-shortcut="settings">
+            <b>Settings</b><small>Data &amp; preferences</small>
           </button>
         </div>
       </div>
     `;
+
+    bindTrainingWorkspaceInteractions(
+      commandCenterHost,
+      readiness,
+      growth
+    );
   }
 
   async function openModal(
@@ -39592,13 +39849,12 @@
 
         <div class="ta-primary-nav" role="tablist" aria-label="Torn Analytics sections">
           <button type="button" class="ta-primary-tab" data-ta-primary-tab="command" role="tab">Command</button>
-          <button type="button" class="ta-primary-tab" data-ta-primary-tab="stats" role="tab">Stats</button>
           <button type="button" class="ta-primary-tab" data-ta-primary-tab="activity" role="tab">Activity</button>
           <button type="button" class="ta-primary-tab" data-ta-primary-tab="resources" role="tab">Resources</button>
           <button type="button" class="ta-primary-tab" data-ta-primary-tab="settings" role="tab">Settings</button>
         </div>
 
-        <section class="ta-command-center" data-ta-primary-panel="command" aria-label="Command Center">
+        <section class="ta-command-center ta-primary-workspace" data-ta-primary-panel="command" aria-label="Command Center">
           <div class="ta-command-center-placeholder" data-ta-command-center-live>
             <span class="ta-command-center-kicker">Current action</span>
             <strong>Analyze stored history to load training guidance.</strong>
@@ -39606,11 +39862,11 @@
           </div>
         </section>
 
-        <div data-ta-primary-panel="settings">\n        <details class="ta-section ta-settings-section" ${commandCenterDrawerPreferences.settings_dashboard_open === true ? 'open' : ''}>
-          <summary class="ta-section-summary-row">
+        <div data-ta-primary-panel="settings">\n        <section class="ta-section ta-settings-section ta-primary-workspace">
+          <header class="ta-section-summary-row ta-settings-section-header">
             <span class="ta-section-title">Settings</span>
             <span class="ta-section-meta">Actions &amp; preferences</span>
-          </summary>
+          </header>
 
           <div class="ta-section-body">
             <div class="ta-settings-primary">
@@ -39868,7 +40124,7 @@
               </div>
             </details>
           </div>
-        </details>
+        </section>
 
         <div
           id="ta-progress-panel"
@@ -40094,7 +40350,7 @@
     for (
       const section
       of modal.querySelectorAll(
-        '.ta-history-status-strip, .ta-settings-section'
+        '.ta-history-status-strip'
       )
     ) {
       section.addEventListener(
@@ -40113,7 +40369,7 @@
 
         if (
           !summary?.parentElement?.matches?.(
-            '.ta-history-status-strip, .ta-settings-section'
+            '.ta-history-status-strip'
           )
         ) {
           return;
