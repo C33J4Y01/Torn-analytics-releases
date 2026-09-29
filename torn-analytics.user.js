@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.80
+// @version      2.18.81
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.80';
+  const VERSION = '2.18.81';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -40,6 +40,8 @@
   // recap, cooldown, Energy-action, and direct-shortcut hierarchy.
   // v2.18.80 merges Train Now into Command, combines activity and stat
   // analytics, removes redundant outer drawers, and rebuilds Resources.
+  // v2.18.81 repairs mobile tab scrolling, sticky navigation, and compact
+  // workspace spacing after the merged-layout device test.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -35239,7 +35241,7 @@
 
       #${MODAL_ID} .ta-primary-nav {
         position: sticky;
-        top: -16px;
+        top: 0;
         z-index: 4;
         display: flex;
         gap: 6px;
@@ -35293,9 +35295,10 @@
         display: grid;
         gap: 5px;
         padding: 13px;
-        border: 1px solid #29403f;
-        border-radius: 10px;
-        background: #111918;
+        border: 1px solid #36524e;
+        border-radius: 12px;
+        background: linear-gradient(90deg, #10201e 0%, #101312 42%);
+        box-shadow: inset 3px 0 0 #3ea99e;
         color: #eef3f2;
       }
 
@@ -35312,10 +35315,10 @@
         display: grid;
         gap: 6px;
         padding: 14px;
-        border: 1px solid #29403f;
+        border: 1px solid #304440;
         border-radius: 10px;
-        background: #111817;
-        box-shadow: inset 4px 0 0 #45c7b9;
+        background: #121716;
+        box-shadow: inset 3px 0 0 #3ea99e;
         color: #f3f6f5;
       }
 
@@ -37342,11 +37345,12 @@
         display: flex;
         align-items: baseline;
         justify-content: space-between;
+        flex-wrap: wrap;
         gap: 10px;
       }
 
       #${MODAL_ID} .ta-resource-history-heading {
-        margin-top: 5px;
+        margin: 14px 0 8px;
       }
 
       #${MODAL_ID} .ta-resource-history-heading b,
@@ -37357,8 +37361,11 @@
 
       #${MODAL_ID} .ta-resource-history-heading span,
       #${MODAL_ID} .ta-workspace-heading span {
+        min-width: 0;
+        max-width: 100%;
         color: #929c99;
         font-size: 10px;
+        overflow-wrap: anywhere;
         text-align: right;
       }
 
@@ -37577,9 +37584,9 @@
       }
 
       #${MODAL_ID} .ta-settings-section {
-        border-color: #4b4b56;
-        background: linear-gradient(90deg, #181820 0%, #101010 42%);
-        box-shadow: inset 3px 0 0 #9898aa;
+        border-color: #36524e;
+        background: linear-gradient(90deg, #10201e 0%, #101312 42%);
+        box-shadow: inset 3px 0 0 #3ea99e;
       }
 
       #${MODAL_ID} .ta-settings-section-header {
@@ -37591,8 +37598,8 @@
       }
 
       #${MODAL_ID} .ta-stat-subsection {
-        border-left: 2px solid #5a472b;
-        background: #14120f;
+        border-left: 2px solid #376c66;
+        background: #111615;
       }
 
       #${MODAL_ID} .ta-stat-subsection > summary {
@@ -37600,7 +37607,7 @@
       }
 
       #${MODAL_ID} .ta-stat-subsection[open] > summary {
-        border-bottom: 1px solid rgba(209, 163, 75, .18);
+        border-bottom: 1px solid rgba(62, 169, 158, .2);
       }
 
       /* v2.18.7: three concise, independently expandable resource drawers. */
@@ -37689,6 +37696,16 @@
 
         #${MODAL_ID} .ta-primary-tab {
           padding-inline: 8px;
+        }
+
+        #${MODAL_ID} .ta-workspace-heading {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 3px;
+        }
+
+        #${MODAL_ID} .ta-workspace-heading span {
+          text-align: left;
         }
 
         #${MODAL_ID} .ta-diagnostics-overview {
@@ -38969,9 +38986,9 @@
         display: grid;
         gap: 6px;
         padding: 11px;
-        border: 1px solid #384c5e;
+        border: 1px solid #304440;
         border-radius: 10px;
-        background: #121a21;
+        background: #121716;
       }
 
       #${MODAL_ID} .ta-activity-compact-summary strong {
@@ -38992,10 +39009,16 @@
         align-content: start;
         gap: 10px;
         padding: 12px;
-        border: 1px solid #34495d;
+        border: 1px solid #36524e;
         border-radius: 12px;
-        background: linear-gradient(135deg, #101b25 0%, #111514 52%);
-        box-shadow: inset 4px 0 0 #6197c6;
+        background: linear-gradient(90deg, #10201e 0%, #101312 42%);
+        box-shadow: inset 3px 0 0 #3ea99e;
+      }
+
+      #${MODAL_ID} .ta-activity-workspace .ta-activity-embedded {
+        border: 0;
+        background: transparent;
+        box-shadow: none;
       }
 
       #${MODAL_ID} .ta-activity-embedded .ta-section-body {
@@ -39097,9 +39120,9 @@
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 3px;
         padding: 3px;
-        border: 1px solid #453a28;
+        border: 1px solid #304440;
         border-radius: 9px;
-        background: #15130f;
+        background: #111615;
       }
 
       #${MODAL_ID} .ta-stats-view-nav button {
@@ -39109,7 +39132,7 @@
         border: 0;
         border-radius: 6px;
         background: transparent;
-        color: #9f9a90;
+        color: #9ba5a2;
         font: inherit;
         font-size: 12px;
         font-weight: 800;
@@ -39117,13 +39140,13 @@
       }
 
       #${MODAL_ID} .ta-stats-view-nav button.ta-stats-view-active {
-        background: #332817;
-        color: #f0cf87;
-        box-shadow: inset 0 0 0 1px rgba(209, 163, 75, .35);
+        background: #1d3b38;
+        color: #e8f5f3;
+        box-shadow: inset 0 0 0 1px rgba(62, 169, 158, .42);
       }
 
       #${MODAL_ID} .ta-stats-view-nav button:focus-visible {
-        outline: 2px solid #d1a34b;
+        outline: 2px solid #3ea99e;
         outline-offset: 1px;
       }
 
@@ -39133,17 +39156,17 @@
 
       #${MODAL_ID} .ta-stats-empty-state {
         padding: 14px 10px;
-        border-top: 1px solid #34302a;
-        border-bottom: 1px solid #34302a;
-        color: #aaa49a;
+        border-top: 1px solid #2e3b39;
+        border-bottom: 1px solid #2e3b39;
+        color: #9ba5a2;
         font-size: 12px;
         line-height: 1.45;
       }
 
       #${MODAL_ID} .ta-stats-data-list {
         display: grid;
-        border-top: 1px solid #34302a;
-        border-bottom: 1px solid #34302a;
+        border-top: 1px solid #2e3b39;
+        border-bottom: 1px solid #2e3b39;
       }
 
       #${MODAL_ID} .ta-stat-data-block {
@@ -39154,7 +39177,7 @@
       }
 
       #${MODAL_ID} .ta-stat-data-block + .ta-stat-data-block {
-        border-top: 1px solid #302c25;
+        border-top: 1px solid #293532;
       }
 
       #${MODAL_ID} .ta-stat-data-heading {
@@ -39162,13 +39185,13 @@
         align-items: baseline;
         justify-content: space-between;
         gap: 9px;
-        color: #e7e1d7;
+        color: #e5ecea;
         font-size: 13px;
         font-weight: 800;
       }
 
       #${MODAL_ID} .ta-stat-data-heading > span:last-child {
-        color: #918b82;
+        color: #8f9b98;
         font-size: 10px;
         font-weight: 700;
         text-align: right;
@@ -40250,7 +40273,11 @@
       return selected;
     }
 
-    function selectPrimaryTab(value, persist = true) {
+    function selectPrimaryTab(
+      value,
+      persist = true,
+      resetScroll = false
+    ) {
       const selected =
         uiSessionPrimaryTab(value);
 
@@ -40279,6 +40306,14 @@
 
       applyPrimaryTabPanels(selected);
 
+      if (
+        resetScroll &&
+        scrollContainer
+      ) {
+        scrollContainer.scrollTop =
+          0;
+      }
+
       if (persist) {
         writePrimaryTabPreference(
           selected
@@ -40295,7 +40330,9 @@
           selectPrimaryTab(
             button.getAttribute(
               'data-ta-primary-tab'
-            )
+            ),
+            true,
+            true
           );
         }
       );
@@ -40321,7 +40358,9 @@
         selectPrimaryTab(
           shortcut.getAttribute(
             'data-ta-command-shortcut'
-          )
+          ),
+          true,
+          true
         );
 
         const statsView =
