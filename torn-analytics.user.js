@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.83
+// @version      2.18.84
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.83';
+  const VERSION = '2.18.84';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -46,6 +46,8 @@
   // top-level workspace framing, and matches Torn's resource color identities.
   // v2.18.83 makes Command the opening home workspace, turns its information
   // cards into contextual deep links, and adds one-tap returns from each tool.
+  // v2.18.84 centers Command in the primary navigation and moves Settings
+  // beside Close as a persistent header utility.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -35230,12 +35232,27 @@
         content: '';
       }
 
+      #${MODAL_ID} .ta-modal-actions {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      #${MODAL_ID} .ta-modal-settings,
       #${MODAL_ID} .ta-modal-close {
         width: auto;
-        min-width: 72px;
+        min-width: 64px;
         min-height: 38px;
         margin: 0;
-        padding: 7px 12px;
+        padding: 7px 10px;
+        font-size: 12px;
+      }
+
+      #${MODAL_ID} .ta-modal-settings {
+        border-color: #36524e;
+        background: #15201e;
+        color: #b9d7d2;
       }
 
       #${MODAL_ID} .ta-modal-scroll {
@@ -37741,6 +37758,26 @@
       }
       @media(max-width:520px) {
 
+        #${MODAL_ID} .ta-modal-header {
+          gap: 8px;
+          padding-inline: 12px;
+        }
+
+        #${MODAL_ID} .ta-modal-title h2 {
+          font-size: 16px;
+        }
+
+        #${MODAL_ID} .ta-modal-actions {
+          gap: 5px;
+        }
+
+        #${MODAL_ID} .ta-modal-settings,
+        #${MODAL_ID} .ta-modal-close {
+          min-width: 58px;
+          padding-inline: 8px;
+          font-size: 11px;
+        }
+
         #${MODAL_ID} .actions,
         #${MODAL_ID} .stats {
           grid-template-columns: 1fr;
@@ -39947,20 +39984,29 @@
             </span>
           </div>
 
-          <button
-            id="ta-close"
-            class="ta-modal-close"
-            type="button"
-          >
-            Close
-          </button>
+          <div class="ta-modal-actions">
+            <button
+              class="ta-modal-settings"
+              type="button"
+              data-ta-command-shortcut="settings"
+            >
+              Settings
+            </button>
+
+            <button
+              id="ta-close"
+              class="ta-modal-close"
+              type="button"
+            >
+              Close
+            </button>
+          </div>
         </div>
 
         <div class="ta-primary-nav" role="tablist" aria-label="Torn Analytics sections">
-          <button type="button" class="ta-primary-tab" data-ta-primary-tab="command" role="tab">Command</button>
           <button type="button" class="ta-primary-tab" data-ta-primary-tab="activity" role="tab">Activity</button>
+          <button type="button" class="ta-primary-tab" data-ta-primary-tab="command" role="tab">Command</button>
           <button type="button" class="ta-primary-tab" data-ta-primary-tab="resources" role="tab">Resources</button>
-          <button type="button" class="ta-primary-tab" data-ta-primary-tab="settings" role="tab">Settings</button>
         </div>
 
         <div class="ta-modal-scroll">
