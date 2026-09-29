@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.81
+// @version      2.18.82
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.81';
+  const VERSION = '2.18.82';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -42,6 +42,8 @@
   // analytics, removes redundant outer drawers, and rebuilds Resources.
   // v2.18.81 repairs mobile tab scrolling, sticky navigation, and compact
   // workspace spacing after the merged-layout device test.
+  // v2.18.82 moves primary navigation outside the scrolling content, flattens
+  // top-level workspace framing, and matches Torn's resource color identities.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -35234,18 +35236,18 @@
         min-height: 0;
         overflow-x: hidden;
         overflow-y: auto;
-        padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+        padding: 14px 16px calc(18px + env(safe-area-inset-bottom));
+        overflow-anchor: none;
         overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
       }
 
       #${MODAL_ID} .ta-primary-nav {
-        position: sticky;
-        top: 0;
-        z-index: 4;
+        position: relative;
+        z-index: 1;
+        flex: 0 0 auto;
         display: flex;
         gap: 6px;
-        margin: -16px -16px 10px;
         padding: 10px 12px;
         overflow-x: auto;
         border-bottom: 1px solid #333;
@@ -37248,20 +37250,20 @@
 
       #${MODAL_ID} .ta-resource-live-energy,
       #${MODAL_ID} .ta-resource-history-energy {
-        --ta-resource-color: #d9ae45;
-        --ta-resource-border: #5f522a;
+        --ta-resource-color: #4caf50;
+        --ta-resource-border: #315d35;
       }
 
       #${MODAL_ID} .ta-resource-live-nerve,
       #${MODAL_ID} .ta-resource-history-nerve {
-        --ta-resource-color: #70a8cf;
-        --ta-resource-border: #35566d;
+        --ta-resource-color: #ef4438;
+        --ta-resource-border: #6a3733;
       }
 
       #${MODAL_ID} .ta-resource-live-happiness,
       #${MODAL_ID} .ta-resource-history-happiness {
-        --ta-resource-color: #c989bd;
-        --ta-resource-border: #684761;
+        --ta-resource-color: #f2b51d;
+        --ta-resource-border: #6b5925;
       }
 
       #${MODAL_ID} .ta-resource-stack-status {
@@ -39030,6 +39032,42 @@
         gap: 10px;
       }
 
+      /* v2.18.82: one fixed navigation row and flatter top-level workspaces. */
+      #${MODAL_ID} .ta-command-center-placeholder,
+      #${MODAL_ID} .ta-activity-workspace,
+      #${MODAL_ID} .ta-resource-section,
+      #${MODAL_ID} .ta-settings-section {
+        border: 1px solid #293633;
+        background: #101312;
+        box-shadow: none;
+      }
+
+      #${MODAL_ID} .ta-command-center-placeholder,
+      #${MODAL_ID} .ta-activity-workspace {
+        gap: 14px;
+        padding: 16px;
+      }
+
+      #${MODAL_ID} .ta-resource-section,
+      #${MODAL_ID} .ta-settings-section {
+        margin: 0;
+      }
+
+      #${MODAL_ID} .ta-resource-section > .ta-section-summary-row,
+      #${MODAL_ID} .ta-settings-section > .ta-section-summary-row {
+        padding: 14px 16px;
+      }
+
+      #${MODAL_ID} .ta-resource-section > .ta-section-body,
+      #${MODAL_ID} .ta-settings-section > .ta-section-body {
+        padding: 0 16px 16px;
+      }
+
+      #${MODAL_ID} .ta-resource-live-grid,
+      #${MODAL_ID} .ta-resource-history-grid {
+        gap: 10px;
+      }
+
       /* v2.18.51: one quiet weekly surface replaces two competing dashboards. */
       #${MODAL_ID} .ta-weekly-highlights-section {
         border-color: #3d584a;
@@ -39868,14 +39906,14 @@
           </button>
         </div>
 
-        <div class="ta-modal-scroll">
-
         <div class="ta-primary-nav" role="tablist" aria-label="Torn Analytics sections">
           <button type="button" class="ta-primary-tab" data-ta-primary-tab="command" role="tab">Command</button>
           <button type="button" class="ta-primary-tab" data-ta-primary-tab="activity" role="tab">Activity</button>
           <button type="button" class="ta-primary-tab" data-ta-primary-tab="resources" role="tab">Resources</button>
           <button type="button" class="ta-primary-tab" data-ta-primary-tab="settings" role="tab">Settings</button>
         </div>
+
+        <div class="ta-modal-scroll">
 
         <section class="ta-command-center ta-primary-workspace" data-ta-primary-panel="command" aria-label="Command Center">
           <div class="ta-command-center-placeholder" data-ta-command-center-live>
