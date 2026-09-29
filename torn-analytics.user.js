@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.82
+// @version      2.18.83
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.82';
+  const VERSION = '2.18.83';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -44,6 +44,8 @@
   // workspace spacing after the merged-layout device test.
   // v2.18.82 moves primary navigation outside the scrolling content, flattens
   // top-level workspace framing, and matches Torn's resource color identities.
+  // v2.18.83 makes Command the opening home workspace, turns its information
+  // cards into contextual deep links, and adds one-tap returns from each tool.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -28910,8 +28912,11 @@
     return `
       <section class="ta-primary-workspace ta-activity-workspace" data-ta-activity-workspace>
         <div class="ta-workspace-heading">
-          <b>Activity &amp; progress</b>
-          <span>${Number(activity?.total_logs || 0).toLocaleString()} logs · ${Number(growth?.valid_logs || 0).toLocaleString()} training actions</span>
+          <span class="ta-workspace-heading-copy">
+            <b>Activity &amp; progress</b>
+            <span>${Number(activity?.total_logs || 0).toLocaleString()} logs · ${Number(growth?.valid_logs || 0).toLocaleString()} training actions</span>
+          </span>
+          <button type="button" class="ta-return-command" data-ta-command-shortcut="command">‹ Command</button>
         </div>
         ${renderStatsWorkspaceNavigation(activeView)}
         ${renderStatsWorkspaceView(
@@ -31894,10 +31899,13 @@
     return `
       <section class="ta-section ta-resource-section ta-primary-workspace">
         <header class="ta-section-summary-row ta-resource-section-header">
-          <span class="ta-section-title">Resources</span>
-          <span class="ta-section-meta">
-            Live bars &amp; ${resourceDashboardFormatNumber(totalEvents)} recorded events
+          <span class="ta-section-heading-copy">
+            <span class="ta-section-title">Resources</span>
+            <span class="ta-section-meta">
+              Live bars &amp; ${resourceDashboardFormatNumber(totalEvents)} recorded events
+            </span>
           </span>
+          <button type="button" class="ta-return-command" data-ta-command-shortcut="command">‹ Command</button>
         </header>
         <div class="ta-section-body ta-resource-compact-body">
           ${
@@ -35314,9 +35322,12 @@
       }
 
       #${MODAL_ID} .ta-command-recap {
+        position: relative;
         display: grid;
         gap: 6px;
-        padding: 14px;
+        width: 100%;
+        margin: 0;
+        padding: 14px 38px 14px 14px;
         border: 1px solid #304440;
         border-radius: 10px;
         background: #121716;
@@ -35351,12 +35362,19 @@
       }
 
       #${MODAL_ID} .ta-command-cooldown-strip {
+        position: relative;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         gap: 7px 14px;
-        padding: 1px 4px 10px;
+        width: 100%;
+        margin: 0;
+        padding: 1px 30px 10px 4px;
+        border-top: 0;
+        border-right: 0;
+        border-left: 0;
         border-bottom: 1px solid #26302f;
+        background: transparent;
         color: #b0b8b6;
       }
 
@@ -35376,9 +35394,12 @@
 
       #${MODAL_ID} .ta-command-action {
         --ta-command-energy-accent: #48b9ad;
+        position: relative;
         display: grid;
         gap: 8px;
-        padding: 15px;
+        width: 100%;
+        margin: 0;
+        padding: 15px 38px 15px 15px;
         border: 1px solid #315552;
         border-radius: 12px;
         background: linear-gradient(135deg, #14201e 0%, #111514 100%);
@@ -35436,50 +35457,64 @@
         line-height: 1.45;
       }
 
-      #${MODAL_ID} .ta-command-shortcuts {
-        display: grid;
-        gap: 8px;
-        padding-top: 2px;
+      #${MODAL_ID} .ta-command-context-link,
+      #${MODAL_ID} .ta-command-evidence-link,
+      #${MODAL_ID} .ta-return-command {
+        appearance: none;
+        -webkit-appearance: none;
+        font: inherit;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
       }
 
-      #${MODAL_ID} .ta-command-shortcut-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px;
-      }
-
-      #${MODAL_ID} .ta-command-shortcut-grid > button {
-        position: relative;
-        display: grid;
-        gap: 4px;
-        min-height: 68px;
-        margin: 0;
-        padding: 12px 12px 12px 19px;
-        border: 1px solid #293635;
-        border-radius: 10px;
-        background: #131b1a;
-        color: #f0f3f2;
+      #${MODAL_ID} .ta-command-context-link {
         text-align: left;
       }
 
-      #${MODAL_ID} .ta-command-shortcut-grid > button::before {
+      #${MODAL_ID} .ta-command-context-link::after {
         position: absolute;
-        top: 12px;
-        bottom: 12px;
-        left: 9px;
-        width: 4px;
-        border-radius: 999px;
-        background: #3ea99e;
-        content: '';
+        top: 50%;
+        right: 13px;
+        color: #86aaa5;
+        font-size: 22px;
+        line-height: 1;
+        content: '›';
+        opacity: .72;
+        transform: translateY(-50%);
       }
 
-      #${MODAL_ID} .ta-command-shortcut-grid b {
-        font-size: 13px;
+      #${MODAL_ID} .ta-command-evidence-link {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        width: 100%;
+        min-height: 42px;
+        margin: 0;
+        padding: 10px 12px;
+        border: 1px solid #293633;
+        border-radius: 9px;
+        background: #111615;
+        color: #a4afac;
+        text-align: left;
       }
 
-      #${MODAL_ID} .ta-command-shortcut-grid small {
-        color: #98a3a0;
+      #${MODAL_ID} .ta-command-evidence-link span {
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      #${MODAL_ID} .ta-command-evidence-link b {
+        color: #b9d7d2;
         font-size: 11px;
+        white-space: nowrap;
+      }
+
+      #${MODAL_ID} .ta-command-context-link:focus-visible,
+      #${MODAL_ID} .ta-command-evidence-link:focus-visible,
+      #${MODAL_ID} .ta-return-command:focus-visible {
+        outline: 2px solid #3ea99e;
+        outline-offset: 2px;
       }
 
       #${MODAL_ID} .ta-training-compact-summary.ta-command-training-overview {
@@ -35751,6 +35786,34 @@
         text-align: right;
         font-size: 12px;
         opacity: .65;
+      }
+
+      #${MODAL_ID} .ta-section-heading-copy,
+      #${MODAL_ID} .ta-workspace-heading-copy {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-section-heading-copy .ta-section-meta {
+        margin-left: 0;
+        text-align: left;
+      }
+
+      #${MODAL_ID} .ta-return-command {
+        flex: 0 0 auto;
+        width: auto;
+        min-height: 32px;
+        margin: 0 0 0 auto;
+        padding: 6px 10px;
+        border: 1px solid #36524e;
+        border-radius: 999px;
+        background: #15201e;
+        color: #b9d7d2;
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 1;
+        white-space: nowrap;
       }
 
       #${MODAL_ID} .ta-section-body {
@@ -37345,7 +37408,7 @@
       #${MODAL_ID} .ta-resource-history-heading,
       #${MODAL_ID} .ta-workspace-heading {
         display: flex;
-        align-items: baseline;
+        align-items: flex-start;
         justify-content: space-between;
         flex-wrap: wrap;
         gap: 10px;
@@ -37356,13 +37419,13 @@
       }
 
       #${MODAL_ID} .ta-resource-history-heading b,
-      #${MODAL_ID} .ta-workspace-heading b {
+      #${MODAL_ID} .ta-workspace-heading-copy > b {
         color: #f1f3f2;
         font-size: 14px;
       }
 
       #${MODAL_ID} .ta-resource-history-heading span,
-      #${MODAL_ID} .ta-workspace-heading span {
+      #${MODAL_ID} .ta-workspace-heading-copy > span {
         min-width: 0;
         max-width: 100%;
         color: #929c99;
@@ -37702,11 +37765,11 @@
 
         #${MODAL_ID} .ta-workspace-heading {
           align-items: flex-start;
-          flex-direction: column;
-          gap: 3px;
+          flex-direction: row;
+          gap: 8px;
         }
 
-        #${MODAL_ID} .ta-workspace-heading span {
+        #${MODAL_ID} .ta-workspace-heading-copy > span {
           text-align: left;
         }
 
@@ -39708,7 +39771,7 @@
     const summary = statGrowthCompactSummaryModel(growth || {}, '7d', 'all');
 
     commandCenterHost.innerHTML = `
-      <div class="ta-command-recap">
+      <button type="button" class="ta-command-recap ta-command-context-link" data-ta-command-shortcut="activity" data-ta-command-view="charts" aria-label="Open training charts">
         <span>
           Recent training recap
           <small>${escapeActivityHtml(summary.period_label)}</small>
@@ -39722,13 +39785,13 @@
               : ''
           }
         </small>
-      </div>
-      <div class="ta-command-cooldown-strip">
+      </button>
+      <button type="button" class="ta-command-cooldown-strip ta-command-context-link" data-ta-command-shortcut="resources" aria-label="Open live resources">
         <span>Cooldowns</span>
         <b>Drug ${escapeActivityHtml(drug.label)}</b>
         <b class="${booster.state === 'complete' ? 'is-ready' : ''}">Booster ${escapeActivityHtml(booster.label)}</b>
-      </div>
-      <div class="ta-command-action ta-command-energy-${energyTone}">
+      </button>
+      <button type="button" class="ta-command-action ta-command-context-link ta-command-energy-${energyTone}" data-ta-command-shortcut="resources" aria-label="Open Energy resources">
         <div class="ta-command-energy-heading">
           <strong>
             ${energy === null ? '—' : energy.toLocaleString() + 'E'}${
@@ -39741,7 +39804,7 @@
         </div>
         <b>${escapeActivityHtml(advice?.title || 'Training guidance unavailable')}</b>
         <small>${escapeActivityHtml(advice?.detail || 'Refresh stored analysis to restore guidance.')}</small>
-      </div>
+      </button>
       ${renderTrainingCompactSummary(
         readiness,
         growth,
@@ -39750,23 +39813,10 @@
         'all',
         { embedded: true }
       )}
-      <div class="ta-command-shortcuts">
-        <span class="ta-command-center-kicker">Direct shortcuts</span>
-        <div class="ta-command-shortcut-grid">
-          <button type="button" data-ta-command-shortcut="activity" data-ta-command-view="charts">
-            <b>Charts</b><small>Stat trends</small>
-          </button>
-          <button type="button" data-ta-command-shortcut="activity" data-ta-command-view="data">
-            <b>Data</b><small>History &amp; export</small>
-          </button>
-          <button type="button" data-ta-command-shortcut="resources">
-            <b>Resources</b><small>Live bars &amp; history</small>
-          </button>
-          <button type="button" data-ta-command-shortcut="settings">
-            <b>Settings</b><small>Data &amp; preferences</small>
-          </button>
-        </div>
-      </div>
+      <button type="button" class="ta-command-evidence-link" data-ta-command-shortcut="activity" data-ta-command-view="data">
+        <span>Prediction evidence</span>
+        <b>View supporting data ›</b>
+      </button>
     `;
 
     bindTrainingWorkspaceInteractions(
@@ -39925,8 +39975,11 @@
 
         <div data-ta-primary-panel="settings">\n        <section class="ta-section ta-settings-section ta-primary-workspace">
           <header class="ta-section-summary-row ta-settings-section-header">
-            <span class="ta-section-title">Settings</span>
-            <span class="ta-section-meta">Actions &amp; preferences</span>
+            <span class="ta-section-heading-copy">
+              <span class="ta-section-title">Settings</span>
+              <span class="ta-section-meta">Actions &amp; preferences</span>
+            </span>
+            <button type="button" class="ta-return-command" data-ta-command-shortcut="command">‹ Command</button>
           </header>
 
           <div class="ta-section-body">
@@ -40377,8 +40430,9 @@
     }
 
     selectPrimaryTab(
-      readPrimaryTabPreference(),
-      false
+      'command',
+      false,
+      true
     );
 
     modal.addEventListener(
@@ -41328,7 +41382,9 @@
         // The dashboards are mounted by analyzeStoredLogs after the initial
         // tab selection, so reapply visibility to the newly created panels.
         applyPrimaryTabPanels(
-          readPrimaryTabPreference()
+          modal.getAttribute(
+            'data-ta-primary-tab'
+          ) || 'command'
         );
 
         await refreshStoredHistorySummary();
