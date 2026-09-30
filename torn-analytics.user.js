@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.84
+// @version      2.18.85
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.84';
+  const VERSION = '2.18.85';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -48,6 +48,8 @@
   // cards into contextual deep links, and adds one-tap returns from each tool.
   // v2.18.84 centers Command in the primary navigation and moves Settings
   // beside Close as a persistent header utility.
+  // v2.18.85 unifies Command's training recap into a persistent in-place
+  // share surface and replaces Activity prose with compact metrics.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -13495,10 +13497,6 @@
       summary.busiest
         ? `${activityDashboardShortDate(summary.busiest.date)}: ${Number(summary.busiest.count || 0).toLocaleString()}`
         : '—';
-    const partialText =
-      partialContext.is_partial_today
-        ? ' · today partial'
-        : '';
     const dashboardOpen =
       readActivityDashboardPreferences()
         .activity_dashboard_open ===
@@ -13506,12 +13504,23 @@
 
     const body = `
       <div class="ta-section-body ta-activity-compact-body">
-        <section class="ta-activity-compact-summary">
-          <strong>${escapeActivityHtml(activityDashboardCompactSentence(summary))}</strong>
+        <section class="ta-activity-compact-summary" aria-label="Last 7 days activity summary">
           <span>
-            ${summary.average_per_active_day.toFixed(0)} per active day ·
-            ${Number(activity.longest_active_streak?.days || 0).toLocaleString()}-day streak ·
-            busiest ${escapeActivityHtml(busiestText)}${partialText}
+            <small>Actions</small>
+            <strong>${Number(summary.total || 0).toLocaleString()}</strong>
+          </span>
+          <span>
+            <small>Active days</small>
+            <strong>${Number(summary.active_days || 0).toLocaleString()}</strong>
+          </span>
+          <span>
+            <small>Streak</small>
+            <strong>${Number(activity.longest_active_streak?.days || 0).toLocaleString()} days</strong>
+          </span>
+          <span>
+            <small>Busiest</small>
+            <strong>${escapeActivityHtml(busiestText)}</strong>
+            ${partialContext.is_partial_today ? '<em>today partial</em>' : ''}
           </span>
         </section>
 
@@ -13805,6 +13814,10 @@
           uiSessionOptionalBoolean(
             parsed?.history_status_open
           ),
+        training_recap_open:
+          uiSessionOptionalBoolean(
+            parsed?.training_recap_open
+          ),
         settings_dashboard_open:
           uiSessionOptionalBoolean(
             parsed?.settings_dashboard_open
@@ -13813,6 +13826,7 @@
     } catch (_) {
       return {
         history_status_open: null,
+        training_recap_open: null,
         settings_dashboard_open: null
       };
     }
@@ -13831,6 +13845,7 @@
       const key
       of [
         'history_status_open',
+        'training_recap_open',
         'settings_dashboard_open'
       ]
     ) {
@@ -28614,14 +28629,195 @@
           Math.floor(Date.now() / 1000)
         )}
 
+        ${
+          embedded
+            ? ''
+            : `
+              <details
+                class="ta-training-support-section"
+                data-ta-training-support-section="recap"
+              >
+                <summary>
+                  <span>Training recap</span>
+                  <b>${escapeActivityHtml(summary.period_label)}</b>
+                </summary>
+                <div class="ta-training-support-controls">
+                  <label class="ta-training-summary-period">
+                    <span>Period</span>
+                    <select data-ta-training-summary-range aria-label="Training summary period">
+                      ${periodOptions}
+                    </select>
+                  </label>
+                  <label class="ta-training-summary-period">
+                    <span>Stats</span>
+                    <select data-ta-training-summary-stat aria-label="Training summary stat">
+                      ${statOptions}
+                    </select>
+                  </label>
+                </div>
+                ${
+                  jumpRecap
+                    ? `<p class="ta-training-jump-recap" data-ta-training-jump-recap><span>Latest Happy Jump</span><b>${escapeActivityHtml(jumpRecap)}</b></p>`
+                    : ''
+                }
+                <button
+                  type="button"
+                  class="ta-training-recap"
+                  data-ta-training-recap
+                  data-ta-training-recap-text="${escapeActivityHtml(statGrowthTrainingRecapSentence(summary))}"
+                  data-ta-copy-state="idle"
+                  aria-label="Prepare training recap copy"
+                >
+                  <span>Shareable recap</span>
+                  <b>${escapeActivityHtml(statGrowthTrainingRecapSentence(summary))}</b>
+                  <small data-ta-training-recap-copy-label aria-live="polite"></small>
+                </button>
+              </details>
+            `
+        }
+
         <details
           class="ta-training-support-section"
-          data-ta-training-support-section="recap"
+          data-ta-training-support-section="prediction"
         >
           <summary>
-            <span>Training recap</span>
-            <b>${escapeActivityHtml(summary.period_label)}</b>
+            <span>Estimated gain</span>
+            <b>${projection?.available ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}` : 'Not enough evidence'}</b>
           </summary>
+          <div class="ta-training-support-controls ta-training-prediction-controls">
+            <label class="ta-training-summary-period">
+              <span>Stat</span>
+              <select data-ta-training-prediction-stat aria-label="Prediction stat">
+                ${predictionStatOptions}
+              </select>
+            </label>
+          </div>
+          <p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${escapeActivityHtml(predictionEvidence)}<small class="ta-training-summary-prediction-context">${escapeActivityHtml(predictionContextText)}</small></p>
+        </details>
+
+      </section>
+    `;
+  }
+
+  function renderCommandTrainingRecap(
+    growth,
+    range = '7d',
+    statValue = 'all',
+    open = false
+  ) {
+    const period =
+      statGrowthCompactPeriod(
+        range
+      );
+    const summary =
+      statGrowthCompactSummaryModel(
+        growth || {},
+        period,
+        statValue
+      );
+    const latestHappyJump =
+      typeof statGrowthLatestHappyJumpEvent ===
+        'function'
+        ? statGrowthLatestHappyJumpEvent(
+            growth
+          )
+        : null;
+    const periodDays =
+      period === '7d'
+        ? 7
+        : period === '14d'
+          ? 14
+          : period === '30d'
+            ? 30
+            : null;
+    const periodCutoff =
+      periodDays === null
+        ? null
+        : Math.floor(
+            Date.now() /
+            1000
+          ) -
+          periodDays *
+            86400;
+    const jumpMatchesStat =
+      summary.stat === 'all' ||
+      (
+        Array.isArray(
+          latestHappyJump?.stats
+        ) &&
+        latestHappyJump.stats.some(
+          row =>
+            row?.stat ===
+              summary.stat
+        )
+      );
+    const jumpInPeriod =
+      latestHappyJump &&
+      jumpMatchesStat &&
+      (
+        periodCutoff === null ||
+        Number(
+          latestHappyJump.last_timestamp ||
+          0
+        ) >=
+          periodCutoff
+      );
+    const jumpRecap =
+      jumpInPeriod
+        ? statGrowthHappyJumpEventSentence(
+            latestHappyJump
+          )
+        : '';
+    const recapText =
+      statGrowthTrainingRecapSentence(
+        summary
+      );
+    const periodOptions = [
+      ['7d', '1 week'],
+      ['14d', '2 weeks'],
+      ['30d', '1 month'],
+      ['all', 'All time']
+    ]
+      .map(
+        ([value, label]) =>
+          `<option value="${value}" ${value === period ? 'selected' : ''}>${label}</option>`
+      )
+      .join('');
+    const statOptions = [
+      ['all', 'All stats'],
+      ['strength', 'Strength'],
+      ['defense', 'Defense'],
+      ['speed', 'Speed'],
+      ['dexterity', 'Dexterity']
+    ]
+      .map(
+        ([value, label]) =>
+          `<option value="${value}" ${value === summary.stat ? 'selected' : ''}>${label}</option>`
+      )
+      .join('');
+
+    return `
+      <details
+        class="ta-command-recap ta-command-training-recap"
+        data-ta-command-training-recap
+        ${open === true ? 'open' : ''}
+      >
+        <summary class="ta-command-recap-summary">
+          <span>
+            Training recap
+            <small>${escapeActivityHtml(summary.period_label)}</small>
+          </span>
+          <strong>${escapeActivityHtml(statGrowthFormatGain(summary.gain))} stats</strong>
+          <small>
+            ${summary.actions.toLocaleString()} gym ${summary.actions === 1 ? 'session' : 'sessions'} ·
+            ${summary.energy_used.toLocaleString()}E used${
+              summary.job_special_gain > 0
+                ? ` · Army ${escapeActivityHtml(statGrowthFormatGain(summary.job_special_gain))} / ${summary.job_points_used.toLocaleString()} JP`
+                : ''
+            }
+          </small>
+        </summary>
+        <div class="ta-command-recap-body">
           <div class="ta-training-support-controls">
             <label class="ta-training-summary-period">
               <span>Period</span>
@@ -28645,36 +28841,25 @@
             type="button"
             class="ta-training-recap"
             data-ta-training-recap
-            data-ta-training-recap-text="${escapeActivityHtml(statGrowthTrainingRecapSentence(summary))}"
+            data-ta-training-recap-text="${escapeActivityHtml(recapText)}"
             data-ta-copy-state="idle"
             aria-label="Prepare training recap copy"
           >
             <span>Shareable recap</span>
-            <b>${escapeActivityHtml(statGrowthTrainingRecapSentence(summary))}</b>
+            <b>${escapeActivityHtml(recapText)}</b>
             <small data-ta-training-recap-copy-label aria-live="polite"></small>
           </button>
-        </details>
-
-        <details
-          class="ta-training-support-section"
-          data-ta-training-support-section="prediction"
-        >
-          <summary>
-            <span>Estimated gain</span>
-            <b>${projection?.available ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}` : 'Not enough evidence'}</b>
-          </summary>
-          <div class="ta-training-support-controls ta-training-prediction-controls">
-            <label class="ta-training-summary-period">
-              <span>Stat</span>
-              <select data-ta-training-prediction-stat aria-label="Prediction stat">
-                ${predictionStatOptions}
-              </select>
-            </label>
-          </div>
-          <p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${escapeActivityHtml(predictionEvidence)}<small class="ta-training-summary-prediction-context">${escapeActivityHtml(predictionContextText)}</small></p>
-        </details>
-
-      </section>
+          <button
+            type="button"
+            class="ta-command-recap-charts"
+            data-ta-command-shortcut="activity"
+            data-ta-command-view="charts"
+          >
+            View charts
+            <span aria-hidden="true">›</span>
+          </button>
+        </div>
+      </details>
     `;
   }
 
@@ -29158,6 +29343,40 @@
           root?.querySelector?.(
             '[data-ta-training-recap]'
           );
+        const commandRecap =
+          root?.querySelector?.(
+            '[data-ta-command-training-recap]'
+          );
+
+        const persistCommandRecap =
+          () => {
+            if (!commandRecap) {
+              return;
+            }
+
+            writeCommandCenterDrawerPreferences({
+              training_recap_open:
+                commandRecap.open ===
+                true
+            });
+          };
+
+        commandRecap?.addEventListener(
+          'toggle',
+          persistCommandRecap
+        );
+
+        commandRecap?.querySelector?.(
+          'summary'
+        )?.addEventListener(
+          'click',
+          () => {
+            setTimeout(
+              persistCommandRecap,
+              0
+            );
+          }
+        );
 
         recap?.addEventListener(
           'click',
@@ -29299,6 +29518,20 @@
                 range
             });
 
+            if (
+              root?.matches?.(
+                '[data-ta-command-center-live]'
+              )
+            ) {
+              renderCommandCenterSnapshot({
+                training_readiness:
+                  root.__taTrainingReadiness,
+                stat_growth:
+                  root.__taTrainingGrowth
+              });
+              return;
+            }
+
             refreshCompactSummary(
               range,
               statSelect?.value
@@ -29321,6 +29554,20 @@
               training_summary_stat:
                 summaryStat
             });
+
+            if (
+              root?.matches?.(
+                '[data-ta-command-center-live]'
+              )
+            ) {
+              renderCommandCenterSnapshot({
+                training_readiness:
+                  root.__taTrainingReadiness,
+                stat_growth:
+                  root.__taTrainingGrowth
+              });
+              return;
+            }
 
             refreshCompactSummary(
               rangeSelect?.value ||
@@ -35330,7 +35577,7 @@
       }
 
       #${MODAL_ID} .ta-command-center-kicker,
-      #${MODAL_ID} .ta-command-recap span {
+      #${MODAL_ID} .ta-command-recap-summary > span {
         font-size: 11px;
         font-weight: 800;
         letter-spacing: .04em;
@@ -35340,42 +35587,118 @@
 
       #${MODAL_ID} .ta-command-recap {
         position: relative;
-        display: grid;
-        gap: 6px;
         width: 100%;
         margin: 0;
-        padding: 14px 38px 14px 14px;
+        padding: 0;
         border: 1px solid #304440;
         border-radius: 10px;
         background: #121716;
         box-shadow: inset 3px 0 0 #3ea99e;
         color: #f3f6f5;
+        overflow: hidden;
       }
 
-      #${MODAL_ID} .ta-command-recap > span {
+      #${MODAL_ID} .ta-command-recap-summary {
+        position: relative;
+        display: grid;
+        gap: 6px;
+        padding: 14px 38px 14px 14px;
+        cursor: pointer;
+        list-style: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      #${MODAL_ID} .ta-command-recap-summary::-webkit-details-marker {
+        display: none;
+      }
+
+      #${MODAL_ID} .ta-command-recap-summary::after {
+        position: absolute;
+        top: 50%;
+        right: 14px;
+        color: #86aaa5;
+        font-size: 20px;
+        line-height: 1;
+        content: '⌄';
+        opacity: .78;
+        transform: translateY(-50%);
+        transition: transform .14s ease;
+      }
+
+      #${MODAL_ID} .ta-command-recap[open] > .ta-command-recap-summary::after {
+        transform: translateY(-50%) rotate(180deg);
+      }
+
+      #${MODAL_ID} .ta-command-recap-summary > span {
         display: flex;
         align-items: baseline;
         justify-content: space-between;
         gap: 10px;
       }
 
-      #${MODAL_ID} .ta-command-recap > span > small {
+      #${MODAL_ID} .ta-command-recap-summary > span > small {
         font-size: 10px;
         font-weight: 600;
         letter-spacing: 0;
         text-transform: none;
       }
 
-      #${MODAL_ID} .ta-command-recap > strong {
+      #${MODAL_ID} .ta-command-recap-summary > strong {
         font-size: 26px;
         font-weight: 500;
         line-height: 1.15;
       }
 
-      #${MODAL_ID} .ta-command-recap > small {
+      #${MODAL_ID} .ta-command-recap-summary > small {
         color: #9da8a5;
         font-size: 12px;
         line-height: 1.4;
+      }
+
+      #${MODAL_ID} .ta-command-recap-body {
+        display: grid;
+        border-top: 1px solid #304440;
+        background: #101312;
+      }
+
+      #${MODAL_ID} .ta-command-recap-body > .ta-training-support-controls {
+        border-top: 0;
+      }
+
+      #${MODAL_ID} .ta-command-recap-body > .ta-training-recap {
+        border-top: 1px solid #303837;
+        border-radius: 0;
+        background: #111514;
+      }
+
+      #${MODAL_ID} .ta-command-recap-charts {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 42px;
+        margin: 8px 10px 10px;
+        padding: 8px 11px;
+        border: 1px solid #315552;
+        border-radius: 8px;
+        background: #14201e;
+        color: #c5dfda;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 750;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      #${MODAL_ID} .ta-command-recap-charts > span {
+        font-size: 18px;
+        line-height: 1;
+      }
+
+      #${MODAL_ID} .ta-command-recap-summary:focus-visible,
+      #${MODAL_ID} .ta-command-recap-charts:focus-visible {
+        outline: 2px solid #3ea99e;
+        outline-offset: -2px;
       }
 
       #${MODAL_ID} .ta-command-cooldown-strip {
@@ -39086,20 +39409,45 @@
 
       #${MODAL_ID} .ta-activity-compact-summary {
         display: grid;
-        gap: 6px;
-        padding: 11px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1px;
+        padding: 1px;
         border: 1px solid #304440;
         border-radius: 10px;
         background: #121716;
+        overflow: hidden;
+      }
+
+      #${MODAL_ID} .ta-activity-compact-summary > span {
+        display: grid;
+        align-content: center;
+        gap: 2px;
+        min-width: 0;
+        min-height: 58px;
+        padding: 9px 10px;
+        background: #151a19;
+      }
+
+      #${MODAL_ID} .ta-activity-compact-summary small {
+        color: #8f9b98;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .045em;
+        text-transform: uppercase;
       }
 
       #${MODAL_ID} .ta-activity-compact-summary strong {
         color: #ececec;
-        font-size: 14px;
-        line-height: 1.45;
+        font-size: 15px;
+        line-height: 1.25;
       }
 
-      #${MODAL_ID} .ta-activity-compact-summary span,
+      #${MODAL_ID} .ta-activity-compact-summary em {
+        color: #8f9b98;
+        font-size: 9px;
+        font-style: normal;
+      }
+
       #${MODAL_ID} .ta-activity-compact-note {
         color: #9f9f9f;
         font-size: 11px;
@@ -39704,11 +40052,21 @@
       root?.querySelector?.(
         '.ta-history-status-strip'
       );
+    const trainingRecap =
+      root?.querySelector?.(
+        '[data-ta-command-training-recap]'
+      );
     const patch = {};
 
     if (history) {
       patch.history_status_open =
         history.open ===
+        true;
+    }
+
+    if (trainingRecap) {
+      patch.training_recap_open =
+        trainingRecap.open ===
         true;
     }
 
@@ -39805,24 +40163,28 @@
               : 'Live state';
     const drug = trainingReadinessCooldownLabel(readiness?.drug_ready_at);
     const booster = trainingReadinessCooldownLabel(readiness?.booster_ready_at);
-    const summary = statGrowthCompactSummaryModel(growth || {}, '7d', 'all');
+    const recapRange =
+      statGrowthCompactPeriod(
+        readUiSessionState()
+          .stat_growth_range
+      );
+    const recapStat =
+      statGrowthCompactSummaryStat(
+        readStatGrowthPreferences()
+          .training_summary_stat
+      );
+    const recapOpen =
+      readCommandCenterDrawerPreferences()
+        .training_recap_open ===
+      true;
 
     commandCenterHost.innerHTML = `
-      <button type="button" class="ta-command-recap ta-command-context-link" data-ta-command-shortcut="activity" data-ta-command-view="charts" aria-label="Open training charts">
-        <span>
-          Recent training recap
-          <small>${escapeActivityHtml(summary.period_label)}</small>
-        </span>
-        <strong>${escapeActivityHtml(statGrowthFormatGain(summary.gain))} stats</strong>
-        <small>
-          ${summary.actions.toLocaleString()} gym ${summary.actions === 1 ? 'session' : 'sessions'} ·
-          ${summary.energy_used.toLocaleString()}E used${
-            summary.job_special_gain > 0
-              ? ` · Army ${escapeActivityHtml(statGrowthFormatGain(summary.job_special_gain))} / ${summary.job_points_used.toLocaleString()} JP`
-              : ''
-          }
-        </small>
-      </button>
+      ${renderCommandTrainingRecap(
+        growth,
+        recapRange,
+        recapStat,
+        recapOpen
+      )}
       <button type="button" class="ta-command-cooldown-strip ta-command-context-link" data-ta-command-shortcut="resources" aria-label="Open live resources">
         <span>Cooldowns</span>
         <b>Drug ${escapeActivityHtml(drug.label)}</b>
@@ -39845,9 +40207,9 @@
       ${renderTrainingCompactSummary(
         readiness,
         growth,
-        '7d',
+        recapRange,
         plan,
-        'all',
+        recapStat,
         { embedded: true }
       )}
       <button type="button" class="ta-command-evidence-link" data-ta-command-shortcut="activity" data-ta-command-view="data">
