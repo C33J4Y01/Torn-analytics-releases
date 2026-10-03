@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.86
+// @version      2.18.87
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.86';
+  const VERSION = '2.18.87';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -52,6 +52,8 @@
   // share surface and replaces Activity prose with compact metrics.
   // v2.18.86 makes recap copying explicit, compacts the Charts shortcut,
   // and keeps partial-day context attached only to the live chart.
+  // v2.18.87 replaces Recent activity bars with an accessible line trend
+  // while preserving exact daily tap details and partial-day context.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -12884,31 +12886,33 @@
         0
       );
 
-    const maximum =
-      Math.max(
-        0,
-        ...rows.map(
-          row =>
-            Number(
-              row.count ||
-              0
-            )
-        )
+    const coordinates =
+      activityDashboardLineCoordinates(
+        rows
       );
 
-    const bars =
-      rows.map(row => {
+    const linePoints =
+      coordinates
+        .map(
+          point =>
+            `${point.x.toFixed(2)},${point.y.toFixed(2)}`
+        )
+        .join(' ');
+
+    const areaPoints =
+      coordinates.length
+        ? `${coordinates[0].x.toFixed(2)},100 ${linePoints} ${coordinates[coordinates.length - 1].x.toFixed(2)},100`
+        : '';
+
+    const points =
+      rows.map((row, index) => {
         const count =
           Number(
             row.count ||
             0
           );
-
-        const height =
-          activityDashboardPercent(
-            count,
-            maximum
-          );
+        const coordinate =
+          coordinates[index];
 
         const isPartial =
           partialContext.is_partial_today &&
@@ -12935,21 +12939,21 @@
           `${windowPercent.toFixed(1)}% of displayed ${layout.recent_days}-day activity${partialText}`;
 
         return `
-          <div
-            class="ta-chart-column${isPartial ? ' ta-chart-column-partial' : ''}"
-            role="button"
-            tabindex="0"
+          <button
+            type="button"
+            class="ta-activity-line-point${isPartial ? ' ta-activity-line-point-partial' : ''}"
+            style="--ta-point-top:${coordinate.y.toFixed(2)}px"
             data-ta-detail="${escapeActivityHtml(detail)}"
             aria-label="${escapeActivityHtml(detail)}"
             title="${escapeActivityHtml(detail)}"
           >
-            <div class="ta-chart-value">${count.toLocaleString()}</div>
-            <div class="ta-chart-rail"><div class="ta-chart-bar" style="height:${height}%"></div></div>
-            <div class="ta-chart-label">
+            <span class="ta-activity-line-value">${count.toLocaleString()}</span>
+            <i class="ta-activity-line-dot" aria-hidden="true"></i>
+            <span class="ta-chart-label">
               ${escapeActivityHtml(activityDashboardShortDate(row.date))}
               ${isPartial ? '<span class="ta-chart-partial-badge">partial</span>' : ''}
-            </div>
-          </div>
+            </span>
+          </button>
         `;
       }).join('');
 
@@ -12999,9 +13003,14 @@
           <span>Recent activity</span>
           <span>Last ${layout.recent_days} calendar days · ${escapeActivityHtml(dateWindow)}${partialHeading}</span>
         </div>
-        <div class="ta-chart-scroll">
-          <div class="ta-chart-columns ta-chart-columns-daily" style="grid-template-columns:repeat(${rows.length},minmax(0,1fr))">
-            ${bars}
+        <div class="ta-activity-line-chart" aria-label="Recent activity line chart">
+          <svg class="ta-activity-line-svg" viewBox="0 0 600 132" preserveAspectRatio="none" aria-hidden="true">
+            <line class="ta-activity-line-baseline" x1="0" y1="100" x2="600" y2="100"></line>
+            ${areaPoints ? `<polygon class="ta-activity-line-area" points="${areaPoints}"></polygon>` : ''}
+            ${linePoints ? `<polyline class="ta-activity-line-stroke" points="${linePoints}"></polyline>` : ''}
+          </svg>
+          <div class="ta-activity-line-targets" style="grid-template-columns:repeat(${rows.length},minmax(0,1fr))">
+            ${points}
           </div>
         </div>
         <div class="ta-chart-detail" data-ta-chart-detail-output>
@@ -13009,6 +13018,81 @@
         </div>
       </div>
     `;
+  }
+
+  function activityDashboardLineCoordinates(
+    rows,
+    width = 600,
+    plotTop = 22,
+    plotBottom = 100
+  ) {
+    const safeRows =
+      Array.isArray(rows)
+        ? rows
+        : [];
+    const safeWidth =
+      Number.isFinite(width) &&
+      width > 0
+        ? width
+        : 600;
+    const safeTop =
+      Number.isFinite(plotTop)
+        ? plotTop
+        : 22;
+    const safeBottom =
+      Number.isFinite(plotBottom) &&
+      plotBottom > safeTop
+        ? plotBottom
+        : 100;
+    const maximum =
+      Math.max(
+        0,
+        ...safeRows.map(
+          row =>
+            Math.max(
+              0,
+              Number(
+                row?.count ||
+                0
+              )
+            )
+        )
+      );
+
+    return safeRows.map(
+      (row, index) => {
+        const count =
+          Math.max(
+            0,
+            Number(
+              row?.count ||
+              0
+            )
+          );
+        const ratio =
+          maximum > 0
+            ? count /
+              maximum
+            : 0;
+
+        return {
+          x:
+            (
+              index +
+              0.5
+            ) /
+            safeRows.length *
+            safeWidth,
+          y:
+            safeBottom -
+            ratio *
+            (
+              safeBottom -
+              safeTop
+            )
+        };
+      }
+    );
   }
 
   function renderActivityHourlyChart(
@@ -13193,7 +13277,7 @@
     const columns =
       Array.from(
         root.querySelectorAll(
-          '.ta-chart-column[data-ta-detail]'
+          '.ta-chart-column[data-ta-detail], .ta-activity-line-point[data-ta-detail]'
         )
       );
 
@@ -13228,7 +13312,7 @@
         for (
           const candidate
           of card.querySelectorAll(
-            '.ta-chart-column[data-ta-detail]'
+            '.ta-chart-column[data-ta-detail], .ta-activity-line-point[data-ta-detail]'
           )
         ) {
           candidate.classList.toggle(
@@ -37001,6 +37085,135 @@
       #${MODAL_ID} .ta-chart-scroll {
         overflow: hidden;
         padding-bottom: 2px;
+      }
+
+      #${MODAL_ID} .ta-activity-line-chart {
+        position: relative;
+        width: 100%;
+        height: 132px;
+        overflow: hidden;
+        border-radius: 6px;
+        background:
+          linear-gradient(to bottom, transparent 60%, rgba(255, 255, 255, .025));
+      }
+
+      #${MODAL_ID} .ta-activity-line-svg,
+      #${MODAL_ID} .ta-activity-line-targets {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 132px;
+      }
+
+      #${MODAL_ID} .ta-activity-line-svg {
+        pointer-events: none;
+      }
+
+      #${MODAL_ID} .ta-activity-line-baseline {
+        stroke: #303837;
+        stroke-width: 1;
+        vector-effect: non-scaling-stroke;
+      }
+
+      #${MODAL_ID} .ta-activity-line-area {
+        fill: rgba(62, 169, 158, .09);
+      }
+
+      #${MODAL_ID} .ta-activity-line-stroke {
+        fill: none;
+        stroke: #69afa7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 2;
+        vector-effect: non-scaling-stroke;
+      }
+
+      #${MODAL_ID} .ta-activity-line-targets {
+        display: grid;
+      }
+
+      #${MODAL_ID} .ta-activity-line-point {
+        position: relative;
+        min-width: 0;
+        height: 132px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      #${MODAL_ID} .ta-activity-line-point:focus-visible {
+        outline: 1px solid #69afa7;
+        outline-offset: -2px;
+      }
+
+      #${MODAL_ID} .ta-activity-line-point-partial::after {
+        position: absolute;
+        top: 15px;
+        right: 4px;
+        bottom: 28px;
+        left: 4px;
+        border: 1px dashed #65716f;
+        border-radius: 5px;
+        content: '';
+      }
+
+      #${MODAL_ID} .ta-activity-line-value,
+      #${MODAL_ID} .ta-activity-line-dot {
+        position: absolute;
+        left: 50%;
+        z-index: 1;
+        transform: translateX(-50%);
+      }
+
+      #${MODAL_ID} .ta-activity-line-value {
+        top: calc(var(--ta-point-top) - 19px);
+        color: #aab6b3;
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
+      #${MODAL_ID} .ta-activity-line-dot {
+        top: calc(var(--ta-point-top) - 4px);
+        width: 9px;
+        height: 9px;
+        border: 2px solid #b8d9d4;
+        border-radius: 50%;
+        background: #172321;
+        box-sizing: border-box;
+      }
+
+      #${MODAL_ID} .ta-activity-line-point-partial .ta-activity-line-dot {
+        border-style: dashed;
+        background: #141817;
+      }
+
+      #${MODAL_ID} .ta-activity-line-point.ta-chart-column-active {
+        background: rgba(62, 169, 158, .055);
+      }
+
+      #${MODAL_ID} .ta-activity-line-point.ta-chart-column-active .ta-activity-line-dot {
+        width: 13px;
+        height: 13px;
+        top: calc(var(--ta-point-top) - 6px);
+        border-color: #e4f3f0;
+        box-shadow: 0 0 0 3px rgba(62, 169, 158, .18);
+      }
+
+      #${MODAL_ID} .ta-activity-line-point > .ta-chart-label {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        margin: 0;
       }
 
       #${MODAL_ID} .ta-chart-columns {
