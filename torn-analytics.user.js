@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.85
+// @version      2.18.86
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.85';
+  const VERSION = '2.18.86';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -50,6 +50,8 @@
   // beside Close as a persistent header utility.
   // v2.18.85 unifies Command's training recap into a persistent in-place
   // share surface and replaces Activity prose with compact metrics.
+  // v2.18.86 makes recap copying explicit, compacts the Charts shortcut,
+  // and keeps partial-day context attached only to the live chart.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -13489,10 +13491,6 @@
         new Date(),
         activity?.time_basis
       );
-    const partialContext =
-      activityDashboardPartialTodayContext(
-        activity
-      );
     const busiestText =
       summary.busiest
         ? `${activityDashboardShortDate(summary.busiest.date)}: ${Number(summary.busiest.count || 0).toLocaleString()}`
@@ -13520,7 +13518,6 @@
           <span>
             <small>Busiest</small>
             <strong>${escapeActivityHtml(busiestText)}</strong>
-            ${partialContext.is_partial_today ? '<em>today partial</em>' : ''}
           </span>
         </section>
 
@@ -28837,27 +28834,32 @@
               ? `<p class="ta-training-jump-recap" data-ta-training-jump-recap><span>Latest Happy Jump</span><b>${escapeActivityHtml(jumpRecap)}</b></p>`
               : ''
           }
-          <button
-            type="button"
-            class="ta-training-recap"
-            data-ta-training-recap
-            data-ta-training-recap-text="${escapeActivityHtml(recapText)}"
-            data-ta-copy-state="idle"
-            aria-label="Prepare training recap copy"
-          >
+          <div class="ta-training-recap ta-command-recap-text">
             <span>Shareable recap</span>
             <b>${escapeActivityHtml(recapText)}</b>
-            <small data-ta-training-recap-copy-label aria-live="polite"></small>
-          </button>
-          <button
-            type="button"
-            class="ta-command-recap-charts"
-            data-ta-command-shortcut="activity"
-            data-ta-command-view="charts"
-          >
-            View charts
-            <span aria-hidden="true">›</span>
-          </button>
+          </div>
+          <div class="ta-command-recap-actions">
+            <button
+              type="button"
+              class="ta-command-recap-copy"
+              data-ta-training-recap
+              data-ta-training-recap-direct="true"
+              data-ta-training-recap-text="${escapeActivityHtml(recapText)}"
+              data-ta-copy-state="idle"
+              aria-label="Copy training recap"
+            >
+              <span data-ta-training-recap-copy-label aria-live="polite">Copy recap</span>
+            </button>
+            <button
+              type="button"
+              class="ta-command-recap-charts"
+              data-ta-command-shortcut="activity"
+              data-ta-command-view="charts"
+            >
+              Charts
+              <span aria-hidden="true">›</span>
+            </button>
+          </div>
         </div>
       </details>
     `;
@@ -29381,6 +29383,19 @@
         recap?.addEventListener(
           'click',
           async () => {
+            const directCopy =
+              recap.getAttribute(
+                'data-ta-training-recap-direct'
+              ) ===
+              'true';
+            const idleLabel =
+              directCopy
+                ? 'Copy recap'
+                : '';
+            const idleAriaLabel =
+              directCopy
+                ? 'Copy training recap'
+                : 'Prepare training recap copy';
             const state =
               recap.getAttribute(
                 'data-ta-copy-state'
@@ -29396,6 +29411,7 @@
             );
 
             if (
+              !directCopy &&
               state !== 'armed'
             ) {
               recap.setAttribute(
@@ -29426,14 +29442,14 @@
                       );
                       recap.setAttribute(
                         'aria-label',
-                        'Prepare training recap copy'
+                        idleAriaLabel
                       );
 
                       if (
                         label
                       ) {
                         label.textContent =
-                          '';
+                          idleLabel;
                       }
                     }
                   },
@@ -29486,14 +29502,14 @@
                     );
                     recap.setAttribute(
                       'aria-label',
-                      'Prepare training recap copy'
+                      idleAriaLabel
                     );
 
                     if (
                       label
                     ) {
                       label.textContent =
-                        '';
+                        idleLabel;
                     }
                   }
                 },
@@ -35671,13 +35687,25 @@
         background: #111514;
       }
 
+      #${MODAL_ID} .ta-command-recap-text {
+        cursor: default;
+      }
+
+      #${MODAL_ID} .ta-command-recap-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 8px 10px 10px;
+      }
+
+      #${MODAL_ID} .ta-command-recap-copy,
       #${MODAL_ID} .ta-command-recap-charts {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: center;
         gap: 10px;
         min-height: 42px;
-        margin: 8px 10px 10px;
+        margin: 0;
         padding: 8px 11px;
         border: 1px solid #315552;
         border-radius: 8px;
@@ -35690,12 +35718,24 @@
         -webkit-tap-highlight-color: transparent;
       }
 
+      #${MODAL_ID} .ta-command-recap-copy[data-ta-copy-state="copied"] {
+        border-color: #4f8463;
+        background: #111a15;
+        color: #87c99d;
+      }
+
+      #${MODAL_ID} .ta-command-recap-copy[data-ta-copy-state="error"] {
+        border-color: #8c4e4e;
+        color: #d49090;
+      }
+
       #${MODAL_ID} .ta-command-recap-charts > span {
         font-size: 18px;
         line-height: 1;
       }
 
       #${MODAL_ID} .ta-command-recap-summary:focus-visible,
+      #${MODAL_ID} .ta-command-recap-copy:focus-visible,
       #${MODAL_ID} .ta-command-recap-charts:focus-visible {
         outline: 2px solid #3ea99e;
         outline-offset: -2px;
