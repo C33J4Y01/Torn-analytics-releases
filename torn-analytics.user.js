@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.88
+// @version      2.18.89
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.88';
+  const VERSION = '2.18.89';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -56,6 +56,8 @@
   // while preserving exact daily tap details and partial-day context.
   // v2.18.88 restores the last selected primary workspace after close,
   // refresh, rotation, and TornPDA page reconstruction.
+  // v2.18.89 compacts Activity's four headline metrics into one responsive
+  // strip so the recent trend remains closer to the top of the workspace.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -39664,7 +39666,7 @@
 
       #${MODAL_ID} .ta-activity-compact-summary {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 1px;
         padding: 1px;
         border: 1px solid #304440;
@@ -39678,23 +39680,30 @@
         align-content: center;
         gap: 2px;
         min-width: 0;
-        min-height: 58px;
-        padding: 9px 10px;
+        min-height: 48px;
+        padding: 7px 6px;
         background: #151a19;
       }
 
       #${MODAL_ID} .ta-activity-compact-summary small {
         color: #8f9b98;
-        font-size: 9px;
+        font-size: 8px;
         font-weight: 800;
-        letter-spacing: .045em;
+        letter-spacing: .035em;
         text-transform: uppercase;
       }
 
       #${MODAL_ID} .ta-activity-compact-summary strong {
         color: #ececec;
-        font-size: 15px;
+        font-size: 13px;
         line-height: 1.25;
+        white-space: nowrap;
+      }
+
+      @media(max-width:340px) {
+        #${MODAL_ID} .ta-activity-compact-summary {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
 
       #${MODAL_ID} .ta-activity-compact-summary em {
