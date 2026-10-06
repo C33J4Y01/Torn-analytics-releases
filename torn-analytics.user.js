@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.87
+// @version      2.18.88
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.87';
+  const VERSION = '2.18.88';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -54,6 +54,8 @@
   // and keeps partial-day context attached only to the live chart.
   // v2.18.87 replaces Recent activity bars with an accessible line trend
   // while preserving exact daily tap details and partial-day context.
+  // v2.18.88 restores the last selected primary workspace after close,
+  // refresh, rotation, and TornPDA page reconstruction.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -41091,7 +41093,7 @@
     }
 
     selectPrimaryTab(
-      'command',
+      readPrimaryTabPreference(),
       false,
       true
     );
