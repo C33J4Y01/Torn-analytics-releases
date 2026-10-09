@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.89
+// @version      2.18.90
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.89';
+  const VERSION = '2.18.90';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -58,6 +58,8 @@
   // refresh, rotation, and TornPDA page reconstruction.
   // v2.18.89 compacts Activity's four headline metrics into one responsive
   // strip so the recent trend remains closer to the top of the workspace.
+  // v2.18.90 adds a verified Resource Readiness summary and softens the live
+  // resource colors without changing API cadence or training calculations.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -10766,7 +10768,8 @@
         '<div data-ta-primary-panel="resources">' +
         renderResourceDashboard(
           latestAnalysis?.resource_flow,
-          latestAnalysis?.resource_bars
+          latestAnalysis?.resource_bars,
+          latestAnalysis?.training_readiness
         ) +
         '</div>';
 
@@ -30004,7 +30007,8 @@
     analysis = null
   ) {
     bindResourceDashboardInteractions(
-      root
+      root,
+      analysis
     );
 
     bindTrainingWorkspaceInteractions(
@@ -32231,9 +32235,315 @@
     `;
   }
 
+  function resourceDashboardReadinessModel(
+    readiness = null,
+    barsSnapshot = null,
+    planValue = readTrainingReadinessPlan(),
+    nowSeconds = Math.floor(Date.now() / 1000)
+  ) {
+    const plan =
+      trainingReadinessPlan(
+        planValue
+      );
+    const liveBars =
+      barsSnapshot?.status ===
+      'available';
+    const finite = value =>
+      Number.isSafeInteger(value) && value >= 0
+        ? value
+        : null;
+    const energy =
+      liveBars
+        ? finite(
+            barsSnapshot?.energy?.current
+          )
+        : finite(
+            readiness?.energy
+          );
+    const energyMaximum =
+      liveBars
+        ? finite(
+            barsSnapshot?.energy?.maximum
+          )
+        : finite(
+            readiness?.energy_maximum
+          );
+    const drug =
+      trainingReadinessCooldownLabel(
+        readiness?.drug_ready_at,
+        nowSeconds
+      );
+    const booster =
+      trainingReadinessCooldownLabel(
+        readiness?.booster_ready_at,
+        nowSeconds
+      );
+    const completeInventory =
+      readiness?.supply_snapshot?.status === 'available' &&
+      ['xanax', 'erotic_dvd', 'ecstasy'].every(key =>
+        Number.isSafeInteger(readiness.supply_snapshot.items?.[key]) &&
+        readiness.supply_snapshot.items[key] >= 0
+      );
+    const supply =
+      trainingReadinessSupplyPresentation(
+        completeInventory
+          ? readiness.supply_snapshot
+          : { status: 'unavailable', reason: readiness?.supply_snapshot?.reason || 'invalid_response' },
+        readiness?.happy_jump_supply_plan
+      );
+    const energyText =
+      energy === null
+        ? 'Unavailable'
+        : energyMaximum === null
+          ? `${energy.toLocaleString()}E`
+          : `${energy.toLocaleString()} / ${energyMaximum.toLocaleString()}`;
+    const stacked =
+      energy !== null &&
+      energy >= 1000;
+    const naturallyFull =
+      energy !== null &&
+      energyMaximum !== null &&
+      energy >= energyMaximum &&
+      !stacked;
+    // Xanax builds the stack; it is not required again once 1,000E is verified.
+    if (completeInventory && stacked && plan === 'happy_jump') {
+      const xanax = supply.supplies.find(item => item.key === 'xanax');
+      xanax.quantity = 0;
+      xanax.inventory_status = 'ready';
+      const missingUnits = supply.supplies
+        .filter(item => !item.optional)
+        .reduce((total, item) => total + Math.max(0, item.quantity - item.inventory_count), 0);
+      supply.state = missingUnits > 0 ? 'missing' : 'ready';
+      supply.summary = missingUnits > 0
+        ? `${missingUnits.toLocaleString()} ${missingUnits === 1 ? 'item' : 'items'} missing`
+        : 'Jump items ready';
+    }
+    let state =
+      'unknown';
+    let summary =
+      'Live readiness unavailable';
+
+    if (
+      plan ===
+      'happy_jump'
+    ) {
+      if (
+        supply.state ===
+        'missing'
+      ) {
+        state =
+          'missing';
+        summary =
+          'Missing Happy Jump supplies';
+      } else if (
+        supply.state ===
+        'unknown'
+      ) {
+        summary =
+          'Check Happy Jump supplies';
+      } else if (
+        energy === null
+      ) {
+        summary = 'Energy status unavailable';
+      } else if (
+        !stacked
+      ) {
+        state =
+          'waiting';
+        summary =
+          'Build your Energy stack';
+      } else if (
+        drug.state ===
+        'waiting'
+      ) {
+        state =
+          'waiting';
+        summary =
+          'Waiting on drug cooldown';
+      } else if (
+        booster.state ===
+        'waiting'
+      ) {
+        state =
+          'waiting';
+        summary =
+          'Waiting on booster cooldown';
+      } else if (
+        drug.state ===
+          'complete' &&
+        booster.state ===
+          'complete'
+      ) {
+        state =
+          'ready';
+        summary =
+          'Happy Jump ready';
+      } else {
+        summary =
+          'Cooldown status unavailable';
+      }
+    } else if (
+      naturallyFull
+    ) {
+      state =
+        'action';
+      summary =
+        'Train now — Energy is full';
+    } else if (
+      stacked
+    ) {
+      state =
+        'action';
+      summary =
+        'Stacked Energy ready to train';
+    } else if (
+      energy !== null &&
+      energy > 0
+    ) {
+      state =
+        'ready';
+      summary =
+        'Training available';
+    } else if (
+      energy === 0 &&
+      drug.state ===
+      'complete'
+    ) {
+      state =
+        'ready';
+      summary =
+        'Xanax ready';
+    } else if (
+      energy === 0 &&
+      drug.state ===
+      'waiting'
+    ) {
+      state =
+        'waiting';
+      summary =
+        'Waiting for Energy or Xanax';
+    }
+
+    const supplyText =
+      supply.state ===
+        'unknown' &&
+      plan !==
+        'happy_jump'
+        ? 'Select Happy Jump to check'
+        : supply.summary;
+    const supplyCounts =
+      supply.supplies
+        .filter(
+          item =>
+            !item.optional &&
+            completeInventory &&
+            Number.isSafeInteger(
+              item.inventory_count
+            )
+        )
+        .map(
+          item => ({
+            label:
+              item.key ===
+              'erotic_dvd'
+                ? 'EDVD'
+                : item.item,
+            owned:
+              Number(
+                item.inventory_count
+              ),
+            needed:
+              Number(
+                item.quantity
+              ),
+            status:
+              item.inventory_status
+          })
+        );
+
+    return {
+      plan,
+      plan_label:
+        plan ===
+        'happy_jump'
+          ? 'Happy Jump'
+          : 'Efficient',
+      state,
+      summary,
+      energy_text:
+        energyText,
+      energy_state:
+        stacked
+          ? 'stacked'
+          : naturallyFull
+            ? 'full'
+            : energy === null
+              ? 'unknown'
+              : 'active',
+      drug,
+      booster,
+      supply_state:
+        supply.state,
+      supply_text:
+        supplyText,
+      supply_counts:
+        supplyCounts,
+      supply_note:
+        supply.note
+    };
+  }
+
+  function renderResourceDashboardReadiness(
+    readiness,
+    barsSnapshot
+  ) {
+    const model =
+      resourceDashboardReadinessModel(
+        readiness,
+        barsSnapshot
+      );
+    const supplyCounts =
+      model.supply_counts.length
+        ? `
+          <div class="ta-resource-readiness-supplies">
+            <small>Owned / needed</small>
+            <span>
+              ${model.supply_counts
+                .map(
+                  item =>
+                    `<b class="is-${escapeResourceDashboardHtml(item.status)}">${escapeResourceDashboardHtml(item.label)} ${item.owned.toLocaleString()}/${item.needed.toLocaleString()}</b>`
+                )
+                .join(' · ')}
+            </span>
+          </div>
+        `
+        : '';
+
+    return `
+      <section class="ta-resource-readiness ta-resource-readiness-${escapeResourceDashboardHtml(model.state)}" aria-label="Resource readiness">
+        <div class="ta-resource-readiness-heading">
+          <span>
+            <small>Resource readiness</small>
+            <strong>${escapeResourceDashboardHtml(model.summary)}</strong>
+          </span>
+          <b>${escapeResourceDashboardHtml(model.plan_label)}</b>
+        </div>
+        <div class="ta-resource-readiness-strip">
+          <span class="is-${escapeResourceDashboardHtml(model.energy_state)}"><small>Energy</small><b>${escapeResourceDashboardHtml(model.energy_text)}</b></span>
+          <span class="is-${escapeResourceDashboardHtml(model.drug.state)}"><small>Drug</small><b>${escapeResourceDashboardHtml(model.drug.label)}</b></span>
+          <span class="is-${escapeResourceDashboardHtml(model.booster.state)}"><small>Booster</small><b>${escapeResourceDashboardHtml(model.booster.label)}</b></span>
+          <span class="is-${escapeResourceDashboardHtml(model.supply_state)}"><small>Jump supplies</small><b>${escapeResourceDashboardHtml(model.supply_text)}</b></span>
+        </div>
+        ${supplyCounts}
+        ${model.plan === 'happy_jump' ? `<p class="ta-resource-readiness-note">${escapeResourceDashboardHtml(model.supply_note)}</p>` : ''}
+      </section>
+    `;
+  }
+
   function renderResourceDashboard(
     flow,
-    barsSnapshot
+    barsSnapshot,
+    readiness = null
   ) {
     if (
       !flow
@@ -32261,6 +32571,7 @@
           <button type="button" class="ta-return-command" data-ta-command-shortcut="command">‹ Command</button>
         </header>
         <div class="ta-section-body ta-resource-compact-body">
+          ${renderResourceDashboardReadiness(readiness, barsSnapshot)}
           ${
             liveAvailable
               ? `
@@ -32622,7 +32933,8 @@
   }
 
   function bindResourceDashboardInteractions(
-    root
+    root,
+    analysis = null
   ) {
     const countdowns =
       root?.querySelectorAll?.(
@@ -32631,10 +32943,23 @@
       [];
 
     if (
-      !countdowns.length
+      !countdowns.length &&
+      !root?.querySelector?.('.ta-resource-readiness')
     ) {
       return;
     }
+
+    const refreshReadiness = () => {
+      const target = root?.querySelector?.('.ta-resource-readiness');
+      if (!target || !root.isConnected) return;
+      target.outerHTML = renderResourceDashboardReadiness(
+        analysis?.training_readiness,
+        analysis?.resource_bars
+      );
+    };
+    root?.addEventListener?.('change', event => {
+      if (event.target?.matches?.('[data-ta-training-plan]')) refreshReadiness();
+    });
 
     const update =
       () => {
@@ -32646,6 +32971,14 @@
 
         let stillCounting =
           false;
+
+        refreshReadiness();
+        for (const readyAt of [analysis?.training_readiness?.drug_ready_at,
+          analysis?.training_readiness?.booster_ready_at]) {
+          if (Number.isSafeInteger(readyAt) && readyAt > Date.now() / 1000) {
+            stillCounting = true;
+          }
+        }
 
         for (
           const output
@@ -37910,20 +38243,165 @@
 
       #${MODAL_ID} .ta-resource-live-energy,
       #${MODAL_ID} .ta-resource-history-energy {
-        --ta-resource-color: #4caf50;
-        --ta-resource-border: #315d35;
+        --ta-resource-color: #739177;
+        --ta-resource-border: #36483a;
       }
 
       #${MODAL_ID} .ta-resource-live-nerve,
       #${MODAL_ID} .ta-resource-history-nerve {
-        --ta-resource-color: #ef4438;
-        --ta-resource-border: #6a3733;
+        --ta-resource-color: #a56f6a;
+        --ta-resource-border: #4d3937;
       }
 
       #${MODAL_ID} .ta-resource-live-happiness,
       #${MODAL_ID} .ta-resource-history-happiness {
-        --ta-resource-color: #f2b51d;
-        --ta-resource-border: #6b5925;
+        --ta-resource-color: #b09a61;
+        --ta-resource-border: #4d4632;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness {
+        overflow: hidden;
+        border: 1px solid #30413e;
+        border-radius: 10px;
+        background: #121716;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 11px;
+        border-bottom: 1px solid #273532;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-heading > span {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-heading small,
+      #${MODAL_ID} .ta-resource-readiness-strip small,
+      #${MODAL_ID} .ta-resource-readiness-supplies small {
+        color: #8f9b98;
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-heading strong {
+        color: #ededed;
+        font-size: 14px;
+        line-height: 1.25;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-heading > b {
+        flex: 0 0 auto;
+        padding: 4px 8px;
+        border: 1px solid #3a5b56;
+        border-radius: 999px;
+        color: #b9d0cc;
+        font-size: 10px;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-ready .ta-resource-readiness-heading strong {
+        color: #a8c7ad;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-action .ta-resource-readiness-heading strong,
+      #${MODAL_ID} .ta-resource-readiness-missing .ta-resource-readiness-heading strong {
+        color: #cfad69;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-strip {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-strip > span {
+        display: grid;
+        align-content: center;
+        gap: 2px;
+        min-width: 0;
+        min-height: 46px;
+        padding: 7px 10px;
+        border-right: 1px solid #222d2b;
+        border-bottom: 1px solid #222d2b;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-strip > span:nth-child(2n) {
+        border-right: 0;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-strip > span:nth-last-child(-n+2) {
+        border-bottom: 0;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-strip b {
+        overflow-wrap: anywhere;
+        color: #d7dcda;
+        font-size: 11px;
+        line-height: 1.25;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-strip .is-complete b,
+      #${MODAL_ID} .ta-resource-readiness-strip .is-ready b {
+        color: #9fbea5;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-strip .is-missing b,
+      #${MODAL_ID} .ta-resource-readiness-strip .is-full b {
+        color: #cfad69;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-supplies {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 7px 10px;
+        border-top: 1px solid #273532;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-supplies > span {
+        color: #abb4b1;
+        font-size: 10px;
+        text-align: right;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-supplies b {
+        color: inherit;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-supplies b.is-missing {
+        color: #cfad69;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-note {
+        margin: 0;
+        padding: 6px 10px;
+        color: #8f9b98;
+        font-size: 10px;
+        line-height: 1.35;
+      }
+
+      @media(orientation:landscape) and (min-width:700px) {
+        #${MODAL_ID} .ta-resource-readiness-strip {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        #${MODAL_ID} .ta-resource-readiness-strip > span,
+        #${MODAL_ID} .ta-resource-readiness-strip > span:nth-child(2n),
+        #${MODAL_ID} .ta-resource-readiness-strip > span:nth-last-child(-n+2) {
+          border-right: 1px solid #222d2b;
+          border-bottom: 0;
+        }
+
+        #${MODAL_ID} .ta-resource-readiness-strip > span:last-child {
+          border-right: 0;
+        }
       }
 
       #${MODAL_ID} .ta-resource-stack-status {
