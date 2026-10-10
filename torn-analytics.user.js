@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.90
+// @version      2.18.91
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.90';
+  const VERSION = '2.18.91';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -60,6 +60,8 @@
   // strip so the recent trend remains closer to the top of the workspace.
   // v2.18.90 adds a verified Resource Readiness summary and softens the live
   // resource colors without changing API cadence or training calculations.
+  // v2.18.91 prevents superseded Resource timers from repainting stale
+  // snapshots and preserves readiness through the diagnostics renderer.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -32936,6 +32938,23 @@
     root,
     analysis = null
   ) {
+    const bindingToken =
+      {};
+
+    if (
+      root &&
+      typeof root ===
+        'object'
+    ) {
+      root.__taResourceDashboardBindingToken =
+        bindingToken;
+    }
+
+    const isCurrentBinding =
+      () =>
+        root?.__taResourceDashboardBindingToken ===
+          bindingToken;
+
     const countdowns =
       root?.querySelectorAll?.(
         '[data-ta-resource-full-at]'
@@ -32950,6 +32969,12 @@
     }
 
     const refreshReadiness = () => {
+      if (
+        !isCurrentBinding()
+      ) {
+        return;
+      }
+
       const target = root?.querySelector?.('.ta-resource-readiness');
       if (!target || !root.isConnected) return;
       target.outerHTML = renderResourceDashboardReadiness(
@@ -32958,13 +32983,19 @@
       );
     };
     root?.addEventListener?.('change', event => {
-      if (event.target?.matches?.('[data-ta-training-plan]')) refreshReadiness();
+      if (
+        isCurrentBinding() &&
+        event.target?.matches?.('[data-ta-training-plan]')
+      ) {
+        refreshReadiness();
+      }
     });
 
     const update =
       () => {
         if (
-          !root.isConnected
+          !root.isConnected ||
+          !isCurrentBinding()
         ) {
           return;
         }
@@ -34527,12 +34558,14 @@
   renderResourceDashboard =
     function renderResourceDashboardWithDiagnostics(
       flow,
-      barsSnapshot
+      barsSnapshot,
+      readiness = null
     ) {
       const html =
         renderResourceDashboardWithoutDiagnostics(
           flow,
-          barsSnapshot
+          barsSnapshot,
+          readiness
         );
 
       if (
