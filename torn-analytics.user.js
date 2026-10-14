@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.91
+// @version      2.18.92
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.91';
+  const VERSION = '2.18.92';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -62,6 +62,8 @@
   // resource colors without changing API cadence or training calculations.
   // v2.18.91 prevents superseded Resource timers from repainting stale
   // snapshots and preserves readiness through the diagnostics renderer.
+  // v2.18.92 hides Happy Jump-only supply status and counts while Efficient
+  // is selected, without changing snapshots, calculations, or advice.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -32434,7 +32436,8 @@
         ? 'Select Happy Jump to check'
         : supply.summary;
     const supplyCounts =
-      supply.supplies
+      plan === 'happy_jump'
+        ? supply.supplies
         .filter(
           item =>
             !item.optional &&
@@ -32461,7 +32464,8 @@
             status:
               item.inventory_status
           })
-        );
+        )
+        : [];
 
     return {
       plan,
@@ -32484,6 +32488,9 @@
               : 'active',
       drug,
       booster,
+      show_jump_supplies:
+        plan ===
+        'happy_jump',
       supply_state:
         supply.state,
       supply_text:
@@ -32520,6 +32527,10 @@
           </div>
         `
         : '';
+    const supplyStatus =
+      model.show_jump_supplies
+        ? `<span class="is-${escapeResourceDashboardHtml(model.supply_state)}"><small>Jump supplies</small><b>${escapeResourceDashboardHtml(model.supply_text)}</b></span>`
+        : '';
 
     return `
       <section class="ta-resource-readiness ta-resource-readiness-${escapeResourceDashboardHtml(model.state)}" aria-label="Resource readiness">
@@ -32530,14 +32541,14 @@
           </span>
           <b>${escapeResourceDashboardHtml(model.plan_label)}</b>
         </div>
-        <div class="ta-resource-readiness-strip">
+        <div class="ta-resource-readiness-strip ta-resource-readiness-strip-${model.show_jump_supplies ? 'jump' : 'efficient'}">
           <span class="is-${escapeResourceDashboardHtml(model.energy_state)}"><small>Energy</small><b>${escapeResourceDashboardHtml(model.energy_text)}</b></span>
           <span class="is-${escapeResourceDashboardHtml(model.drug.state)}"><small>Drug</small><b>${escapeResourceDashboardHtml(model.drug.label)}</b></span>
           <span class="is-${escapeResourceDashboardHtml(model.booster.state)}"><small>Booster</small><b>${escapeResourceDashboardHtml(model.booster.label)}</b></span>
-          <span class="is-${escapeResourceDashboardHtml(model.supply_state)}"><small>Jump supplies</small><b>${escapeResourceDashboardHtml(model.supply_text)}</b></span>
+          ${supplyStatus}
         </div>
         ${supplyCounts}
-        ${model.plan === 'happy_jump' ? `<p class="ta-resource-readiness-note">${escapeResourceDashboardHtml(model.supply_note)}</p>` : ''}
+        ${model.show_jump_supplies ? `<p class="ta-resource-readiness-note">${escapeResourceDashboardHtml(model.supply_note)}</p>` : ''}
       </section>
     `;
   }
@@ -38372,6 +38383,24 @@
         border-bottom: 0;
       }
 
+      #${MODAL_ID} .ta-resource-readiness-strip-efficient > span {
+        border-bottom: 0;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-strip-efficient > span:first-child {
+        grid-column: 1 / -1;
+        border-right: 0;
+        border-bottom: 1px solid #222d2b;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-strip-efficient > span:nth-child(2) {
+        border-right: 1px solid #222d2b;
+      }
+
+      #${MODAL_ID} .ta-resource-readiness-strip-efficient > span:nth-child(3) {
+        border-right: 0;
+      }
+
       #${MODAL_ID} .ta-resource-readiness-strip b {
         overflow-wrap: anywhere;
         color: #d7dcda;
@@ -38433,6 +38462,22 @@
         }
 
         #${MODAL_ID} .ta-resource-readiness-strip > span:last-child {
+          border-right: 0;
+        }
+
+        #${MODAL_ID} .ta-resource-readiness-strip-efficient {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        #${MODAL_ID} .ta-resource-readiness-strip-efficient > span:first-child,
+        #${MODAL_ID} .ta-resource-readiness-strip-efficient > span:nth-child(2),
+        #${MODAL_ID} .ta-resource-readiness-strip-efficient > span:nth-child(3) {
+          grid-column: auto;
+          border-right: 1px solid #222d2b;
+          border-bottom: 0;
+        }
+
+        #${MODAL_ID} .ta-resource-readiness-strip-efficient > span:last-child {
           border-right: 0;
         }
       }
