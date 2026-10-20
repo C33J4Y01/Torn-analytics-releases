@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.92
+// @version      2.18.93
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.92';
+  const VERSION = '2.18.93';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -64,6 +64,8 @@
   // snapshots and preserves readiness through the diagnostics renderer.
   // v2.18.92 hides Happy Jump-only supply status and counts while Efficient
   // is selected, without changing snapshots, calculations, or advice.
+  // v2.18.93 fixes recap wrapping, compacts its filters, and shows existing
+  // per-stat gains as rows without changing calculation or copy contracts.
   // This build remains gated for personal iPhone TornPDA verification.
 
   const API_BASE = 'https://api.torn.com/v2';
@@ -28791,6 +28793,23 @@
     `;
   }
 
+  function renderCommandTrainingRecapGains(summary) {
+    const rows =
+      (summary?.stats || [])
+        .filter(item => Number.isFinite(item.gain) && item.gain > 0)
+        .map(item => `
+          <div>
+            <dt>${escapeActivityHtml(item.label)}</dt>
+            <dd>${escapeActivityHtml(statGrowthFormatGain(item.gain))}</dd>
+          </div>
+        `)
+        .join('');
+
+    return rows
+      ? `<dl class="ta-command-recap-gains" aria-label="Stat gains in selected period">${rows}</dl>`
+      : '';
+  }
+
   function renderCommandTrainingRecap(
     growth,
     range = '7d',
@@ -28910,7 +28929,7 @@
           </small>
         </summary>
         <div class="ta-command-recap-body">
-          <div class="ta-training-support-controls">
+          <div class="ta-training-support-controls ta-command-recap-controls">
             <label class="ta-training-summary-period">
               <span>Period</span>
               <select data-ta-training-summary-range aria-label="Training summary period">
@@ -28924,6 +28943,7 @@
               </select>
             </label>
           </div>
+          ${renderCommandTrainingRecapGains(summary)}
           ${
             jumpRecap
               ? `<p class="ta-training-jump-recap" data-ta-training-jump-recap><span>Latest Happy Jump</span><b>${escapeActivityHtml(jumpRecap)}</b></p>`
@@ -36068,6 +36088,8 @@
 
       #${MODAL_ID} .ta-command-recap {
         position: relative;
+        box-sizing: border-box;
+        min-width: 0;
         width: 100%;
         margin: 0;
         padding: 0;
@@ -36138,6 +36160,8 @@
 
       #${MODAL_ID} .ta-command-recap-body {
         display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        min-width: 0;
         border-top: 1px solid #304440;
         background: #101312;
       }
@@ -36153,7 +36177,72 @@
       }
 
       #${MODAL_ID} .ta-command-recap-text {
+        box-sizing: border-box;
+        min-width: 0;
+        max-width: 100%;
         cursor: default;
+      }
+
+      #${MODAL_ID} .ta-command-recap-text > b,
+      #${MODAL_ID} .ta-command-recap-body > .ta-training-jump-recap > b {
+        min-width: 0;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+
+      #${MODAL_ID} .ta-command-recap-body > .ta-command-recap-controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 8px 10px;
+      }
+
+      #${MODAL_ID} .ta-command-recap-controls > .ta-training-summary-period {
+        grid-template-columns: minmax(0, 1fr);
+        min-width: 0;
+        gap: 3px;
+      }
+
+      #${MODAL_ID} .ta-command-recap-body > .ta-command-recap-controls select {
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+        min-height: 44px;
+        padding: 5px 22px 5px 8px;
+        font-size: 12px;
+      }
+
+      #${MODAL_ID} .ta-command-recap-gains {
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+        margin: 0;
+        padding: 8px 10px;
+        border-top: 1px solid #303837;
+        font-size: 12px;
+      }
+
+      #${MODAL_ID} .ta-command-recap-gains > div {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 8px;
+        align-items: baseline;
+      }
+
+      #${MODAL_ID} .ta-command-recap-gains dt,
+      #${MODAL_ID} .ta-command-recap-gains dd {
+        min-width: 0;
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+
+      #${MODAL_ID} .ta-command-recap-gains dt {
+        color: #a3afab;
+      }
+
+      #${MODAL_ID} .ta-command-recap-gains dd {
+        color: #edf3f0;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
       }
 
       #${MODAL_ID} .ta-command-recap-actions {
