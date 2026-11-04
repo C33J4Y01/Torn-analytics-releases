@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.93
+// @version      2.18.94
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.93';
+  const VERSION = '2.18.94';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -14682,6 +14682,19 @@
     );
 
     return opened;
+  }
+
+  function maintainUiOrientationHandoff(modal) {
+    const refresh = () => {
+      if (!modal?.isConnected) return;
+      const state = readUiSessionState();
+      if (!state.modal_open) return;
+      if (document.visibilityState !== 'hidden') {
+        writeUiOrientationHandoff({ ...state, updated_at: Date.now() });
+      }
+      setTimeout(refresh, 10000);
+    };
+    refresh();
   }
 
   function markUiOrientationRefreshPending() {
@@ -40899,6 +40912,28 @@
 
     `;
 
+    style.textContent += `
+      @media (orientation: landscape) and (max-height: 500px) {
+        #${MODAL_ID} { box-sizing: border-box; padding: 4px; }
+        #${MODAL_ID} .card {
+          width: 100%; height: calc(100dvh - 8px); max-height: calc(100dvh - 8px);
+        }
+        #${MODAL_ID} .ta-modal-header { gap: 8px; padding: 4px 10px; }
+        #${MODAL_ID} .ta-modal-title { display: flex; align-items: baseline; gap: 10px; }
+        #${MODAL_ID} h2 { font-size: 14px; }
+        #${MODAL_ID} .ta-modal-settings,
+        #${MODAL_ID} .ta-modal-close { min-height: 36px; padding: 4px 10px; }
+        #${MODAL_ID} .ta-primary-nav { padding: 3px 8px; }
+        #${MODAL_ID} .ta-primary-tab { min-height: 36px; padding: 4px 10px; }
+        #${MODAL_ID} .ta-modal-scroll { flex: 1 1 auto; padding: 6px 10px; }
+        #${MODAL_ID} .ta-primary-workspace { min-height: 0; }
+        #${MODAL_ID} .ta-command-recap-summary { gap: 3px; padding: 7px 36px 7px 10px; }
+        #${MODAL_ID} .ta-command-recap-summary > strong { font-size: 22px; }
+        #${MODAL_ID} .ta-command-recap-summary > span { font-size: 10px; }
+        #${MODAL_ID} .ta-command-recap-body > .ta-command-recap-controls { padding: 5px 10px; }
+      }
+    `;
+
     document.head.appendChild(
       style
     );
@@ -42340,6 +42375,7 @@
     markUiModalOpened(
       restoreState
     );
+    maintainUiOrientationHandoff(modal);
 
     if (
       scrollContainer
