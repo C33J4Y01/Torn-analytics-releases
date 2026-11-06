@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.96
+// @version      2.18.97
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.96';
+  const VERSION = '2.18.97';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -13689,6 +13689,16 @@
   const UI_ORIENTATION_HANDOFF_MAX_AGE_MS =
     30 * 1000;
 
+  // TornPDA injects this non-secret identifier at document start. A fresh
+  // WebView for the same tab can restore UI state without guessing orientation.
+  function uiOrientationHandoffKey() {
+    const uid = typeof window !== 'undefined' ? window.__tornpda?.tab?.uid : null;
+    return typeof uid === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uid)
+      ? `${UI_ORIENTATION_HANDOFF_STORAGE_KEY}:${uid.toLowerCase()}`
+      : UI_ORIENTATION_HANDOFF_STORAGE_KEY;
+  }
+
   // Compact display preferences survive TornPDA's fresh-page reopen path.
   // They contain no account data and never restore the modal itself.
   const UI_RESOURCE_PREFERENCES_STORAGE_KEY =
@@ -14155,7 +14165,7 @@
   function clearUiOrientationHandoff() {
     try {
       uiOrientationHandoffStorage()?.removeItem(
-        UI_ORIENTATION_HANDOFF_STORAGE_KEY
+        uiOrientationHandoffKey()
       );
     } catch (_) {}
   }
@@ -14335,7 +14345,7 @@
 
     try {
       uiOrientationHandoffStorage()?.setItem(
-        UI_ORIENTATION_HANDOFF_STORAGE_KEY,
+        uiOrientationHandoffKey(),
         JSON.stringify(
           handoff
         )
@@ -14349,7 +14359,7 @@
     try {
       const raw =
         uiOrientationHandoffStorage()?.getItem(
-          UI_ORIENTATION_HANDOFF_STORAGE_KEY
+          uiOrientationHandoffKey()
         );
 
       if (
@@ -14766,8 +14776,12 @@
       handoffAgeMs <
         UI_ORIENTATION_HANDOFF_MAX_AGE_MS;
 
+    const tabScopedHandoff =
+      uiOrientationHandoffKey() !== UI_ORIENTATION_HANDOFF_STORAGE_KEY;
+
     const unchangedOrientationHandoff =
       !sessionRestore &&
+      !tabScopedHandoff &&
       handoff?.modal_open &&
       handoffFresh &&
       handoff.orientation ===
@@ -14786,15 +14800,13 @@
       return undefined;
     }
 
-    // A persistent handoff is accepted only when orientation actually
-    // changed. This lets TornPDA survive a replaced page context without
-    // causing a normal same-orientation new tab to inherit the modal.
+    // A tab-scoped handoff already identifies the original TornPDA tab.
+    // Without that identifier, retain the existing orientation heuristic.
     const orientationRestore =
       !sessionRestore &&
       handoff?.modal_open &&
       handoffFresh &&
-      handoff.orientation !==
-        orientation;
+      (tabScopedHandoff || handoff.orientation !== orientation);
 
     const source =
       sessionRestore
