@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.99
+// @version      2.19.0
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.99';
+  const VERSION = '2.19.0';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -13922,6 +13922,10 @@
           uiSessionOptionalBoolean(
             parsed?.training_recap_open
           ),
+        training_details_open:
+          uiSessionOptionalBoolean(
+            parsed?.training_details_open
+          ),
         settings_dashboard_open:
           uiSessionOptionalBoolean(
             parsed?.settings_dashboard_open
@@ -13931,6 +13935,7 @@
       return {
         history_status_open: null,
         training_recap_open: null,
+        training_details_open: null,
         settings_dashboard_open: null
       };
     }
@@ -13950,6 +13955,7 @@
       of [
         'history_status_open',
         'training_recap_open',
+        'training_details_open',
         'settings_dashboard_open'
       ]
     ) {
@@ -20747,7 +20753,8 @@
     readiness,
     planValue,
     advice,
-    nowSeconds = Math.floor(Date.now() / 1000)
+    nowSeconds = Math.floor(Date.now() / 1000),
+    showStatus = true
   ) {
     const plan = trainingReadinessPlan(planValue);
     const now = Number.isFinite(Number(nowSeconds))
@@ -20776,6 +20783,10 @@
         <b>${escapeActivityHtml(value)}</b>
       </li>
     `;
+    const cooldownRows = showStatus
+      ? statusRow('Drug cooldown', drug.label, drug.state) +
+        statusRow('Booster cooldown', booster.label, booster.state)
+      : '';
 
     if (
       plan === 'happy_jump' &&
@@ -20796,8 +20807,7 @@
           <ul class="ta-training-guide-list">
             ${statusRow('Jump result', `+${statGrowthFormatNumber(event.gain, 2)} total stats`, 'complete')}
             ${statusRow('Energy trained', `${Number(event.energy_used || 0).toLocaleString()}E · ${Number(event.trains || 0).toLocaleString()} trains`, 'complete')}
-            ${statusRow('Drug cooldown', drug.label, drug.state)}
-            ${statusRow('Booster cooldown', booster.label, booster.state)}
+            ${cooldownRows}
           </ul>
           <p class="ta-training-guide-note">${escapeActivityHtml(remainingEnergy)}</p>
           ${renderTrainingSupplyDetails(
@@ -20825,7 +20835,7 @@
             Natural Energy stops regenerating at its normal maximum. Train regularly so it does not sit full.
           </p>
           <ul class="ta-training-guide-list">
-            ${statusRow('Natural Energy', energyState, energyMaximum !== null && energy !== null && energy >= energyMaximum ? 'action' : 'complete')}
+            ${showStatus ? statusRow('Natural Energy', energyState, energyMaximum !== null && energy !== null && energy >= energyMaximum ? 'action' : 'complete') : ''}
             ${statusRow('Before Xanax', 'Train to 0E first so an overdose cannot erase saved Energy.', drug.state)}
             ${statusRow('Before daily refill', 'Train to 0E so the refill restores the full bar.', 'waiting')}
           </ul>
@@ -20848,8 +20858,7 @@
       <div class="ta-training-guide ta-training-happy-guide" data-ta-training-guide>
         <ul class="ta-training-guide-list">
           ${statusRow('Energy stack', stackValue, stackState)}
-          ${statusRow('Drug cooldown', drug.label, drug.state)}
-          ${statusRow('Booster cooldown', booster.label, booster.state)}
+          ${cooldownRows}
           <li class="ta-training-guide-row ta-training-guide-waiting">
             <span>Begin just after reset</span>
             <b data-ta-training-jump-countdown>Next TCT reset · ${escapeActivityHtml(trainingReadinessFormatDuration(quarter.seconds_until))}</b>
@@ -28748,7 +28757,8 @@
           readiness,
           plan,
           advice,
-          Math.floor(Date.now() / 1000)
+          Math.floor(Date.now() / 1000),
+          !embedded
         )}
 
         ${
@@ -28798,14 +28808,14 @@
             `
         }
 
-        <details
-          class="ta-training-support-section"
-          data-ta-training-support-section="prediction"
-        >
-          <summary>
-            <span>Estimated gain</span>
-            <b>${projection?.available ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}` : 'Not enough evidence'}</b>
-          </summary>
+        ${embedded
+          ? '<section class="ta-training-support-section ta-command-prediction"><h3>Estimated gain</h3>'
+          : `<details class="ta-training-support-section" data-ta-training-support-section="prediction">
+              <summary>
+                <span>Estimated gain</span>
+                <b>${projection?.available ? `${statGrowthFormatNumber(projection.low, 2)}–${statGrowthFormatNumber(projection.high, 2)}` : 'Not enough evidence'}</b>
+              </summary>`
+        }
           <div class="ta-training-support-controls ta-training-prediction-controls">
             <label class="ta-training-summary-period">
               <span>Stat</span>
@@ -28815,7 +28825,7 @@
             </label>
           </div>
           <p class="ta-training-summary-prediction"><span>Prediction</span>${escapeActivityHtml(predictionText)} · ${escapeActivityHtml(predictionEvidence)}<small class="ta-training-summary-prediction-context">${escapeActivityHtml(predictionContextText)}</small></p>
-        </details>
+        ${embedded ? '</section>' : '</details>'}
 
       </section>
     `;
@@ -28947,16 +28957,16 @@
             <small>${escapeActivityHtml(summary.period_label)}</small>
           </span>
           <strong>${escapeActivityHtml(statGrowthFormatGain(summary.gain))} stats</strong>
-          <small>
+        </summary>
+        <div class="ta-command-recap-body">
+          <p class="ta-command-recap-meta">
             ${summary.actions.toLocaleString()} gym ${summary.actions === 1 ? 'session' : 'sessions'} ·
             ${summary.energy_used.toLocaleString()}E used${
               summary.job_special_gain > 0
                 ? ` · Army ${escapeActivityHtml(statGrowthFormatGain(summary.job_special_gain))} / ${summary.job_points_used.toLocaleString()} JP`
                 : ''
             }
-          </small>
-        </summary>
-        <div class="ta-command-recap-body">
+          </p>
           <div class="ta-training-support-controls ta-command-recap-controls">
             <label class="ta-training-summary-period">
               <span>Period</span>
@@ -29495,7 +29505,7 @@
 
         const persistCommandRecap =
           () => {
-            if (!commandRecap) {
+            if (!commandRecap?.isConnected) {
               return;
             }
 
@@ -29751,6 +29761,14 @@
               training_summary_stat:
                 summaryStat
             });
+
+            if (root?.matches?.('[data-ta-command-center-live]')) {
+              renderCommandCenterSnapshot({
+                training_readiness: root.__taTrainingReadiness,
+                stat_growth: root.__taTrainingGrowth
+              });
+              return;
+            }
 
             refreshCompactSummary(
               rangeSelect?.value ||
@@ -36148,8 +36166,8 @@
       #${MODAL_ID} .ta-command-recap-summary {
         position: relative;
         display: grid;
-        gap: 6px;
-        padding: 14px 38px 14px 14px;
+        gap: 4px;
+        padding: 10px 38px 10px 12px;
         cursor: pointer;
         list-style: none;
         -webkit-tap-highlight-color: transparent;
@@ -36196,7 +36214,9 @@
         line-height: 1.15;
       }
 
-      #${MODAL_ID} .ta-command-recap-summary > small {
+      #${MODAL_ID} .ta-command-recap-meta {
+        margin: 0;
+        padding: 9px 12px 0;
         color: #9da8a5;
         font-size: 12px;
         line-height: 1.4;
@@ -36339,26 +36359,60 @@
         outline-offset: -2px;
       }
 
-      #${MODAL_ID} .ta-command-cooldown-strip {
-        position: relative;
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 7px 14px;
-        width: 100%;
-        margin: 0;
-        padding: 1px 30px 10px 4px;
-        border-top: 0;
-        border-right: 0;
-        border-left: 0;
-        border-bottom: 1px solid #26302f;
-        background: transparent;
-        color: #b0b8b6;
+      #${MODAL_ID} .ta-command-status {
+        min-width: 0;
+        border: 1px solid #293633;
+        border-radius: 9px;
+        background: #111615;
       }
 
-      #${MODAL_ID} .ta-command-cooldown-strip > span {
+      #${MODAL_ID} .ta-command-energy-link {
+        position: relative;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 3px 8px;
+        width: 100%;
+        min-height: 44px;
+        padding: 6px 30px 6px 10px;
+        border: 0;
+        border-bottom: 1px solid #293633;
+        background: transparent;
+        color: #e0e7e5;
+      }
+
+      #${MODAL_ID} .ta-command-energy-link > b {
+        font-size: 13px;
+      }
+
+      #${MODAL_ID} .ta-command-energy-link > span {
         font-size: 11px;
-        opacity: .72;
+        font-weight: 700;
+      }
+
+      #${MODAL_ID} .ta-command-energy-link.ta-command-energy-max > span:not(.ta-command-action-destination) {
+        color: #ec8e86;
+      }
+
+      #${MODAL_ID} .ta-command-energy-link.ta-command-energy-low > span:not(.ta-command-action-destination) {
+        color: #e1b84e;
+      }
+
+      #${MODAL_ID} .ta-command-energy-link.ta-command-energy-stacked > span:not(.ta-command-action-destination) {
+        color: #67cdbf;
+      }
+
+      #${MODAL_ID} .ta-command-action-destination {
+        margin-left: auto;
+        color: #b9d7d2;
+      }
+
+      #${MODAL_ID} .ta-command-cooldown-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 14px;
+        padding: 7px 10px;
+        color: #b0b8b6;
       }
 
       #${MODAL_ID} .ta-command-cooldown-strip > b {
@@ -36371,58 +36425,25 @@
       }
 
       #${MODAL_ID} .ta-command-action {
-        --ta-command-energy-accent: #48b9ad;
-        position: relative;
         display: grid;
-        gap: 8px;
-        width: 100%;
-        margin: 0;
-        padding: 15px 38px 15px 15px;
+        gap: 5px;
+        min-width: 0;
+        padding: 10px 12px;
         border: 1px solid #315552;
-        border-radius: 12px;
+        border-radius: 10px;
         background: linear-gradient(135deg, #14201e 0%, #111514 100%);
         color: #f1f3f2;
       }
 
-      #${MODAL_ID} .ta-command-action.ta-command-energy-max {
-        --ta-command-energy-accent: #db6c63;
-        border-color: #70423e;
-        background: linear-gradient(135deg, #241816 0%, #151212 100%);
-      }
-
-      #${MODAL_ID} .ta-command-action.ta-command-energy-low {
-        --ta-command-energy-accent: #e1b84e;
-        border-color: #695725;
-        background: linear-gradient(135deg, #242113 0%, #151511 100%);
-      }
-
-      #${MODAL_ID} .ta-command-action.ta-command-energy-stacked {
-        --ta-command-energy-accent: #52d2c3;
-      }
-
-      #${MODAL_ID} .ta-command-energy-heading {
+      #${MODAL_ID} .ta-command-action-heading {
         display: flex;
-        align-items: center;
+        align-items: baseline;
         justify-content: space-between;
-        gap: 10px;
-      }
-
-      #${MODAL_ID} .ta-command-energy-heading > strong {
-        color: var(--ta-command-energy-accent);
-        font-size: 26px;
-        line-height: 1.1;
-      }
-
-      #${MODAL_ID} .ta-command-energy-heading > span {
-        padding: 6px 9px;
-        border: 1px solid var(--ta-command-energy-accent);
-        border-radius: 999px;
-        color: var(--ta-command-energy-accent);
-        font-size: 10px;
-        font-weight: 800;
-        letter-spacing: .04em;
-        text-transform: uppercase;
-        white-space: nowrap;
+        flex-wrap: wrap;
+        gap: 3px 8px;
+        color: #b1c6c3;
+        font-size: 11px;
+        font-weight: 700;
       }
 
       #${MODAL_ID} .ta-command-action > b {
@@ -36430,15 +36451,45 @@
       }
 
       #${MODAL_ID} .ta-command-action > small {
-        color: #a5aeac;
+        color: #b0bab7;
         font-size: 13px;
-        line-height: 1.45;
+        line-height: 1.35;
       }
 
-      #${MODAL_ID} .ta-command-action-destination {
-        color: #b9d7d2;
-        font-size: 12px;
+      #${MODAL_ID} .ta-command-training-details {
+        min-width: 0;
+        border: 1px solid #293633;
+        border-radius: 9px;
+        background: #111615;
+      }
+
+      #${MODAL_ID} .ta-command-training-details > summary {
+        box-sizing: border-box;
+        min-height: 44px;
+        padding: 12px;
+        color: #d1e2df;
+        font-size: 13px;
         font-weight: 700;
+        cursor: pointer;
+      }
+
+      #${MODAL_ID} .ta-command-training-details > summary:focus-visible {
+        outline: 2px solid #3ea99e;
+        outline-offset: -2px;
+      }
+
+      #${MODAL_ID} .ta-command-details-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+        padding: 0 10px 10px;
+      }
+
+      #${MODAL_ID} .ta-command-prediction > h3 {
+        margin: 0;
+        padding: 10px 12px 0;
+        color: #d1e2df;
+        font-size: 13px;
       }
 
       #${MODAL_ID} .ta-command-context-link,
@@ -41037,6 +41088,7 @@
       root?.querySelector?.(
         '[data-ta-command-training-recap]'
       );
+    const trainingDetails = root?.querySelector?.('[data-ta-command-training-details]');
     const patch = {};
 
     if (history) {
@@ -41049,6 +41101,10 @@
       patch.training_recap_open =
         trainingRecap.open ===
         true;
+    }
+
+    if (trainingDetails) {
+      patch.training_details_open = trainingDetails.open === true;
     }
 
     writeCommandCenterDrawerPreferences(
@@ -41149,10 +41205,13 @@
             energy >= 1000
           ? 'Stacked'
           : energyLow
-            ? 'Low · optional'
-            : energy !== null
-              ? 'Regenerating'
-              : 'Energy unavailable';
+            ? 'Low'
+            : '';
+    const energyText = energy === null
+      ? 'Energy unavailable'
+      : 'Energy ' + energy.toLocaleString() + 'E' +
+        (maximum === null ? '' : ' / ' + maximum.toLocaleString());
+    const energyStatusMarkup = energyStatus ? '<span>' + escapeActivityHtml(energyStatus) + '</span>' : '';
     const nowSeconds = Math.floor(Date.now() / 1000);
     const drug = trainingReadinessCooldownLabel(readiness?.drug_ready_at, nowSeconds);
     const booster = trainingReadinessCooldownLabel(readiness?.booster_ready_at, nowSeconds);
@@ -41166,10 +41225,11 @@
         readStatGrowthPreferences()
           .training_summary_stat
       );
-    const recapOpen =
-      readCommandCenterDrawerPreferences()
-        .training_recap_open ===
-      true;
+    const preferences = readCommandCenterDrawerPreferences();
+    const recapOpen = commandCenterHost.querySelector?.('[data-ta-command-training-recap]')?.open
+      ?? (preferences.training_recap_open === true);
+    const detailsOpen = commandCenterHost.querySelector?.('[data-ta-command-training-details]')?.open
+      ?? (preferences.training_details_open === true);
 
     commandCenterHost.innerHTML = `
       ${renderCommandTrainingRecap(
@@ -41178,39 +41238,52 @@
         recapStat,
         recapOpen
       )}
-      <button type="button" class="ta-command-cooldown-strip ta-command-context-link" data-ta-command-shortcut="resources" aria-label="Open live resources">
-        <span>Cooldowns</span>
-        <b data-ta-command-cooldown="drug" class="${drug.state === 'complete' ? 'is-ready' : ''}">Drug ${escapeActivityHtml(drug.label)}</b>
-        <b data-ta-command-cooldown="booster" class="${booster.state === 'complete' ? 'is-ready' : ''}">Booster ${escapeActivityHtml(booster.label)}</b>
-      </button>
-      <button type="button" class="ta-command-action ta-command-context-link ta-command-energy-${energyTone}" data-ta-command-shortcut="resources">
-        <div class="ta-command-energy-heading">
-          <strong>
-            ${energy === null ? '—' : energy.toLocaleString() + 'E'}${
-              energy === null || maximum === null
-                ? ''
-                : ` / ${maximum.toLocaleString()}`
-            }
-          </strong>
-          <span>${escapeActivityHtml(energyStatus)}</span>
+      <section class="ta-command-action" aria-label="Next action">
+        <div class="ta-command-action-heading">
+          <span>Next action</span>
+          <span>Plan: ${plan === 'happy_jump' ? 'Happy Jump' : 'Efficient'}</span>
         </div>
         <b>${escapeActivityHtml(advice?.title || 'Training guidance unavailable')}</b>
         <small>${escapeActivityHtml(advice?.detail || 'Refresh stored analysis to restore guidance.')}</small>
-        <span class="ta-command-action-destination">View Energy in Resources</span>
-      </button>
-      ${renderTrainingCompactSummary(
-        readiness,
-        growth,
-        recapRange,
-        plan,
-        recapStat,
-        { embedded: true }
-      )}
-      <button type="button" class="ta-command-evidence-link" data-ta-command-shortcut="activity" data-ta-command-view="data">
-        <span>Prediction evidence</span>
-        <b>View supporting data ›</b>
-      </button>
+      </section>
+      <div class="ta-command-status">
+        <button type="button" class="ta-command-energy-link ta-command-context-link ta-command-energy-${energyTone}" data-ta-command-shortcut="resources" aria-label="View Energy in Resources">
+          <b>${energyText}</b>
+          ${energyStatusMarkup}
+          <span class="ta-command-action-destination">View in Resources</span>
+        </button>
+        <div class="ta-command-cooldown-strip" aria-label="Cooldowns">
+          <b data-ta-command-cooldown="drug" class="${drug.state === 'complete' ? 'is-ready' : ''}">Drug ${escapeActivityHtml(drug.label)}</b>
+          <b data-ta-command-cooldown="booster" class="${booster.state === 'complete' ? 'is-ready' : ''}">Booster ${escapeActivityHtml(booster.label)}</b>
+        </div>
+      </div>
+      <details class="ta-command-training-details" data-ta-command-training-details ${detailsOpen ? 'open' : ''}>
+        <summary>Training details</summary>
+        <div class="ta-command-details-body">
+          ${renderTrainingCompactSummary(
+            readiness,
+            growth,
+            recapRange,
+            plan,
+            recapStat,
+            { embedded: true }
+          )}
+          <button type="button" class="ta-command-evidence-link" data-ta-command-shortcut="activity" data-ta-command-view="data">
+            <span>Prediction evidence</span>
+            <b>View supporting data ›</b>
+          </button>
+        </div>
+      </details>
     `;
+
+    const details = commandCenterHost.querySelector?.('[data-ta-command-training-details]');
+    const persistDetails = () => {
+      if (details.isConnected) {
+        writeCommandCenterDrawerPreferences({ training_details_open: details.open });
+      }
+    };
+    details?.addEventListener('toggle', persistDetails);
+    details?.querySelector('summary')?.addEventListener('click', () => setTimeout(persistDetails, 0));
 
     bindTrainingWorkspaceInteractions(
       commandCenterHost,
