@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.19.0
+// @version      2.19.1
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.19.0';
+  const VERSION = '2.19.1';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -36124,12 +36124,15 @@
 
       #${MODAL_ID} .ta-command-center {
         display: grid;
+        min-height: 0;
+        align-content: start;
         gap: 10px;
         margin-bottom: 14px;
       }
 
       #${MODAL_ID} .ta-command-center-placeholder {
         display: grid;
+        align-content: start;
         gap: 5px;
         padding: 13px;
         border: 1px solid #36524e;
@@ -40500,7 +40503,11 @@
         box-shadow: none;
       }
 
-      #${MODAL_ID} .ta-command-center-placeholder,
+      #${MODAL_ID} .ta-command-center-placeholder {
+        gap: 10px;
+        padding: 12px;
+      }
+
       #${MODAL_ID} .ta-activity-workspace {
         gap: 14px;
         padding: 16px;
@@ -41179,39 +41186,22 @@
     const maximum = Number.isFinite(readiness?.energy_maximum) && readiness.energy_maximum > 0
       ? readiness.energy_maximum
       : null;
-    const energyAtNaturalMaximum =
-      energy !== null &&
-      maximum !== null &&
-      energy >= maximum &&
-      energy < 1000;
-    const energyLow =
-      energy !== null &&
-      maximum !== null &&
-      energy < maximum &&
-      energy <= maximum * 0.5;
-    const energyTone =
-      energyAtNaturalMaximum
-        ? 'max'
-        : energy !== null &&
-            energy >= 1000
-          ? 'stacked'
-          : energyLow
+    const energyTone = energy === null || maximum === null
+      ? 'active'
+      : energy > maximum
+        ? 'stacked'
+        : energy === maximum
+          ? 'max'
+          : energy <= maximum * 0.5
             ? 'low'
             : 'active';
-    const energyStatus =
-      energyAtNaturalMaximum
-        ? 'At max'
-        : energy !== null &&
-            energy >= 1000
-          ? 'Stacked'
-          : energyLow
-            ? 'Low'
-            : '';
+    const energyStatus = { stacked: 'Stacked', max: 'At max', low: 'Low', active: '' }[energyTone];
     const energyText = energy === null
       ? 'Energy unavailable'
       : 'Energy ' + energy.toLocaleString() + 'E' +
         (maximum === null ? '' : ' / ' + maximum.toLocaleString());
-    const energyStatusMarkup = energyStatus ? '<span>' + escapeActivityHtml(energyStatus) + '</span>' : '';
+    const energyStatusMarkup = energyStatus ? '<span id="ta-command-energy-status">' + energyStatus + '</span>' : '';
+    const energyDescription = energyStatus ? 'ta-command-energy-value ta-command-energy-status' : 'ta-command-energy-value';
     const nowSeconds = Math.floor(Date.now() / 1000);
     const drug = trainingReadinessCooldownLabel(readiness?.drug_ready_at, nowSeconds);
     const booster = trainingReadinessCooldownLabel(readiness?.booster_ready_at, nowSeconds);
@@ -41247,8 +41237,8 @@
         <small>${escapeActivityHtml(advice?.detail || 'Refresh stored analysis to restore guidance.')}</small>
       </section>
       <div class="ta-command-status">
-        <button type="button" class="ta-command-energy-link ta-command-context-link ta-command-energy-${energyTone}" data-ta-command-shortcut="resources" aria-label="View Energy in Resources">
-          <b>${energyText}</b>
+        <button type="button" class="ta-command-energy-link ta-command-context-link ta-command-energy-${energyTone}" data-ta-command-shortcut="resources" aria-label="View Energy in Resources" aria-describedby="${energyDescription}">
+          <b id="ta-command-energy-value">${energyText}</b>
           ${energyStatusMarkup}
           <span class="ta-command-action-destination">View in Resources</span>
         </button>
