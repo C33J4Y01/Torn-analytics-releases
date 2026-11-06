@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.98
+// @version      2.18.99
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.98';
+  const VERSION = '2.18.99';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -32552,12 +32552,15 @@
 
   function renderResourceDashboardReadiness(
     readiness,
-    barsSnapshot
+    barsSnapshot,
+    nowSeconds = Math.floor(Date.now() / 1000)
   ) {
     const model =
       resourceDashboardReadinessModel(
         readiness,
-        barsSnapshot
+        barsSnapshot,
+        undefined,
+        nowSeconds
       );
     const supplyCounts =
       model.supply_counts.length
@@ -33020,14 +33023,18 @@
       ) ||
       [];
 
+    const modal = root?.closest?.(`#${MODAL_ID}`);
+    const commandCooldownStrip = () => modal?.querySelector('.ta-command-cooldown-strip');
+
     if (
       !countdowns.length &&
-      !root?.querySelector?.('.ta-resource-readiness')
+      !root?.querySelector?.('.ta-resource-readiness') &&
+      !commandCooldownStrip()
     ) {
       return;
     }
 
-    const refreshReadiness = () => {
+    const refreshReadiness = (nowSeconds = Math.floor(Date.now() / 1000)) => {
       if (
         !isCurrentBinding()
       ) {
@@ -33038,7 +33045,8 @@
       if (!target || !root.isConnected) return;
       target.outerHTML = renderResourceDashboardReadiness(
         analysis?.training_readiness,
-        analysis?.resource_bars
+        analysis?.resource_bars,
+        nowSeconds
       );
     };
     root?.addEventListener?.('change', event => {
@@ -33062,10 +33070,17 @@
         let stillCounting =
           false;
 
-        refreshReadiness();
+        const now = Date.now();
+        const nowSeconds = Math.floor(now / 1000);
+        refreshReadiness(nowSeconds);
+        // Look up the current strip: changing recap filters can replace it.
+        const strip = commandCooldownStrip();
+        if (strip) {
+          updateCommandCenterCooldowns(strip, analysis?.training_readiness, nowSeconds);
+        }
         for (const readyAt of [analysis?.training_readiness?.drug_ready_at,
           analysis?.training_readiness?.booster_ready_at]) {
-          if (Number.isSafeInteger(readyAt) && readyAt > Date.now() / 1000) {
+          if (Number.isSafeInteger(Number(readyAt)) && Number(readyAt) > nowSeconds) {
             stillCounting = true;
           }
         }
@@ -33099,12 +33114,13 @@
             resourceDashboardLiveStatusText(
               current,
               maximum,
-              fullAt
+              fullAt,
+              now
             );
 
           if (
             fullAt >
-            Date.now()
+            now
           ) {
             stillCounting =
               true;
@@ -36417,6 +36433,12 @@
         color: #a5aeac;
         font-size: 13px;
         line-height: 1.45;
+      }
+
+      #${MODAL_ID} .ta-command-action-destination {
+        color: #b9d7d2;
+        font-size: 12px;
+        font-weight: 700;
       }
 
       #${MODAL_ID} .ta-command-context-link,
@@ -41070,6 +41092,17 @@
     );
   }
 
+  function updateCommandCenterCooldowns(strip, readiness, nowSeconds) {
+    for (const [type, label] of [['drug', 'Drug'], ['booster', 'Booster']]) {
+      const output = strip.querySelector(`[data-ta-command-cooldown="${type}"]`);
+      if (!output) continue;
+      const cooldown = trainingReadinessCooldownLabel(readiness?.[`${type}_ready_at`], nowSeconds);
+      const text = `${label} ${cooldown.label}`;
+      if (output.textContent !== text) output.textContent = text;
+      output.classList.toggle('is-ready', cooldown.state === 'complete');
+    }
+  }
+
   function renderCommandCenterSnapshot(analysis) {
     const commandCenterHost =
       document.querySelector(
@@ -41120,8 +41153,9 @@
             : energy !== null
               ? 'Regenerating'
               : 'Energy unavailable';
-    const drug = trainingReadinessCooldownLabel(readiness?.drug_ready_at);
-    const booster = trainingReadinessCooldownLabel(readiness?.booster_ready_at);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const drug = trainingReadinessCooldownLabel(readiness?.drug_ready_at, nowSeconds);
+    const booster = trainingReadinessCooldownLabel(readiness?.booster_ready_at, nowSeconds);
     const recapRange =
       statGrowthCompactPeriod(
         readUiSessionState()
@@ -41146,10 +41180,10 @@
       )}
       <button type="button" class="ta-command-cooldown-strip ta-command-context-link" data-ta-command-shortcut="resources" aria-label="Open live resources">
         <span>Cooldowns</span>
-        <b>Drug ${escapeActivityHtml(drug.label)}</b>
-        <b class="${booster.state === 'complete' ? 'is-ready' : ''}">Booster ${escapeActivityHtml(booster.label)}</b>
+        <b data-ta-command-cooldown="drug" class="${drug.state === 'complete' ? 'is-ready' : ''}">Drug ${escapeActivityHtml(drug.label)}</b>
+        <b data-ta-command-cooldown="booster" class="${booster.state === 'complete' ? 'is-ready' : ''}">Booster ${escapeActivityHtml(booster.label)}</b>
       </button>
-      <button type="button" class="ta-command-action ta-command-context-link ta-command-energy-${energyTone}" data-ta-command-shortcut="resources" aria-label="Open Energy resources">
+      <button type="button" class="ta-command-action ta-command-context-link ta-command-energy-${energyTone}" data-ta-command-shortcut="resources">
         <div class="ta-command-energy-heading">
           <strong>
             ${energy === null ? '—' : energy.toLocaleString() + 'E'}${
@@ -41162,6 +41196,7 @@
         </div>
         <b>${escapeActivityHtml(advice?.title || 'Training guidance unavailable')}</b>
         <small>${escapeActivityHtml(advice?.detail || 'Refresh stored analysis to restore guidance.')}</small>
+        <span class="ta-command-action-destination">View Energy in Resources</span>
       </button>
       ${renderTrainingCompactSummary(
         readiness,
