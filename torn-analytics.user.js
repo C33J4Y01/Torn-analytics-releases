@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.94
+// @version      2.18.95
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.94';
+  const VERSION = '2.18.95';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -44084,7 +44084,7 @@
     40;
 
   const UI_ORIENTATION_VIEWPORT_SETTLE_MS =
-    250;
+    1200;
 
   let uiModalWasPresent =
     false;
@@ -44221,11 +44221,24 @@
     ];
 
     const finishRestore =
-      () => {
+      (deadlineReached = false) => {
         if (
           finished
         ) {
           return;
+        }
+
+        let settledRestoreState = null;
+        try {
+          settledRestoreState = consumeUiOrientationRestoreState({
+            defer_unchanged_orientation: !deadlineReached
+          });
+          // An early pageshow or resize can still report the old viewport.
+          // Leave the handoff intact until dimensions change or time runs out.
+          if (settledRestoreState === undefined) return;
+        } catch (error) {
+          launcherStartupFailure('ui_orientation_settle_restore_failed', error);
+          console.warn('[Torn Analytics] Could not restore the prior UI after viewport settlement:', error);
         }
 
         finished =
@@ -44249,24 +44262,6 @@
         ) {
           clearTimeout(
             settleTimer
-          );
-        }
-
-        let settledRestoreState =
-          null;
-
-        try {
-          settledRestoreState =
-            consumeUiOrientationRestoreState();
-        } catch (error) {
-          launcherStartupFailure(
-            'ui_orientation_settle_restore_failed',
-            error
-          );
-
-          console.warn(
-            '[Torn Analytics] Could not restore the prior UI after viewport settlement:',
-            error
           );
         }
 
@@ -44296,7 +44291,7 @@
           requestAnimationFrame(
             () => {
               requestAnimationFrame(
-                finishRestore
+                () => finishRestore()
               );
             }
           );
@@ -44322,11 +44317,11 @@
     ) {
       settleTimer =
         setTimeout(
-          waitForViewportPaint,
+          () => finishRestore(true),
           UI_ORIENTATION_VIEWPORT_SETTLE_MS
         );
     } else {
-      waitForViewportPaint();
+      finishRestore(true);
     }
   }
 
