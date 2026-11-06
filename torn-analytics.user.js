@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.97
+// @version      2.18.98
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.97';
+  const VERSION = '2.18.98';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -32120,7 +32120,7 @@
           ${escapeResourceDashboardHtml(statusText)}
         </div>
         <div class="ta-resource-rate">
-          ${rateText} · Live from Torn
+          ${rateText} · Last read ${escapeResourceDashboardHtml(resourceDashboardFullClockTime(fetchedAt))}
         </div>
       </div>
     `;
@@ -41084,11 +41084,11 @@
     const advice = readiness
       ? trainingReadinessPlanAdvice(readiness, plan, undefined, growth)
       : null;
-    const energy = Number.isFinite(Number(readiness?.energy))
-      ? Number(readiness.energy)
+    const energy = Number.isFinite(readiness?.energy) && readiness.energy >= 0
+      ? readiness.energy
       : null;
-    const maximum = Number.isFinite(Number(readiness?.energy_maximum))
-      ? Number(readiness.energy_maximum)
+    const maximum = Number.isFinite(readiness?.energy_maximum) && readiness.energy_maximum > 0
+      ? readiness.energy_maximum
       : null;
     const energyAtNaturalMaximum =
       energy !== null &&
@@ -41111,7 +41111,7 @@
             : 'active';
     const energyStatus =
       energyAtNaturalMaximum
-        ? 'At max · train'
+        ? 'At max'
         : energy !== null &&
             energy >= 1000
           ? 'Stacked'
@@ -41119,7 +41119,7 @@
             ? 'Low · optional'
             : energy !== null
               ? 'Regenerating'
-              : 'Live state';
+              : 'Energy unavailable';
     const drug = trainingReadinessCooldownLabel(readiness?.drug_ready_at);
     const booster = trainingReadinessCooldownLabel(readiness?.booster_ready_at);
     const recapRange =
@@ -41153,7 +41153,7 @@
         <div class="ta-command-energy-heading">
           <strong>
             ${energy === null ? '—' : energy.toLocaleString() + 'E'}${
-              maximum === null
+              energy === null || maximum === null
                 ? ''
                 : ` / ${maximum.toLocaleString()}`
             }
@@ -41340,7 +41340,8 @@
           </div>
         </section>
 
-        <div data-ta-primary-panel="settings">\n        <section class="ta-section ta-settings-section ta-primary-workspace">
+        <div data-ta-primary-panel="settings">
+        <section class="ta-section ta-settings-section ta-primary-workspace">
           <header class="ta-section-summary-row ta-settings-section-header">
             <span class="ta-section-heading-copy">
               <span class="ta-section-title">Settings</span>
