@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn Analytics
 // @namespace    chatgpt.openai.com/torn-tools
-// @version      2.18.95
+// @version      2.18.96
 // @description  Persistent Torn log analytics with resumable history, encrypted local storage, metadata-paginated updates, lossless raw-log archiving, and mobile-first analytics dashboards.
 // @author       Personal use
 // @updateURL    https://raw.githubusercontent.com/C33J4Y01/Torn-analytics-releases/main/torn-analytics.meta.js
@@ -22,7 +22,7 @@
   // VERSION / CONSTANTS
   // ============================================================
 
-  const VERSION = '2.18.95';
+  const VERSION = '2.18.96';
 
   // v2.18.71 introduces the tabbed Command Center shell and routes existing
   // Stats, Activity, Resources, and Settings views without adding API polling.
@@ -14625,7 +14625,9 @@
           'orientation'
         )
           ? patch.orientation
-          : uiSessionOrientation(),
+          : current.modal_open && patch.modal_open !== false
+            ? current.orientation
+            : uiSessionOrientation(),
       updated_at:
         Date.now()
     };
@@ -14656,6 +14658,7 @@
   ) {
     const opened =
       writeUiSessionState({
+        orientation: uiSessionOrientation(),
         modal_open:
           true,
         analysis_visible:
@@ -44180,21 +44183,49 @@
     uiSessionLifecycleListenersInstalled =
       true;
 
+    let stableOrientationTimer = null;
+    const cancelStableOrientation = () => {
+      if (stableOrientationTimer === null) return;
+      clearTimeout(stableOrientationTimer);
+      stableOrientationTimer = null;
+    };
+    const onViewportChange = () => {
+      cancelStableOrientation();
+      const modal = document.getElementById(MODAL_ID);
+      if (!modal || !markUiOrientationRefreshPending()) return;
+      // Commit the new orientation only if this same modal survives the
+      // transition in the visible page. A pagehide keeps the old handoff.
+      stableOrientationTimer = setTimeout(() => {
+        stableOrientationTimer = null;
+        if (document.visibilityState === 'hidden' ||
+            document.getElementById(MODAL_ID) !== modal ||
+            !readUiSessionState().modal_open) return;
+        const stable = writeUiSessionState({
+          orientation: uiSessionOrientation(),
+          orientation_refresh_pending: false
+        });
+        writeUiOrientationHandoff(stable);
+      }, UI_ORIENTATION_VIEWPORT_SETTLE_MS);
+    };
+
     window.addEventListener(
       'orientationchange',
-      markUiOrientationRefreshPending,
+      onViewportChange,
       { passive: true }
     );
 
     window.addEventListener(
       'pagehide',
-      markUiOrientationRefreshPending,
+      () => {
+        cancelStableOrientation();
+        if (readUiSessionState().modal_open) markUiOrientationRefreshPending();
+      },
       { passive: true }
     );
 
     window.addEventListener(
       'resize',
-      markUiOrientationRefreshPending,
+      onViewportChange,
       { passive: true }
     );
   }
